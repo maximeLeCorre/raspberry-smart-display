@@ -27,6 +27,7 @@ from inputs import ACTION_BACK, ACTION_NEXT, InputManager
 from modes.champ_select_mode import ChampSelectMode
 from modes.default_mode import DefaultMode
 from modes.lol_mode import LolMode
+from modes.postgame_mode import PostGameMode
 from modes.queue_mode import QueueMode
 from network import NetworkServer
 
@@ -64,6 +65,7 @@ class App:
             ChampSelectMode.name: ChampSelectMode(self),
             LolMode.name: LolMode(self),
             QueueMode.name: QueueMode(self),
+            PostGameMode.name: PostGameMode(self),
         }
         self.mode_order = [DefaultMode.name, ChampSelectMode.name, LolMode.name]
         self.current = None

@@ -190,6 +190,18 @@ def _phase_game(sender: Sender, interval: float, duration: int) -> None:
         time.sleep(interval)
 
 
+def _phase_postgame(sender: Sender, interval: float, duration: int) -> None:
+    print(f"[simu] Après-partie ({duration}s).")
+    payload = {"win": True, "championId": 103, "championName": "Ahri",
+               "kda": [12, 4, 9], "cs": 210, "gold": 14200, "damage": 32500,
+               "level": 16, "duration": 1830, "queue": "Classé Solo/Duo"}
+    sender.send_safe(msg_set_mode("postgame"))
+    end = time.time() + duration
+    while time.time() < end:
+        sender.send_safe(msg_data("postgame", payload))
+        time.sleep(interval)
+
+
 def _setup_real_player(platform: str, regional: str) -> tuple:
     """Prépare l'API Web pour maxoulefou : (riot, lcu, {vrais_puuids}).
 
@@ -239,6 +251,8 @@ def run_simulation(url: str, interval: float = 1.0, scenario: str = "full",
             _phase_game(sender, interval, duration or 10 ** 9)
         elif scenario == "queue":
             _phase_queue(sender, interval, duration or 8)
+        elif scenario == "postgame":
+            _phase_postgame(sender, interval, duration or 10 ** 9)
         else:  # full
             print("[simu] Scénario complet. Ctrl+C pour arrêter.")
             sender.send_safe(msg_set_mode("default"))
@@ -246,6 +260,7 @@ def run_simulation(url: str, interval: float = 1.0, scenario: str = "full",
             _phase_queue(sender, interval, duration or 8)
             _phase_champselect(sender, interval, duration or 20)
             _phase_game(sender, interval, duration or 20)
+            _phase_postgame(sender, interval, duration or 12)
             sender.send_safe(msg_set_mode("default"))
     except KeyboardInterrupt:
         print("\n[simu] Interruption.")
