@@ -14,3 +14,14 @@ update_interval = 1.0
 # Noms des processus à surveiller (Windows).
 client_process = "LeagueClientUx.exe"
 game_process = "League of Legends.exe"
+
+[riot]
+# Routing de l'API Web Riot. Détecté automatiquement via la LCU si possible ;
+# ces valeurs servent de repli (adapter si l'auto-détection échoue).
+platform = "euw1"     # plateforme : euw1, eun1, na1, kr, br1, ...
+regional = "europe"   # région : europe, americas, asia
+# La clé RIOT_API_KEY se met dans le fichier .env (jamais ici, jamais sur Git).
+
+[features]
+# Enrichir les détails joueur (rang, winrate, mains) via l'API Web Riot.
+player_info = true

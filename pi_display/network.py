@@ -35,6 +35,9 @@ class NetworkServer:
         self.event_queue = event_queue
         self._server = None
         self._thread: threading.Thread | None = None
+        # Client connecté courant + verrou (pour envoyer depuis le thread Pygame).
+        self._client = None
+        self._lock = threading.Lock()
 
     def start(self) -> None:
         """Démarre le serveur en arrière-plan (non bloquant)."""
@@ -49,8 +52,25 @@ class NetworkServer:
         if self._server is not None:
             self._server.shutdown()
 
+    def send(self, obj: dict) -> bool:
+        """Envoie un message au client connecté (ex. demande d'infos joueur).
+
+        Appelable depuis le thread Pygame. Renvoie False si pas de client.
+        """
+        with self._lock:
+            client = self._client
+        if client is None:
+            return False
+        try:
+            client.send(json.dumps(obj))
+            return True
+        except Exception:
+            return False
+
     def _handler(self, websocket) -> None:
         """Appelé pour chaque client connecté (dans un thread dédié)."""
+        with self._lock:
+            self._client = websocket
         self.event_queue.put({"type": "_connected"})
         print("[reseau] Client connecté")
         try:
@@ -65,5 +85,8 @@ class NetworkServer:
             # Déconnexion brutale, erreur de socket : on sort proprement.
             pass
         finally:
+            with self._lock:
+                if self._client is websocket:
+                    self._client = None
             self.event_queue.put({"type": "_disconnected"})
             print("[reseau] Client déconnecté")

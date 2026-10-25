@@ -42,10 +42,18 @@ def make_lol() -> Image.Image:
     return img
 
 
+def make_champselect() -> Image.Image:
+    img = gradient((10, 14, 26), (18, 22, 40))
+    draw = ImageDraw.Draw(img)
+    draw.line([(40, 70), (WIDTH - 40, 70)], fill=(120, 95, 40), width=2)
+    return img
+
+
 def main():
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     make_default().save(ASSETS_DIR / "default.png")
     make_lol().save(ASSETS_DIR / "lol.png")
+    make_champselect().save(ASSETS_DIR / "champselect.png")
     print(f"Fonds générés dans {ASSETS_DIR}")
 
 

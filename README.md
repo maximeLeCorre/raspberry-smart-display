@@ -1,20 +1,38 @@
 # Écran d'information intelligent (Raspberry Pi + écran tactile 5")
 
 Un écran d'info piloté par ce que vous faites sur votre PC. Il affiche des
-« modes » : un mode par défaut (heure, date, météo à venir) et un mode League
-of Legends qui montre un résumé de la partie en cours. Un agent tournant sur
-le PC détecte le jeu et envoie les infos à l'écran.
+« modes » selon la phase de jeu League of Legends :
+
+- **Mode par défaut** : heure, date (météo à venir). Affiché aussi quand le
+  client League est lancé mais que vous êtes au menu / en lobby / file d'attente.
+- **Mode sélection** : pendant la sélection de champions, la liste de votre
+  équipe (icône du champion, pseudo, position). Un **clic sur un joueur** affiche
+  ses détails (rang, niveau, maîtrise, winrate récent, champions mains).
+- **Mode LoL** : pendant la partie, un résumé en direct (temps, KDA, or, CS...).
 
 Le projet se compose de deux programmes :
 
 - **`pi_display/`** — l'appli d'affichage (Pygame). Tourne sur le Raspberry Pi,
   mais se teste en fenêtre sur PC.
-- **`pc_agent/`** — l'agent de fond (Windows) qui détecte LoL, lit l'API locale
-  de Riot et envoie les données à l'écran.
+- **`pc_agent/`** — l'agent de fond (Windows) qui détecte la phase de jeu et
+  envoie les infos à l'écran.
 
-Communication : **WebSocket** (JSON), PC → Pi. La connexion persistante permet
-à l'écran de revenir tout seul au mode par défaut dès que l'agent se déconnecte
-(jeu fermé, PC éteint).
+Communication : **WebSocket** (JSON) bidirectionnel. L'agent pousse le mode et
+les données ; le Pi peut demander en retour les détails d'un joueur (au clic).
+La connexion persistante fait revenir l'écran au mode par défaut dès que l'agent
+se déconnecte (jeu fermé, PC éteint).
+
+### Les API utilisées (côté PC)
+
+| Phase | Source de données | Clé Riot ? |
+|-------|-------------------|------------|
+| Menu / lobby / sélection de champions | **LCU API** (API du client, port + token locaux) | Non |
+| Icônes de champions | LCU (servies localement) | Non |
+| Partie en cours | **Live Client Data API** (`127.0.0.1:2999`, en partie uniquement) | Non |
+| Détails joueur enrichis (rang, winrate, mains) | **API Web Riot** | **Oui** |
+
+> La sélection de champions n'expose de façon fiable que **votre équipe** ;
+> l'équipe adverse est masquée par le client jusqu'au chargement.
 
 ---
 
@@ -22,6 +40,7 @@ Communication : **WebSocket** (JSON), PC → Pi. La connexion persistante permet
 
 - Python **3.11+** (nécessaire pour `tomllib`).
 - Sur PC pour tester : rien d'autre que les dépendances Python ci-dessous.
+- Pour les **détails joueur enrichis** : une clé API Web Riot (voir plus bas).
 
 ## Installation (test sur PC Windows)
 
@@ -63,7 +82,14 @@ Vous devez voir l'heure qui défile (mode par défaut).
 **Terminal 2 — l'agent en simulation :**
 ```powershell
 .\.venv\Scripts\python pc_agent\main.py --simulate
+# scénario complet (défaut -> sélection -> partie -> défaut) : c'est le défaut
+# rester en sélection (pour tester le clic joueur) :
+.\.venv\Scripts\python pc_agent\main.py --simulate --scenario champselect
+# rester en partie :
+.\.venv\Scripts\python pc_agent\main.py --simulate --scenario game
 ```
+En mode sélection simulé, **clique sur un joueur** dans la fenêtre : l'agent
+renvoie de fausses infos (rang, winrate, mains) qui s'affichent à droite.
 L'écran bascule en **mode LoL** avec des données qui évoluent.
 
 **Scénario attendu :**
@@ -94,15 +120,37 @@ L'écran bascule en **mode LoL** avec des données qui évoluent.
 | `--debug`      | Overlay de debug (mode courant, FPS, dernière entrée).      |
 | `--host/--port`| Surcharge la config réseau.                                 |
 
+## Clé API Web Riot (détails joueur)
+
+Pour le rang, le winrate et les champions mains au clic, l'agent a besoin d'une
+clé Riot. **Elle ne va jamais dans le code ni sur Git**, mais dans un fichier
+`.env` (ignoré) à la racine.
+
+1. Allez sur https://developer.riotgames.com, connectez-vous.
+2. Copiez la **Development API Key** (`RGAPI-…`). ⚠️ Elle **expire toutes les
+   24 h** ; régénérez-la au besoin (ou demandez une clé Personal/Production).
+3. Créez `.env` à la racine (modèle : `.env.example`) :
+   ```
+   RIOT_API_KEY=RGAPI-votre-cle-ici
+   ```
+4. Vérifiez la région dans `pc_agent/config.toml` (`[riot] platform/regional`).
+   Elle est auto-détectée via le client si celui-ci est ouvert.
+
+Sans clé, tout le reste fonctionne (champions, pseudos de l'équipe) ; seuls les
+détails enrichis sont indisponibles.
+
 ## Tester avec le vrai League of Legends (sur PC)
 
-Lancez l'agent **sans** `--simulate` pendant que le jeu tourne :
+Lancez l'agent **sans** `--simulate`, client League ouvert :
 ```powershell
 .\.venv\Scripts\python pc_agent\main.py
 ```
-L'agent détecte `LeagueClientUx.exe` / `League of Legends.exe` et, pendant un
-match, lit `https://127.0.0.1:2999/liveclientdata/allgamedata` (API locale de
-Riot, dispo uniquement en partie).
+L'agent suit la phase de jeu via la **LCU API** (client) :
+
+- menu / lobby / file d'attente → **mode par défaut** ;
+- sélection de champions → **mode sélection** (équipe + clic pour les détails) ;
+- partie en cours → **mode LoL**, via la **Live Client Data API**
+  (`https://127.0.0.1:2999/liveclientdata/allgamedata`, disponible en partie).
 
 ---
 

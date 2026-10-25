@@ -24,6 +24,7 @@ import queue
 import pygame
 
 from inputs import ACTION_BACK, ACTION_NEXT, InputManager
+from modes.champ_select_mode import ChampSelectMode
 from modes.default_mode import DefaultMode
 from modes.lol_mode import LolMode
 from network import NetworkServer
@@ -58,9 +59,10 @@ class App:
         # Modes disponibles. L'ordre sert au bouton « mode suivant ».
         self.modes = {
             DefaultMode.name: DefaultMode(self),
+            ChampSelectMode.name: ChampSelectMode(self),
             LolMode.name: LolMode(self),
         }
-        self.mode_order = [DefaultMode.name, LolMode.name]
+        self.mode_order = [DefaultMode.name, ChampSelectMode.name, LolMode.name]
         self.current = None
 
         # Verrou de contrôle manuel : quand l'utilisateur force un mode (bouton),
@@ -132,6 +134,15 @@ class App:
             target = self._next_mode()
             self.manual_mode = target
             self.set_mode(target)
+
+    def request_player_info(self, puuid, summoner_id, champion_id) -> None:
+        """Demande à l'agent les détails d'un joueur (clic en sélection)."""
+        self.server.send({
+            "type": "request_player_info",
+            "puuid": puuid,
+            "summonerId": summoner_id,
+            "championId": champion_id,
+        })
 
     # --------------------------------------------------------------- boucles
     def _handle_pygame_events(self) -> None:
@@ -206,6 +217,12 @@ class App:
             payload = msg.get("payload", {})
             if mode in self.modes:
                 self.modes[mode].update_data(payload)
+
+        elif msg_type == "player_info":
+            # Réponse à une demande de détails joueur (mode sélection).
+            champ_select = self.modes.get(ChampSelectMode.name)
+            if champ_select is not None:
+                champ_select.set_player_info(msg.get("puuid", ""), msg.get("info", {}))
 
     def _draw_debug(self, dirty):
         rect = pygame.Rect(0, 0, 340, 58)
