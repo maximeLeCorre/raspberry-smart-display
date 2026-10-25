@@ -21,7 +21,7 @@ import io
 import pygame
 
 from inputs import ACTION_BACK
-from modes.base import Mode
+from screen import Screen
 
 RETOUR_RECT = pygame.Rect(690, 0, 110, 58)
 
@@ -43,10 +43,11 @@ def _format_points(points) -> str:
     return str(points)
 
 
-class ChampSelectMode(Mode):
+class ChampSelectScreen(Screen):
     name = "champselect"
     background_name = "champselect.png"
     bg_color = (10, 14, 26)
+    cycle = True
 
     def __init__(self, app):
         super().__init__(app)

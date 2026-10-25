@@ -10,7 +10,7 @@ from __future__ import annotations
 import pygame
 
 from inputs import ACTION_BACK
-from modes.base import Mode
+from screen import Screen
 
 RETOUR_RECT = pygame.Rect(700, 8, 92, 40)
 
@@ -20,7 +20,7 @@ def _mmss(seconds: int) -> str:
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
 
-class QueueMode(Mode):
+class QueueScreen(Screen):
     name = "queue"
     background_name = "champselect.png"
     bg_color = (12, 16, 30)

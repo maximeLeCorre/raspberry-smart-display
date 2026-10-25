@@ -7,14 +7,14 @@ déposés dans une queue thread-safe que la boucle Pygame vient vider à chaque
 frame, sans jamais être bloquée par le réseau.
 
 Messages attendus (PC -> Pi), un objet JSON par message :
-    {"type": "set_mode", "mode": "lol"}
-    {"type": "data", "mode": "lol", "payload": {...}}
-    {"type": "set_mode", "mode": "default"}
+    {"type": "set_screen", "screen": "lol"}
+    {"type": "data", "screen": "lol", "payload": {...}}
+    {"type": "set_screen", "screen": "default"}
 
 Deux événements internes sont aussi déposés dans la queue pour que l'appli
 réagisse aux (dé)connexions :
     {"type": "_connected"}
-    {"type": "_disconnected"}   -> l'appli revient au mode par défaut
+    {"type": "_disconnected"}   -> l'appli revient à l'écran par défaut
 """
 
 from __future__ import annotations
