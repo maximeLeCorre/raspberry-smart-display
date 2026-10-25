@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 from champ_select import build_champ_select_payload, build_player_info, icon_b64
 from detector import is_any_process_running
 from lcu import LcuClient
-from phases import build_queue_payload
+from phases import build_postgame_payload, build_queue_payload
 from riot_api import get_all_game_data, summarize_full
 from riot_web import RiotWeb
 from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_mode
@@ -51,7 +51,7 @@ def parse_args():
     p.add_argument("--simulate", action="store_true",
                    help="Scénario simulé, sans lancer le jeu.")
     p.add_argument("--scenario", default="full",
-                   choices=["full", "champselect", "game", "queue"],
+                   choices=["full", "champselect", "game", "queue", "postgame"],
                    help="Scénario de simulation (défaut : full).")
     p.add_argument("--duration", type=int, default=None,
                    help="Durée d'une étape de simulation en secondes.")
@@ -144,6 +144,14 @@ def run_real(url: str, config: dict) -> None:
                 data = get_all_game_data()
                 if data is not None:
                     sender.send_safe(msg_data("lol", summarize_full(data, lcu.champion_id_by_name)))
+
+            elif phase in ("WaitingForStats", "PreEndOfGame", "EndOfGame"):
+                payload = build_postgame_payload(lcu)
+                if payload is not None:
+                    if last_mode != "postgame":
+                        sender.send_safe(msg_set_mode("postgame"))
+                        last_mode = "postgame"
+                    sender.send_safe(msg_data("postgame", payload))
 
             else:
                 # Menu, lobby, file d'attente, client fermé... -> mode par défaut.
