@@ -1,0 +1,22 @@
+# Configuration de l'appli d'affichage.
+# Pour passer du test local au vrai Pi : il suffit souvent de lancer avec
+# --fullscreen (ou de laisser la détection auto du Pi faire le travail).
+
+[network]
+# Adresse d'écoute du serveur WebSocket.
+# "0.0.0.0" = écoute sur toutes les interfaces (indispensable sur le Pi pour
+# recevoir les messages du PC). En test local pur, "127.0.0.1" suffit aussi.
+host = "0.0.0.0"
+port = 8765
+
+[display]
+width = 800        # résolution interne de rendu (ne pas changer : écran 5")
+height = 480
+fps = 15           # FPS max de la boucle d'affichage (Pi 3 = peu puissant)
+
+[gpio]
+# Broches BCM des boutons physiques (uniquement sur le Pi, ignorées sur PC).
+# button_back : force le retour au mode par défaut (même si le jeu tourne).
+# button_next : passe au mode suivant.
+button_back = 17
+button_next = 27
