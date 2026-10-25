@@ -21,6 +21,13 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CLIENT_PROCESS = "leagueclientux.exe"
 
+# La LCU n'expose pas de résumé id->nom de champion fiable ; on le récupère
+# depuis Community Dragon (CDN public, pas de clé). Chargé une seule fois.
+CHAMPION_SUMMARY_URL = (
+    "https://raw.communitydragon.org/latest/plugins/"
+    "rcp-be-lol-game-data/global/default/v1/champion-summary.json"
+)
+
 # Région (LCU) -> routing plateforme (API Web Riot) -> routing régional.
 PLATFORM_BY_REGION = {
     "NA": "na1", "EUW": "euw1", "EUNE": "eun1", "KR": "kr", "BR": "br1",
@@ -123,6 +130,12 @@ class LcuClient:
     def current_summoner(self) -> dict | None:
         return self.get_json("/lol-summoner/v1/current-summoner")
 
+    def summoner_by_id(self, summoner_id) -> dict | None:
+        """Infos d'un summoner par son id local (gameName/tagLine si visibles)."""
+        if not summoner_id:
+            return None
+        return self.get_json(f"/lol-summoner/v1/summoners/{summoner_id}")
+
     def region_platform(self) -> tuple[str | None, str | None]:
         """Déduit (platform, regional) depuis la LCU. (None, None) si inconnu."""
         data = self.get_json("/riotclient/region-locale")
@@ -148,10 +161,18 @@ class LcuClient:
         return (self._champions or {}).get(champion_id, "")
 
     def _load_champion_summary(self) -> None:
-        data = self.get_json("/lol-game-data/v1/champion-summary.json")
         self._champions = {}
-        if isinstance(data, list):
-            for champ in data:
-                cid = champ.get("id")
-                if isinstance(cid, int) and cid > 0:
-                    self._champions[cid] = champ.get("name", "")
+        try:
+            resp = requests.get(CHAMPION_SUMMARY_URL, timeout=8)
+        except requests.RequestException:
+            return  # hors ligne : les noms resteront vides (repli silencieux)
+        if resp.status_code != 200:
+            return
+        try:
+            data = resp.json()
+        except ValueError:
+            return
+        for champ in data:
+            cid = champ.get("id")
+            if isinstance(cid, int) and cid > 0:
+                self._champions[cid] = champ.get("name", "")

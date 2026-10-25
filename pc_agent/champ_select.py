@@ -42,18 +42,25 @@ def build_champ_select_payload(lcu: LcuClient, riot: RiotWeb | None = None) -> d
         # championId = pick verrouillé ; sinon l'intention de pick.
         champ_id = cell.get("championId") or cell.get("championPickIntentId") or 0
 
+        summoner_id = cell.get("summonerId")
         game_name = cell.get("gameName", "") or ""
         tag_line = cell.get("tagLine", "") or ""
-        puuid = cell.get("puuid", "") or ""
 
-        # Le pseudo est parfois masqué dans la session : on tente l'API Web.
-        if not game_name and puuid and riot and riot.enabled:
-            summoner = riot.summoner_by_puuid(puuid)
-            # (summoner-v4 ne renvoie pas le Riot ID ; on laisse vide si inconnu)
+        # Le Riot ID est parfois absent de la session : on le complète via la LCU.
+        if (not game_name or not tag_line) and summoner_id:
+            summoner = lcu.summoner_by_id(summoner_id) or {}
+            game_name = game_name or summoner.get("gameName", "") or ""
+            tag_line = tag_line or summoner.get("tagLine", "") or ""
+
+        # On résout le VRAI PUUID externe (le PUUID LCU ne marche pas avec
+        # l'API Web). Vide si pseudo masqué / pas de clé -> pas d'enrichissement.
+        puuid = ""
+        if riot and riot.enabled and game_name and tag_line:
+            puuid = riot.resolve_puuid(game_name, tag_line) or ""
 
         players.append({
             "cellId": cell.get("cellId"),
-            "summonerId": cell.get("summonerId"),
+            "summonerId": summoner_id,
             "puuid": puuid,
             "championId": champ_id,
             "championName": lcu.champion_name(champ_id),

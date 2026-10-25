@@ -69,6 +69,9 @@ class App:
         # on ignore les « set_mode » venant du réseau jusqu'à ce que l'agent se
         # (re)connecte ou signale explicitement le mode par défaut.
         self.manual_mode: str | None = None
+        # Dernier mode demandé par l'agent (même si on l'ignore à cause du verrou
+        # manuel). Sert à proposer un badge « Rejoindre » sur l'écran par défaut.
+        self.network_mode = DefaultMode.name
 
         self.running = False
         self.set_mode(DefaultMode.name)
@@ -144,6 +147,21 @@ class App:
             "championId": champion_id,
         })
 
+    def joinable_mode(self) -> str | None:
+        """Mode LoL (sélection/partie) proposé par l'agent et qu'on peut
+        rejoindre depuis l'écran par défaut (après un retour manuel)."""
+        if self.network_mode in (LolMode.name, ChampSelectMode.name):
+            return self.network_mode
+        return None
+
+    def join_network_mode(self) -> None:
+        """Rejoint le mode actuellement demandé par l'agent (clic sur le badge),
+        en relâchant le verrou manuel."""
+        target = self.network_mode
+        if target in self.modes and target != DefaultMode.name:
+            self.manual_mode = None
+            self.set_mode(target)
+
     # --------------------------------------------------------------- boucles
     def _handle_pygame_events(self) -> None:
         for event in pygame.event.get():
@@ -202,10 +220,13 @@ class App:
         elif msg_type == "_disconnected":
             # Agent parti (jeu fermé, PC éteint) : retour au mode par défaut.
             self.manual_mode = None
+            self.network_mode = DefaultMode.name
             self.set_mode(DefaultMode.name)
 
         elif msg_type == "set_mode":
             mode = msg.get("mode", DefaultMode.name)
+            # On mémorise ce que l'agent veut afficher (pour le badge « Rejoindre »).
+            self.network_mode = mode
             if mode == DefaultMode.name:
                 # L'agent signale la fin de partie : on redonne la main à l'auto.
                 self.manual_mode = None
