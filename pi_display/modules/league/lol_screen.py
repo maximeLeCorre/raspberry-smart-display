@@ -19,7 +19,7 @@ import io
 import pygame
 
 from inputs import ACTION_BACK
-from modes.base import Mode
+from screen import Screen
 
 RETOUR_RECT = pygame.Rect(742, 4, 54, 30)
 ICON = 36
@@ -41,10 +41,11 @@ def format_game_time(seconds: int) -> str:
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
 
-class LolMode(Mode):
+class LolScreen(Screen):
     name = "lol"
     background_name = "lol.png"
     bg_color = (8, 12, 24)
+    cycle = True
 
     def __init__(self, app):
         super().__init__(app)

@@ -14,7 +14,7 @@ import io
 import pygame
 
 from inputs import ACTION_BACK
-from modes.base import Mode
+from screen import Screen
 
 RETOUR_RECT = pygame.Rect(700, 8, 92, 40)
 ICON = 72
@@ -31,7 +31,7 @@ def _mmss(seconds: int) -> str:
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
-class PostGameMode(Mode):
+class PostGameScreen(Screen):
     name = "postgame"
     background_name = "lol.png"
     bg_color = (8, 12, 24)

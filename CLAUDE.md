@@ -22,13 +22,33 @@ sur `localhost`.
 ## Architecture : deux programmes
 
 - **`pi_display/`** — appli d'affichage (Pygame). Tournera sur le Pi ; se teste
-  en fenêtre sur PC. Serveur WebSocket qui reçoit mode + données.
-- **`pc_agent/`** — agent de fond (Windows). Détecte la phase de jeu, lit les
-  API locales/Web de Riot, envoie au Pi. Client WebSocket.
+  en fenêtre sur PC. Serveur WebSocket qui reçoit écran + données.
+- **`pc_agent/`** — agent de fond (Windows). Détecte l'activité, lit les API
+  locales/Web de Riot, envoie au Pi. Client WebSocket.
 
 Communication : **WebSocket JSON bidirectionnel** (lib `websockets`, API
 **synchrone** `websockets.sync` des deux côtés — pas d'asyncio). Le Pi est
 serveur, l'agent est client.
+
+### Vocabulaire & modularité (IMPORTANT)
+
+- **module** = un jeu/domaine (ex. `league`, plus tard `valorant`, `spotify`…).
+  C'est l'unité qu'on **active/désactive** en config.
+- **écran** (`Screen`) = une vue affichable à l'intérieur d'un module (file,
+  sélection, partie, après-partie). Le mot « mode » n'est plus utilisé.
+- Un module a **deux moitiés** : côté Pi un paquet d'écrans
+  (`pi_display/modules/<nom>/`), côté agent une **Source**
+  (`pc_agent/sources/<nom>.py`) qui détecte l'état et produit `(écran, données)`.
+- **Source de vérité des modules actifs = le Pi** (`config.toml [modules]`). À la
+  connexion, le Pi envoie `hello` avec la liste ; l'agent n'interroge que ces
+  Sources (et saute leurs appels API si inactives).
+- Le module **système** (horloge) est toujours actif (écran `default`).
+
+**Ajouter un jeu** = créer `pi_display/modules/<jeu>/` (écrans + descripteur
+`Module`, enregistré dans `modules/__init__.py`) ET `pc_agent/sources/<jeu>.py`
+(classe `Source`, enregistrée dans `sources/__init__.py`), puis l'activer dans
+`pi_display/config.toml [modules]`. `app.py` (Pi) et `main.py` (agent) sont
+**agnostiques** du jeu.
 
 ## Environnement / commandes (Windows)
 
@@ -47,64 +67,59 @@ serveur, l'agent est client.
 
 ## Protocole réseau (messages JSON)
 
+Pi → PC (à la connexion) :
+- `{"type":"hello","modules":["system","league"]}` (modules actifs annoncés)
+
 PC → Pi :
-- `{"type":"set_mode","mode":"default|champselect|lol"}`
-- `{"type":"data","mode":"lol","payload":{...}}`
-- `{"type":"data","mode":"champselect","payload":{"phase":"champselect","players":[...]}}`
+- `{"type":"set_screen","screen":"default|queue|champselect|lol|postgame"}`
+- `{"type":"data","screen":"lol","payload":{...}}` (le payload dépend de l'écran)
 - `{"type":"player_info","puuid":"...","info":{...}}` (réponse à une demande)
 - `{"type":"icon","championId":...,"iconB64":"..."}` (réponse à request_icon)
 - `{"type":"splash","championId":...,"splashB64":"..."}` (réponse à request_splash)
 
-Pi → PC :
+Pi → PC (requêtes) :
 - `{"type":"request_player_info","puuid":"...","summonerId":...,"championId":...}`
 - `{"type":"request_icon","championId":...}`
 - `{"type":"request_splash","championId":...}`
 
-Modes pilotés par l'agent via `set_mode` : `default`, `queue`, `champselect`,
-`lol`, `postgame`. Les `data` portent le `mode` cible.
-
 Interne (synthétisé par le serveur Pi, pas envoyé par l'agent) :
 - `{"type":"_connected"}` / `{"type":"_disconnected"}`
 
-La déconnexion du client fait revenir le Pi au **mode par défaut**.
+La déconnexion du client fait revenir le Pi à l'écran par défaut.
 
-## Système de modes (`pi_display/modes/`)
+## Écrans (`pi_display/`)
 
-- `base.py` : classe `Mode`. Fond PNG pré-rendu chargé **une fois** ; on ne
-  redessine que les zones dynamiques (**dirty rects**) pour ménager le Pi 3.
-  Repli couleur unie si le PNG manque.
-- `default_mode.py` : heure/date, placeholder météo, et un **badge « Rejoindre »**
-  (voir plus bas).
-- `queue_mode.py` : file d'attente (temps + estimé) et ready-check (compte à rebours).
-- `champ_select_mode.py` : grille de notre équipe, **timer de phase**, **bans**
-  (panneau par défaut), clic → détails joueur + **splash art** du champion.
-- `lol_mode.py` : scoreboard 5v5 en direct (KDA/CS/niveau, timers de mort,
-  bandeau d'événements, or).
-- `postgame_mode.py` : bilan de la dernière partie (victoire/défaite, KDA, etc.).
+- `screen.py` : classe de base `Screen` (+ attribut `cycle` = inclus dans le
+  cycle du bouton « suivant »). Fond PNG chargé **une fois** ; redessin par
+  **dirty rects** (ménage le Pi 3) ; repli couleur si PNG absent.
+- `modules/system/default_screen.py` : `DefaultScreen` (horloge, date, météo
+  placeholder, **badge « Rejoindre »**). Module système, toujours actif.
+- `modules/league/` : `QueueScreen` (file + ready-check), `ChampSelectScreen`
+  (équipe, timer de phase, bans, clic → détails + **splash art**), `LolScreen`
+  (scoreboard 5v5, timers de mort, événements), `PostGameScreen` (bilan).
 
-Icônes/splash : réclamés à la demande (request_icon/request_splash) et mis en
-cache côté Pi. Splash = art de chargement **Data Dragon** par alias
-(`https://ddragon.leagueoflegends.com/cdn/img/champion/loading/{alias}_0.jpg`).
+Icônes/splash : réclamés à la demande (request_icon/request_splash), cache côté
+Pi. Splash = art de chargement **Data Dragon** par alias
+(`.../cdn/img/champion/loading/{alias}_0.jpg`).
 
-Ajouter un mode : hériter de `Mode`, définir `name`/`background_name`,
-implémenter `draw()` (et `update_data()` si réseau) ; l'enregistrer dans
-`app.py` (`self.modes` + `self.mode_order`) ; ajouter son fond dans
-`tools/gen_backgrounds.py`.
+Ajouter un écran : hériter de `Screen`, définir `name`/`background_name`,
+implémenter `draw()` (et `update_data()` si réseau) ; l'ajouter à la liste
+`screens` du `Module` concerné ; ajouter son fond.
 
 ### Comportements clés (app.py)
 
-- **Verrou manuel** (`manual_mode`) : un retour manuel (bouton/Échap/zone
-  tactile) force le mode par défaut et **ignore les `set_mode` du réseau**
-  jusqu'à reconnexion de l'agent ou `set_mode default` explicite.
-- **Badge « Rejoindre »** : `network_mode` mémorise le dernier mode demandé par
-  l'agent. Si on est revenu au défaut manuellement alors qu'un mode LoL est
-  actif, le `DefaultMode` affiche un badge cliquable (`app.joinable_mode()` /
-  `app.join_network_mode()`) pour y retourner.
+- `App` construit `self.screens` depuis les **modules activés** (registre
+  `MODULES` filtré par `config[modules]`) ; `screen_order` = écrans `cycle=True`.
+- **Verrou manuel** (`manual_screen`) : un retour manuel force l'écran `default`
+  et **ignore les `set_screen` réseau** jusqu'à reconnexion ou `default` explicite.
+- **Badge « Rejoindre »** : `network_screen` mémorise le dernier écran demandé ;
+  `DefaultScreen` affiche un badge cliquable (`app.joinable_screen()` /
+  `app.join_screen()`) pour y retourner.
 
 ### Entrées
 
 - Tactile = souris Pygame. Clavier = fallback des boutons GPIO :
-  **Échap** = retour défaut, **Tab** = mode suivant, **F1** = overlay debug.
+  **Échap** = retour défaut, **Tab** = écran suivant, **F1** = overlay debug.
 - GPIO réel via `gpiozero` (seulement sur le Pi ; absent sur PC → fallback).
 - Options d'affichage : `--fullscreen`/`--windowed` (auto plein écran + SDL
   `kmsdrm` si Pi détecté), `--scale N`, `--monitor N`, `--debug`.
@@ -154,13 +169,19 @@ niveau / maîtrise / winrate / mains via l'API Web.
 - Un champion **non encore pické** (`championId=0`) n'a pas d'icône → placeholder
   avec initiales, jusqu'au pick.
 
-## Détection de phase (agent, `main.py`)
+## Agent : boucle agnostique + Sources (`main.py`, `sources/`)
 
-`gameflow_phase` pilote le mode : `Matchmaking`/`ReadyCheck` → `queue` ;
-`ChampSelect` → `champselect` ; `InProgress` → `lol` (via Live Client Data API) ;
+`main.py` instancie les Sources et, chaque tick, interroge celles des modules
+activés ; la première `poll()` non-None gagne → `set_screen` + `data` ; sinon
+`default`. Dispatch des requêtes (infos/icône/splash) à `Source.handle_request`.
+Mise à jour ≤ 1 fois / `update_interval` (config, 1–2 s).
+
+`sources/league.py` (`LeagueSource`) mappe `gameflow_phase` → écran :
+`Matchmaking`/`ReadyCheck` → `queue` ; `ChampSelect` → `champselect` ;
+`InProgress` → `lol` (Live Client Data API) ;
 `WaitingForStats`/`PreEndOfGame`/`EndOfGame` → `postgame` (historique LCU) ;
-menu/lobby → `default`. Mise à jour ≤ 1 fois / `update_interval` (config, 1–2 s).
-Les builders queue/postgame sont dans `phases.py`.
+client fermé/menu → `poll()` renvoie None (l'agent affiche `default`). Les
+builders queue/postgame sont dans `phases.py`, la sélection dans `champ_select.py`.
 
 Mode simulation (`simulator.py`) : scénarios `full`/`champselect`/`game`/`queue`/`postgame` avec
 fausses données. Le joueur **maxoulefou** (notre compte, constante `REAL_PLAYER`)
@@ -173,7 +194,8 @@ sans lancer de partie ; les autres joueurs restent fictifs.
 
 ## Config & secrets
 
-- `pi_display/config.toml` : host/port d'écoute, résolution, FPS, broches GPIO.
+- `pi_display/config.toml` : host/port d'écoute, résolution, FPS, broches GPIO,
+  **`[modules]`** (active/désactive les modules — source de vérité, poussée à l'agent).
 - `pc_agent/config.toml` : IP/port du Pi, `update_interval`, noms des process
   LoL, `[riot] platform/regional`, `[features] player_info`.
 - **`.env`** (racine, **ignoré** par Git) : `RIOT_API_KEY=...`. Modèle versionné :

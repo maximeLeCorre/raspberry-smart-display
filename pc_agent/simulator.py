@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from champ_select import build_player_info, icon_b64, splash_b64
 from lcu import LcuClient
 from riot_web import RiotWeb
-from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_mode, msg_splash
+from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_screen, msg_splash
 
 # Notre compte réel : ses stats sont récupérées en vrai via l'API Web.
 REAL_PLAYER = ("maxoulefou", "EUW")
@@ -162,7 +162,7 @@ def _install_click_handler(sender: Sender, riot, lcu, real_puuids: set) -> None:
 
 def _phase_champselect(sender: Sender, interval: float, duration: int) -> None:
     print(f"[simu] Sélection de champions ({duration}s). Clique sur un joueur !")
-    sender.send_safe(msg_set_mode("champselect"))
+    sender.send_safe(msg_set_screen("champselect"))
     end = time.time() + duration
     while time.time() < end:
         sender.send_safe(msg_data("champselect", {"phase": "champselect", "players": FAKE_TEAM}))
@@ -171,7 +171,7 @@ def _phase_champselect(sender: Sender, interval: float, duration: int) -> None:
 
 def _phase_queue(sender: Sender, interval: float, duration: int) -> None:
     print(f"[simu] File d'attente ({duration}s) puis ready-check.")
-    sender.send_safe(msg_set_mode("queue"))
+    sender.send_safe(msg_set_screen("queue"))
     start = time.time()
     while time.time() - start < duration:
         t = int(time.time() - start)
@@ -189,7 +189,7 @@ def _phase_queue(sender: Sender, interval: float, duration: int) -> None:
 
 def _phase_game(sender: Sender, interval: float, duration: int) -> None:
     print(f"[simu] Partie en cours ({duration}s).")
-    sender.send_safe(msg_set_mode("lol"))
+    sender.send_safe(msg_set_screen("lol"))
     start = time.time()
     while time.time() - start < duration:
         sender.send_safe(msg_data("lol", _fake_game_payload(int(time.time() - start))))
@@ -201,7 +201,7 @@ def _phase_postgame(sender: Sender, interval: float, duration: int) -> None:
     payload = {"win": True, "championId": 103, "championName": "Ahri",
                "kda": [12, 4, 9], "cs": 210, "gold": 14200, "damage": 32500,
                "level": 16, "duration": 1830, "queue": "Classé Solo/Duo"}
-    sender.send_safe(msg_set_mode("postgame"))
+    sender.send_safe(msg_set_screen("postgame"))
     end = time.time() + duration
     while time.time() < end:
         sender.send_safe(msg_data("postgame", payload))
@@ -261,16 +261,16 @@ def run_simulation(url: str, interval: float = 1.0, scenario: str = "full",
             _phase_postgame(sender, interval, duration or 10 ** 9)
         else:  # full
             print("[simu] Scénario complet. Ctrl+C pour arrêter.")
-            sender.send_safe(msg_set_mode("default"))
+            sender.send_safe(msg_set_screen("default"))
             time.sleep(duration or 5)
             _phase_queue(sender, interval, duration or 8)
             _phase_champselect(sender, interval, duration or 20)
             _phase_game(sender, interval, duration or 20)
             _phase_postgame(sender, interval, duration or 12)
-            sender.send_safe(msg_set_mode("default"))
+            sender.send_safe(msg_set_screen("default"))
     except KeyboardInterrupt:
         print("\n[simu] Interruption.")
     finally:
-        sender.send_safe(msg_set_mode("default"))
+        sender.send_safe(msg_set_screen("default"))
         sender.close()
         print("[simu] Terminé.")

@@ -14,6 +14,12 @@ width = 800        # résolution interne de rendu (ne pas changer : écran 5")
 height = 480
 fps = 15           # FPS max de la boucle d'affichage (Pi 3 = peu puissant)
 
+[modules]
+# Modules activés (source de vérité unique : le Pi l'annonce à l'agent).
+# Le module système (horloge/date) est toujours actif.
+league = true      # League of Legends (file, sélection, partie, après-partie)
+# valorant = false  # (exemple futur)
+
 [gpio]
 # Broches BCM des boutons physiques (uniquement sur le Pi, ignorées sur PC).
 # button_back : force le retour au mode par défaut (même si le jeu tourne).

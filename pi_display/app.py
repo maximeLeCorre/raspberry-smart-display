@@ -1,20 +1,19 @@
-"""Application d'affichage : fenêtre/écran, boucle de rendu, routage des modes.
+"""Application d'affichage : fenêtre, boucle de rendu, routage des écrans.
 
-La boucle tourne à FPS bas (config). À chaque frame :
-  1. on traite les événements Pygame (fermeture, clavier = boutons simulés,
-     souris = tactile simulé) ;
-  2. on traite les actions des boutons GPIO (queue) ;
-  3. on traite les messages réseau (queue) : changement de mode, données,
-     (dé)connexion de l'agent ;
-  4. le mode courant redessine ses zones dynamiques (dirty rects) ;
-  5. on présente à l'écran.
+L'app est **agnostique** des jeux : elle charge les écrans fournis par les
+**modules** activés (voir `modules/`) et affiche celui que l'agent demande.
+
+À chaque frame :
+  1. événements Pygame (fermeture, clavier = boutons simulés, souris = tactile) ;
+  2. actions des boutons GPIO (queue) ;
+  3. messages réseau (queue) : changement d'écran, données, (dé)connexion ;
+  4. l'écran courant redessine ses zones dynamiques (dirty rects) ;
+  5. présentation à l'écran.
 
 Rendu et mise à l'échelle :
-  - Le rendu se fait toujours en 800x480 (résolution interne).
-  - Sans mise à l'échelle (scale=1), on dessine directement sur la surface
-    d'affichage et on utilise `pygame.display.update(dirty)` : optimal sur Pi.
-  - Avec --scale N (test PC), on dessine sur une surface hors-écran puis on
-    l'agrandit vers la fenêtre : pratique pour voir, moins optimisé.
+  - Rendu toujours en 800x480 (résolution interne).
+  - scale=1 : dessin direct + `pygame.display.update(dirty)` (optimal Pi).
+  - --scale N : surface hors-écran agrandie à la présentation (test PC).
 """
 
 from __future__ import annotations
@@ -24,12 +23,10 @@ import queue
 import pygame
 
 from inputs import ACTION_BACK, ACTION_NEXT, InputManager
-from modes.champ_select_mode import ChampSelectMode
-from modes.default_mode import DefaultMode
-from modes.lol_mode import LolMode
-from modes.postgame_mode import PostGameMode
-from modes.queue_mode import QueueMode
+from modules import MODULES
 from network import NetworkServer
+
+DEFAULT_SCREEN = "default"
 
 
 class App:
@@ -58,28 +55,35 @@ class App:
         self.server.start()
         self.inputs = InputManager(config, self.action_queue, debug)
 
-        # Modes disponibles. Les modes transitoires (queue...) sont pilotés par
-        # l'agent uniquement : ils ne sont pas dans mode_order (cycle « suivant »).
-        self.modes = {
-            DefaultMode.name: DefaultMode(self),
-            ChampSelectMode.name: ChampSelectMode(self),
-            LolMode.name: LolMode(self),
-            QueueMode.name: QueueMode(self),
-            PostGameMode.name: PostGameMode(self),
-        }
-        self.mode_order = [DefaultMode.name, ChampSelectMode.name, LolMode.name]
+        # Écrans disponibles, construits depuis les modules activés en config.
+        self._build_screens(config.get("modules", {}))
         self.current = None
 
-        # Verrou de contrôle manuel : quand l'utilisateur force un mode (bouton),
-        # on ignore les « set_mode » venant du réseau jusqu'à ce que l'agent se
-        # (re)connecte ou signale explicitement le mode par défaut.
-        self.manual_mode: str | None = None
-        # Dernier mode demandé par l'agent (même si on l'ignore à cause du verrou
-        # manuel). Sert à proposer un badge « Rejoindre » sur l'écran par défaut.
-        self.network_mode = DefaultMode.name
+        # Verrou de contrôle manuel : quand l'utilisateur force un écran (bouton),
+        # on ignore les « set_screen » réseau jusqu'à (re)connexion de l'agent ou
+        # retour explicite au défaut.
+        self.manual_screen: str | None = None
+        # Dernier écran demandé par l'agent (même ignoré) : sert au badge « Rejoindre ».
+        self.network_screen = DEFAULT_SCREEN
 
         self.running = False
-        self.set_mode(DefaultMode.name)
+        self.set_screen(DEFAULT_SCREEN)
+
+    def _build_screens(self, modules_cfg: dict) -> None:
+        self.screens = {}
+        self.enabled_modules = []
+        for module in MODULES:
+            if not (module.always_on or modules_cfg.get(module.name, True)):
+                continue
+            self.enabled_modules.append(module.name)
+            for cls in module.screens:
+                self.screens[cls.name] = cls(self)
+        # Ordre du bouton « suivant » : les écrans marqués cycle=True.
+        self.screen_order = [
+            cls.name for module in MODULES for cls in module.screens
+            if cls.name in self.screens and cls.cycle
+        ]
+        print(f"[app] Modules actifs : {self.enabled_modules}")
 
     # --------------------------------------------------------------- display
     def _init_display(self, monitor) -> None:
@@ -96,9 +100,6 @@ class App:
 
         self.window = pygame.display.set_mode(window_size, flags, **kwargs)
         self.window_size = window_size
-
-        # Dessin direct (dirty rects) si pas de mise à l'échelle, sinon surface
-        # hors-écran agrandie à la présentation.
         self.direct = (self.scale == 1)
         self.surface = self.window if self.direct else pygame.Surface((self.width, self.height))
 
@@ -111,73 +112,66 @@ class App:
             self.window.blit(scaled, (0, 0))
             pygame.display.flip()
 
-    # ---------------------------------------------------------------- modes
-    def set_mode(self, name: str) -> None:
-        if name not in self.modes:
-            print(f"[app] Mode inconnu ignoré : {name!r}")
+    # ---------------------------------------------------------------- écrans
+    def set_screen(self, name: str) -> None:
+        if name not in self.screens:
+            print(f"[app] Écran inconnu ou module désactivé, ignoré : {name!r}")
             return
         if self.current is not None and self.current.name == name:
             return
         if self.current is not None:
             self.current.exit()
-        self.current = self.modes[name]
+        self.current = self.screens[name]
         self.current.enter()
-        # Fond complet + premier rendu dynamique, puis on présente tout l'écran.
         self.current.draw_background(self.surface)
         self.current.draw(self.surface)
         self.present([pygame.Rect(0, 0, self.width, self.height)])
-        print(f"[app] Mode actif : {name}")
+        print(f"[app] Écran actif : {name}")
 
-    def _next_mode(self) -> str:
-        # Si le mode courant n'est pas dans le cycle (mode transitoire), on
-        # repart du premier.
-        if self.current.name not in self.mode_order:
-            return self.mode_order[0]
-        idx = self.mode_order.index(self.current.name)
-        return self.mode_order[(idx + 1) % len(self.mode_order)]
+    def _next_screen(self) -> str:
+        if not self.screen_order:
+            return DEFAULT_SCREEN
+        if self.current.name not in self.screen_order:
+            return self.screen_order[0]
+        idx = self.screen_order.index(self.current.name)
+        return self.screen_order[(idx + 1) % len(self.screen_order)]
 
     # --------------------------------------------------------------- actions
     def do_action(self, action: str) -> None:
         if action == ACTION_BACK:
-            # Retour forcé au mode par défaut, même si le jeu tourne.
-            self.manual_mode = DefaultMode.name
-            self.set_mode(DefaultMode.name)
+            self.manual_screen = DEFAULT_SCREEN
+            self.set_screen(DEFAULT_SCREEN)
         elif action == ACTION_NEXT:
-            target = self._next_mode()
-            self.manual_mode = target
-            self.set_mode(target)
+            target = self._next_screen()
+            self.manual_screen = target
+            self.set_screen(target)
 
     def request_player_info(self, puuid, summoner_id, champion_id) -> None:
-        """Demande à l'agent les détails d'un joueur (clic en sélection)."""
         self.server.send({
-            "type": "request_player_info",
-            "puuid": puuid,
-            "summonerId": summoner_id,
-            "championId": champion_id,
+            "type": "request_player_info", "puuid": puuid,
+            "summonerId": summoner_id, "championId": champion_id,
         })
 
     def request_icon(self, champion_id) -> None:
-        """Demande à l'agent l'icône d'un champion (envoyée une seule fois)."""
         self.server.send({"type": "request_icon", "championId": champion_id})
 
     def request_splash(self, champion_id) -> None:
-        """Demande à l'agent l'art de chargement d'un champion (au clic)."""
         self.server.send({"type": "request_splash", "championId": champion_id})
 
-    def joinable_mode(self) -> str | None:
-        """Mode LoL (sélection/partie) proposé par l'agent et qu'on peut
-        rejoindre depuis l'écran par défaut (après un retour manuel)."""
-        if self.network_mode in (LolMode.name, ChampSelectMode.name):
-            return self.network_mode
+    def joinable_screen(self) -> str | None:
+        """Écran non-défaut proposé par l'agent, qu'on peut rejoindre depuis le
+        défaut (après un retour manuel)."""
+        n = self.network_screen
+        if n != DEFAULT_SCREEN and n in self.screens:
+            return n
         return None
 
-    def join_network_mode(self) -> None:
-        """Rejoint le mode actuellement demandé par l'agent (clic sur le badge),
-        en relâchant le verrou manuel."""
-        target = self.network_mode
-        if target in self.modes and target != DefaultMode.name:
-            self.manual_mode = None
-            self.set_mode(target)
+    def join_screen(self) -> None:
+        """Rejoint l'écran actuellement demandé par l'agent (clic badge)."""
+        target = self.network_screen
+        if target in self.screens and target != DEFAULT_SCREEN:
+            self.manual_screen = None
+            self.set_screen(target)
 
     # --------------------------------------------------------------- boucles
     def _handle_pygame_events(self) -> None:
@@ -190,20 +184,17 @@ class App:
                     self.last_key = "Échap -> retour"
                     self.do_action(ACTION_BACK)
                 elif event.key == pygame.K_TAB:
-                    self.last_key = "Tab -> mode suivant"
+                    self.last_key = "Tab -> écran suivant"
                     self.do_action(ACTION_NEXT)
                 elif event.key == pygame.K_F1:
                     self.debug = not self.debug
                     self.last_key = f"F1 -> debug {'on' if self.debug else 'off'}"
-                    # Si on désactive le debug, on efface l'overlay en reblittant
-                    # le fond du mode courant sur sa zone.
                     if not self.debug:
                         self.current.draw_background(self.surface)
                         self.current.enter()
                         self.present([pygame.Rect(0, 0, self.width, self.height)])
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                # La souris simule le tactile. On ramène aux coords internes.
                 x, y = event.pos
                 pos = (x // self.scale, y // self.scale)
                 action = self.current.handle_touch(pos)
@@ -231,56 +222,50 @@ class App:
         msg_type = msg.get("type")
 
         if msg_type == "_connected":
-            # Nouvelle session agent : on repasse en contrôle automatique.
-            self.manual_mode = None
+            # Nouvelle session : on repasse en auto et on annonce nos modules.
+            self.manual_screen = None
+            self.server.send({"type": "hello", "modules": self.enabled_modules})
 
         elif msg_type == "_disconnected":
-            # Agent parti (jeu fermé, PC éteint) : retour au mode par défaut.
-            self.manual_mode = None
-            self.network_mode = DefaultMode.name
-            self.set_mode(DefaultMode.name)
+            self.manual_screen = None
+            self.network_screen = DEFAULT_SCREEN
+            self.set_screen(DEFAULT_SCREEN)
 
-        elif msg_type == "set_mode":
-            mode = msg.get("mode", DefaultMode.name)
-            # On mémorise ce que l'agent veut afficher (pour le badge « Rejoindre »).
-            self.network_mode = mode
-            if mode == DefaultMode.name:
-                # L'agent signale la fin de partie : on redonne la main à l'auto.
-                self.manual_mode = None
-            if self.manual_mode is None:
-                self.set_mode(mode)
+        elif msg_type == "set_screen":
+            screen = msg.get("screen", DEFAULT_SCREEN)
+            self.network_screen = screen
+            if screen == DEFAULT_SCREEN:
+                self.manual_screen = None
+            if self.manual_screen is None:
+                self.set_screen(screen)
 
         elif msg_type == "data":
-            mode = msg.get("mode")
+            screen = msg.get("screen")
             payload = msg.get("payload", {})
-            if mode in self.modes:
-                self.modes[mode].update_data(payload)
+            if screen in self.screens:
+                self.screens[screen].update_data(payload)
 
         elif msg_type == "player_info":
-            # Réponse à une demande de détails joueur (mode sélection).
-            champ_select = self.modes.get(ChampSelectMode.name)
-            if champ_select is not None:
-                champ_select.set_player_info(msg.get("puuid", ""), msg.get("info", {}))
+            target = self.screens.get("champselect")
+            if target is not None and hasattr(target, "set_player_info"):
+                target.set_player_info(msg.get("puuid", ""), msg.get("info", {}))
 
         elif msg_type == "icon":
-            # Réponse à une demande d'icône : on la transmet aux modes qui en
-            # affichent (sélection et partie). Chacun garde son propre cache.
-            for mode in self.modes.values():
-                if hasattr(mode, "set_champion_icon"):
-                    mode.set_champion_icon(msg.get("championId"), msg.get("iconB64"))
+            for screen in self.screens.values():
+                if hasattr(screen, "set_champion_icon"):
+                    screen.set_champion_icon(msg.get("championId"), msg.get("iconB64"))
 
         elif msg_type == "splash":
-            champ_select = self.modes.get(ChampSelectMode.name)
-            if champ_select is not None:
-                champ_select.set_champion_splash(msg.get("championId"), msg.get("splashB64"))
+            target = self.screens.get("champselect")
+            if target is not None and hasattr(target, "set_champion_splash"):
+                target.set_champion_splash(msg.get("championId"), msg.get("splashB64"))
 
     def _draw_debug(self, dirty):
-        rect = pygame.Rect(0, 0, 340, 58)
-        # Efface via le fond du mode courant, puis écrit les infos de debug.
+        rect = pygame.Rect(0, 0, 360, 58)
         self.current.clear_region(self.surface, rect)
         lines = [
-            f"mode={self.current.name}  fps={int(self.clock.get_fps())}  manual={self.manual_mode}",
-            f"derniere entree: {self.last_key or '-'}",
+            f"écran={self.current.name}  fps={int(self.clock.get_fps())}  manuel={self.manual_screen}",
+            f"dernière entrée: {self.last_key or '-'}",
         ]
         y = 6
         for line in lines:

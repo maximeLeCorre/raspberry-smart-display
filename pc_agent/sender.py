@@ -91,12 +91,12 @@ class Sender:
 
 
 # Raccourcis de construction des messages du protocole.
-def msg_set_mode(mode: str) -> dict:
-    return {"type": "set_mode", "mode": mode}
+def msg_set_screen(screen: str) -> dict:
+    return {"type": "set_screen", "screen": screen}
 
 
-def msg_data(mode: str, payload: dict) -> dict:
-    return {"type": "data", "mode": mode, "payload": payload}
+def msg_data(screen: str, payload: dict) -> dict:
+    return {"type": "data", "screen": screen, "payload": payload}
 
 
 def msg_player_info(puuid: str, info: dict) -> dict:

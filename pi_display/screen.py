@@ -1,14 +1,14 @@
-"""Classe de base commune à tous les modes d'affichage.
+"""Classe de base commune à tous les écrans d'affichage.
+
+Un « écran » (Screen) est une vue affichable (horloge, sélection, partie...).
+Les écrans sont regroupés par **module** (un jeu/domaine) dans `modules/`.
 
 Principe de performance (important sur Pi 3) :
-  - Chaque mode a un fond pré-rendu (PNG 800x480) chargé UNE SEULE FOIS.
+  - Chaque écran a un fond pré-rendu (PNG 800x480) chargé UNE SEULE FOIS.
   - On ne redessine pas tout l'écran à chaque frame : seules les zones
-    dynamiques (heure, données LoL...) sont redessinées (« dirty rects »).
+    dynamiques sont redessinées (« dirty rects »).
   - Pour effacer une ancienne valeur, on recopie le morceau de fond
     correspondant, puis on dessine la nouvelle valeur par-dessus.
-
-Pour ajouter un mode : créer un fichier dans modes/, hériter de `Mode`,
-définir `name` et `background_name`, et implémenter `draw()`.
 """
 
 from __future__ import annotations
@@ -18,13 +18,14 @@ from pathlib import Path
 import pygame
 
 # Dossier des fonds : pi_display/assets/
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
 
-class Mode:
-    name = "base"               # identifiant unique du mode
+class Screen:
+    name = "base"               # identifiant unique de l'écran
     background_name = None      # nom du PNG dans assets/ (ex. "default.png")
     bg_color = (20, 20, 30)     # couleur de repli si le PNG est absent
+    cycle = False               # True = inclus dans le cycle du bouton « suivant »
 
     def __init__(self, app):
         self.app = app
@@ -48,22 +49,22 @@ class Mode:
 
     # ---------------------------------------------------------- cycle de vie
     def enter(self) -> None:
-        """Appelé à chaque entrée dans le mode (réinitialiser les caches ici)."""
+        """Appelé à chaque entrée dans l'écran (réinitialiser les caches ici)."""
 
     def exit(self) -> None:
-        """Appelé à la sortie du mode."""
+        """Appelé à la sortie de l'écran."""
 
     def update_data(self, payload: dict) -> None:
-        """Nouvelles données reçues du réseau pour ce mode."""
+        """Nouvelles données reçues du réseau pour cet écran."""
 
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         """Touche/clic aux coordonnées internes. Peut renvoyer une action
-        (voir inputs.ACTION_*), par ex. pour sortir du mode. None = rien."""
+        (voir inputs.ACTION_*), par ex. pour sortir de l'écran. None = rien."""
         return None
 
     # ---------------------------------------------------------------- rendu
     def draw_background(self, surface: pygame.Surface) -> None:
-        """Dessine le fond complet (appelé une fois à l'entrée du mode)."""
+        """Dessine le fond complet (appelé une fois à l'entrée de l'écran)."""
         surface.blit(self.bg, (0, 0))
 
     def draw(self, surface: pygame.Surface) -> list[pygame.Rect]:
