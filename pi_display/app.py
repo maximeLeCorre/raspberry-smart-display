@@ -147,6 +147,10 @@ class App:
             "championId": champion_id,
         })
 
+    def request_icon(self, champion_id) -> None:
+        """Demande à l'agent l'icône d'un champion (envoyée une seule fois)."""
+        self.server.send({"type": "request_icon", "championId": champion_id})
+
     def joinable_mode(self) -> str | None:
         """Mode LoL (sélection/partie) proposé par l'agent et qu'on peut
         rejoindre depuis l'écran par défaut (après un retour manuel)."""
@@ -244,6 +248,12 @@ class App:
             champ_select = self.modes.get(ChampSelectMode.name)
             if champ_select is not None:
                 champ_select.set_player_info(msg.get("puuid", ""), msg.get("info", {}))
+
+        elif msg_type == "icon":
+            # Réponse à une demande d'icône de champion (mode sélection).
+            champ_select = self.modes.get(ChampSelectMode.name)
+            if champ_select is not None:
+                champ_select.set_champion_icon(msg.get("championId"), msg.get("iconB64"))
 
     def _draw_debug(self, dirty):
         rect = pygame.Rect(0, 0, 340, 58)
