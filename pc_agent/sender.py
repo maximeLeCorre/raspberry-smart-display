@@ -105,3 +105,7 @@ def msg_player_info(puuid: str, info: dict) -> dict:
 
 def msg_icon(champion_id, icon_b64) -> dict:
     return {"type": "icon", "championId": champion_id, "iconB64": icon_b64}
+
+
+def msg_splash(champion_id, splash_b64) -> dict:
+    return {"type": "splash", "championId": champion_id, "splashB64": splash_b64}

@@ -160,6 +160,10 @@ class App:
         """Demande à l'agent l'icône d'un champion (envoyée une seule fois)."""
         self.server.send({"type": "request_icon", "championId": champion_id})
 
+    def request_splash(self, champion_id) -> None:
+        """Demande à l'agent l'art de chargement d'un champion (au clic)."""
+        self.server.send({"type": "request_splash", "championId": champion_id})
+
     def joinable_mode(self) -> str | None:
         """Mode LoL (sélection/partie) proposé par l'agent et qu'on peut
         rejoindre depuis l'écran par défaut (après un retour manuel)."""
@@ -264,6 +268,11 @@ class App:
             for mode in self.modes.values():
                 if hasattr(mode, "set_champion_icon"):
                     mode.set_champion_icon(msg.get("championId"), msg.get("iconB64"))
+
+        elif msg_type == "splash":
+            champ_select = self.modes.get(ChampSelectMode.name)
+            if champ_select is not None:
+                champ_select.set_champion_splash(msg.get("championId"), msg.get("splashB64"))
 
     def _draw_debug(self, dirty):
         rect = pygame.Rect(0, 0, 340, 58)
