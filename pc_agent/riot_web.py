@@ -14,6 +14,8 @@ la boucle de l'agent.
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 import requests
 
 
@@ -25,6 +27,9 @@ class RiotWeb:
         self.session = requests.Session()
         if api_key:
             self.session.headers["X-Riot-Token"] = api_key
+        # Cache (gameName, tagLine) -> vrai PUUID externe, pour éviter de
+        # re-résoudre à chaque mise à jour (et ménager le quota).
+        self._puuid_cache: dict[tuple[str, str], str | None] = {}
 
     @property
     def enabled(self) -> bool:
@@ -54,6 +59,30 @@ class RiotWeb:
         return f"{self.regional}.api.riotgames.com"
 
     # --------------------------------------------------------- endpoints
+    def account_by_riot_id(self, game_name: str, tag_line: str) -> dict | None:
+        """Résout un Riot ID (gameName#tagLine) -> compte (dont le vrai PUUID).
+
+        IMPORTANT : le PUUID donné par la LCU est un identifiant interne
+        (format UUID) que l'API Web rejette ("Exception decrypting"). Le vrai
+        PUUID externe (78 caractères) s'obtient uniquement par cet endpoint.
+        """
+        return self._get(
+            self._regional_host(),
+            f"/riot/account/v1/accounts/by-riot-id/{quote(game_name)}/{quote(tag_line)}",
+        )
+
+    def resolve_puuid(self, game_name: str, tag_line: str) -> str | None:
+        """Vrai PUUID externe pour un Riot ID, mis en cache."""
+        if not game_name or not tag_line:
+            return None
+        key = (game_name, tag_line)
+        if key in self._puuid_cache:
+            return self._puuid_cache[key]
+        account = self.account_by_riot_id(game_name, tag_line)
+        puuid = account.get("puuid") if account else None
+        self._puuid_cache[key] = puuid
+        return puuid
+
     def summoner_by_puuid(self, puuid: str) -> dict | None:
         """Donne summonerLevel et l'id de summoner (pour d'autres endpoints)."""
         return self._get(self._platform_host(),
