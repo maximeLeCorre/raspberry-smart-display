@@ -25,12 +25,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from champ_select import build_champ_select_payload, build_player_info
+from champ_select import build_champ_select_payload, build_player_info, icon_b64
 from detector import is_any_process_running
 from lcu import LcuClient
 from riot_api import get_all_game_data, summarize
 from riot_web import RiotWeb
-from sender import Sender, msg_data, msg_player_info, msg_set_mode
+from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_mode
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.toml"
@@ -83,14 +83,16 @@ def make_riot_web(config: dict, lcu: LcuClient) -> RiotWeb:
     return RiotWeb(api_key, platform, regional)
 
 
-def make_request_handler(sender: Sender, build_info):
-    """Crée le callback qui répond aux demandes d'infos joueur venant du Pi."""
+def make_request_handler(sender: Sender, build_info, lcu: LcuClient):
+    """Crée le callback qui répond aux demandes venant du Pi (infos + icônes)."""
     def handle(message: dict):
-        if message.get("type") != "request_player_info":
-            return
-        puuid = message.get("puuid", "")
-        info = build_info(message)
-        sender.send_safe(msg_player_info(puuid, info))
+        msg_type = message.get("type")
+        if msg_type == "request_player_info":
+            puuid = message.get("puuid", "")
+            sender.send_safe(msg_player_info(puuid, build_info(message)))
+        elif msg_type == "request_icon":
+            champ_id = int(message.get("championId") or 0)
+            sender.send_safe(msg_icon(champ_id, icon_b64(lcu, champ_id)))
     return handle
 
 
@@ -111,7 +113,7 @@ def run_real(url: str, config: dict) -> None:
             int(message.get("championId") or 0),
         )
 
-    sender.start_receiver(make_request_handler(sender, build_info))
+    sender.start_receiver(make_request_handler(sender, build_info, lcu))
 
     last_mode = None
     print("[agent] Surveillance du client League (LCU)... (Ctrl+C pour quitter)")
@@ -162,7 +164,9 @@ def main():
         # Import tardif : le simulateur n'a pas besoin des modules LCU/Riot.
         from simulator import run_simulation
         run_simulation(url, interval=config["agent"]["update_interval"],
-                       scenario=args.scenario, duration=args.duration)
+                       scenario=args.scenario, duration=args.duration,
+                       platform=config["riot"]["platform"],
+                       regional=config["riot"]["regional"])
     else:
         run_real(url, config)
 
