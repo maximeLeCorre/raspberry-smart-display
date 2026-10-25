@@ -25,30 +25,26 @@ Communication : **WebSocket** (JSON), PC → Pi. La connexion persistante permet
 
 ## Installation (test sur PC Windows)
 
-Deux jeux de dépendances séparés (un par programme). Depuis la racine du dépôt,
-en PowerShell :
+Le plus simple pour tester localement : **un seul environnement virtuel** à la
+racine, qui installe les deux `requirements.txt`. Depuis la racine du dépôt, en
+PowerShell :
 
 ```powershell
-# 1) Appli d'affichage
-python -m venv pi_display\.venv
-pi_display\.venv\Scripts\Activate.ps1
-pip install -r pi_display\requirements.txt
-deactivate
-
-# 2) Agent PC
-python -m venv pc_agent\.venv
-pc_agent\.venv\Scripts\Activate.ps1
-pip install -r pc_agent\requirements.txt
-deactivate
+py -3.11 -m venv .venv
+.\.venv\Scripts\python -m pip install --upgrade pip
+.\.venv\Scripts\python -m pip install -r pi_display\requirements.txt -r pc_agent\requirements.txt
 ```
 
-> Astuce : vous pouvez aussi utiliser un seul venv partagé et installer les deux
-> `requirements.txt` dedans — c'est plus simple pour tester localement.
+> Remarque : sur ce poste, la commande `python` renvoie vers le stub Microsoft
+> Store. On utilise donc `py -3.11` (Python 3.11, requis par `tomllib`).
+>
+> Alternative : un venv par programme (`pi_display\.venv`, `pc_agent\.venv`) si
+> vous préférez isoler les dépendances. Adaptez alors les chemins ci-dessous.
 
 Générez les fonds placeholder (une fois) :
 
 ```powershell
-pi_display\.venv\Scripts\python pi_display\tools\gen_backgrounds.py
+.\.venv\Scripts\python pi_display\tools\gen_backgrounds.py
 ```
 
 ## Lancer le test local
@@ -57,7 +53,7 @@ Dans **deux terminaux** :
 
 **Terminal 1 — l'écran (fenêtre 800×480) :**
 ```powershell
-pi_display\.venv\Scripts\python pi_display\main.py
+.\.venv\Scripts\python pi_display\main.py
 # agrandi x2 : ... pi_display\main.py --scale 2
 # sur le 2e moniteur : ... pi_display\main.py --monitor 1
 # avec overlay de debug : ... pi_display\main.py --debug   (ou touche F1)
@@ -66,7 +62,7 @@ Vous devez voir l'heure qui défile (mode par défaut).
 
 **Terminal 2 — l'agent en simulation :**
 ```powershell
-pc_agent\.venv\Scripts\python pc_agent\main.py --simulate
+.\.venv\Scripts\python pc_agent\main.py --simulate
 ```
 L'écran bascule en **mode LoL** avec des données qui évoluent.
 
@@ -102,7 +98,7 @@ L'écran bascule en **mode LoL** avec des données qui évoluent.
 
 Lancez l'agent **sans** `--simulate` pendant que le jeu tourne :
 ```powershell
-pc_agent\.venv\Scripts\python pc_agent\main.py
+.\.venv\Scripts\python pc_agent\main.py
 ```
 L'agent détecte `LeagueClientUx.exe` / `League of Legends.exe` et, pendant un
 match, lit `https://127.0.0.1:2999/liveclientdata/allgamedata` (API locale de
