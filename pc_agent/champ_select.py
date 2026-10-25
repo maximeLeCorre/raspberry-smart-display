@@ -10,8 +10,19 @@ from __future__ import annotations
 
 import base64
 
+import requests
+
 from lcu import LcuClient
 from riot_web import RiotWeb
+
+# Art de chargement (portrait) depuis Data Dragon, par alias de champion.
+LOADING_ART_URL = "https://ddragon.leagueoflegends.com/cdn/img/champion/loading/{alias}_0.jpg"
+
+# Phases de sélection -> libellé français.
+SELECT_PHASES = {
+    "PLANNING": "Préparation", "BAN_PICK": "Sélection",
+    "FINALIZATION": "Finalisation", "GAME_STARTING": "Lancement",
+}
 
 # Positions LoL -> libellé court français.
 POSITIONS = {
@@ -26,6 +37,20 @@ def icon_b64(lcu: LcuClient, champion_id: int) -> str | None:
     if not raw:
         return None
     return base64.b64encode(raw).decode("ascii")
+
+
+def splash_b64(lcu: LcuClient, champion_id: int) -> str | None:
+    """Art de chargement (portrait) d'un champion en base64 (demandé au clic)."""
+    alias = lcu.champion_alias(champion_id)
+    if not alias:
+        return None
+    try:
+        resp = requests.get(LOADING_ART_URL.format(alias=alias), timeout=8)
+    except requests.RequestException:
+        return None
+    if resp.status_code != 200:
+        return None
+    return base64.b64encode(resp.content).decode("ascii")
 
 
 def build_champ_select_payload(lcu: LcuClient, riot: RiotWeb | None = None) -> dict | None:
@@ -74,7 +99,20 @@ def build_champ_select_payload(lcu: LcuClient, riot: RiotWeb | None = None) -> d
             # (message request_icon) et ne les reçoit qu'une fois chacune.
         })
 
-    return {"phase": "champselect", "players": players}
+    timer = session.get("timer", {}) or {}
+    bans = session.get("bans", {}) or {}
+    return {
+        "phase": "champselect",
+        "players": players,
+        "timer": {
+            "phase": SELECT_PHASES.get(timer.get("phase", ""), ""),
+            "left": round((timer.get("adjustedTimeLeftInPhase", 0) or 0) / 1000),
+        },
+        "bans": {
+            "myTeam": [c for c in bans.get("myTeamBans", []) if c],
+            "theirTeam": [c for c in bans.get("theirTeamBans", []) if c],
+        },
+    }
 
 
 def build_player_info(lcu: LcuClient, riot: RiotWeb | None,

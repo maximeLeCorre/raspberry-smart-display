@@ -73,8 +73,9 @@ class LcuClient:
         self.token: str | None = None
         self.session = requests.Session()
         self.session.verify = False
-        self._champions: dict[int, str] | None = None     # cache id -> nom
-        self._champion_ids: dict[str, int] | None = None  # cache nom (minuscule) -> id
+        self._champions: dict[int, str] | None = None      # cache id -> nom
+        self._champion_ids: dict[str, int] | None = None   # cache nom (minuscule) -> id
+        self._champion_alias: dict[int, str] | None = None  # cache id -> alias (ex. "MissFortune")
 
     @property
     def connected(self) -> bool:
@@ -169,9 +170,18 @@ class LcuClient:
             self._load_champion_summary()
         return (self._champion_ids or {}).get(name.lower(), 0)
 
+    def champion_alias(self, champion_id: int) -> str:
+        """Alias d'un champion (ex. 'MissFortune'), pour les URL d'art."""
+        if not champion_id or champion_id <= 0:
+            return ""
+        if self._champion_alias is None:
+            self._load_champion_summary()
+        return (self._champion_alias or {}).get(champion_id, "")
+
     def _load_champion_summary(self) -> None:
         self._champions = {}
         self._champion_ids = {}
+        self._champion_alias = {}
         try:
             resp = requests.get(CHAMPION_SUMMARY_URL, timeout=8)
         except requests.RequestException:
@@ -187,5 +197,6 @@ class LcuClient:
             name = champ.get("name", "")
             if isinstance(cid, int) and cid > 0:
                 self._champions[cid] = name
+                self._champion_alias[cid] = champ.get("alias", "")
                 if name:
                     self._champion_ids[name.lower()] = cid

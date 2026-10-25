@@ -57,31 +57,40 @@ class ChampSelectMode(Mode):
         self.font_panel = pygame.font.Font(None, 26)
 
         self.players: list[dict] = []
+        self.timer: dict = {}
+        self.bans: dict = {}
         self.selected_puuid: str | None = None
         self.player_info: dict[str, dict] = {}   # puuid -> détails
         # Icônes reçues (championId -> surface). Persistant entre sessions :
         # une icône ne change jamais, inutile de la redemander.
         self._icon_cache: dict[int, pygame.Surface] = {}
         self._requested: set[int] = set()         # icônes déjà demandées à l'agent
+        self._splash_cache: dict[int, pygame.Surface] = {}  # splash arts reçus
+        self._splash_requested: set[int] = set()
         self._rows: list[tuple[pygame.Rect, dict]] = []  # zones cliquables
-        self._dirty = True  # force un premier rendu
+        self._last_state = None
 
     def enter(self) -> None:
-        self._dirty = True
+        self._last_state = None
         # Nouvelle session : on pourra re-demander les icônes encore manquantes.
         self._requested.clear()
+        self._splash_requested.clear()
 
     def update_data(self, payload: dict) -> None:
-        players = payload.get("players", [])
-        # On ne redessine que si la composition a changé (champions/pseudos).
-        if self._players_signature(players) != self._players_signature(self.players):
-            self.players = players
-            self._dirty = True
+        self.players = payload.get("players", self.players)
+        self.timer = payload.get("timer", self.timer)
+        self.bans = payload.get("bans", self.bans)
 
     def set_player_info(self, puuid: str, info: dict) -> None:
         self.player_info[puuid] = info
         if puuid == self.selected_puuid:
-            self._dirty = True
+            self._last_state = None
+
+    def set_champion_splash(self, champion_id: int, splash_b64: str | None) -> None:
+        surface = self._decode_splash(splash_b64)
+        if surface is not None:
+            self._splash_cache[champion_id] = surface
+            self._last_state = None
 
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         if RETOUR_RECT.collidepoint(pos):
@@ -89,27 +98,48 @@ class ChampSelectMode(Mode):
         for rect, player in self._rows:
             if rect.collidepoint(pos):
                 puuid = player.get("puuid") or ""
+                champ_id = player.get("championId", 0)
                 self.selected_puuid = puuid
-                self._dirty = True
-                # Demande des détails à l'agent (si pas déjà en cache).
+                self._last_state = None
+                # Détails joueur (si pas déjà en cache).
                 if puuid and puuid not in self.player_info:
                     self.app.request_player_info(
-                        puuid, player.get("summonerId"),
-                        player.get("championId", 0))
+                        puuid, player.get("summonerId"), champ_id)
+                # Splash art du champion (si pas déjà reçu).
+                if champ_id and champ_id not in self._splash_cache \
+                        and champ_id not in self._splash_requested:
+                    self._splash_requested.add(champ_id)
+                    self.app.request_splash(champ_id)
                 return None
         return None
 
     # --------------------------------------------------------------- rendu
-    def draw(self, surface: pygame.Surface) -> list[pygame.Rect]:
-        if not self._dirty:
-            return []
-        self._dirty = False
+    def _signature(self):
+        sel = self.selected_puuid
+        return (
+            self._players_signature(self.players),
+            self.timer.get("left"), self.timer.get("phase"),
+            tuple(self.bans.get("myTeam", [])), tuple(self.bans.get("theirTeam", [])),
+            sel, bool(self.player_info.get(sel)) if sel else None,
+            tuple(sorted(self._icon_cache.keys())),
+            tuple(sorted(self._splash_cache.keys())),
+        )
 
-        # Fond complet puis contenu (simple : ce mode change rarement).
+    def draw(self, surface: pygame.Surface) -> list[pygame.Rect]:
+        signature = self._signature()
+        if signature == self._last_state:
+            return []
+        self._last_state = signature
+
         surface.blit(self.bg, (0, 0))
 
         title = self.font_title.render("SÉLECTION DE CHAMPIONS", True, (210, 175, 95))
-        surface.blit(title, title.get_rect(midtop=(self.width // 2, 20)))
+        surface.blit(title, title.get_rect(midtop=(self.width // 2, 16)))
+        # Timer de phase (ex. « Sélection — 24s »).
+        phase, left = self.timer.get("phase"), self.timer.get("left")
+        if phase and left is not None:
+            t = self.font_small.render(f"{phase} — {left}s", True, (160, 180, 210))
+            surface.blit(t, t.get_rect(midtop=(self.width // 2, 56)))
         hint = self.font_hint.render("RETOUR", True, (200, 200, 210))
         surface.blit(hint, hint.get_rect(center=RETOUR_RECT.center))
 
@@ -157,23 +187,58 @@ class ChampSelectMode(Mode):
         pygame.draw.rect(surface, (70, 85, 120), panel, width=1, border_radius=8)
 
         x = panel.x + 14
-        y = panel.y + 14
 
         if not self.selected_puuid:
-            msg = self.font_panel.render("Clique sur un joueur", True, (150, 165, 195))
-            surface.blit(msg, (x, y))
+            self._draw_bans(surface, panel)
             return
+
+        # Splash art en bannière (haut du portrait), si reçu.
+        content_top = panel.y + 14
+        champ_id = self._selected_champion_id()
+        splash = self._splash_cache.get(champ_id)
+        if splash is not None:
+            banner_h = 150
+            prev = surface.get_clip()
+            surface.set_clip(pygame.Rect(panel.x + 1, panel.y + 1, panel.w - 2, banner_h))
+            surface.blit(splash, (panel.x, panel.y - 8))
+            surface.set_clip(prev)
+            shade = pygame.Surface((panel.w, 44), pygame.SRCALPHA)
+            shade.fill((18, 24, 40, 190))
+            surface.blit(shade, (panel.x, panel.y + banner_h - 44))
+            content_top = panel.y + banner_h + 6
 
         info = self.player_info.get(self.selected_puuid)
+        y = content_top
         if info is None:
-            msg = self.font_panel.render("Chargement…", True, (150, 165, 195))
-            surface.blit(msg, (x, y))
+            surface.blit(self.font_panel.render("Chargement…", True, (150, 165, 195)), (x, y))
             return
-
         for line, color in self._info_lines(info):
-            surf = self.font_panel.render(line, True, color)
-            surface.blit(surf, (x, y))
-            y += 30
+            surface.blit(self.font_panel.render(line, True, color), (x, y))
+            y += 29
+
+    def _draw_bans(self, surface: pygame.Surface, panel: pygame.Rect) -> None:
+        x = panel.x + 14
+        y = panel.y + 14
+        surface.blit(self.font_panel.render("Bans", True, (210, 175, 95)), (x, y))
+        y += 42
+        for label, ids in (("Alliés", self.bans.get("myTeam", [])),
+                           ("Ennemis", self.bans.get("theirTeam", []))):
+            surface.blit(self.font_small.render(label, True, (160, 180, 210)), (x, y + 4))
+            bx = x + 96
+            for cid in ids[:5]:
+                surface.blit(self._small_icon(cid, 30), (bx, y))
+                bx += 36
+            if not ids:
+                surface.blit(self.font_small.render("—", True, (120, 140, 170)), (x + 96, y + 4))
+            y += 50
+        surface.blit(self.font_small.render("Clique un joueur pour ses infos", True,
+                                            (130, 150, 185)), (x, panel.bottom - 34))
+
+    def _selected_champion_id(self) -> int:
+        for p in self.players:
+            if (p.get("puuid") or "") == self.selected_puuid:
+                return p.get("championId", 0) or 0
+        return 0
 
     def _info_lines(self, info: dict) -> list[tuple[str, tuple[int, int, int]]]:
         white = (235, 235, 240)
@@ -233,12 +298,24 @@ class ChampSelectMode(Mode):
             self.app.request_icon(champ_id)
         return self._placeholder_icon(player.get("championName") or "?")
 
+    def _small_icon(self, champ_id, size: int) -> pygame.Surface:
+        """Petite icône (pour les bans) depuis le cache, redimensionnée."""
+        champ_id = champ_id or 0
+        if champ_id in self._icon_cache:
+            return pygame.transform.smoothscale(self._icon_cache[champ_id], (size, size))
+        if champ_id > 0 and champ_id not in self._requested:
+            self._requested.add(champ_id)
+            self.app.request_icon(champ_id)
+        placeholder = pygame.Surface((size, size))
+        placeholder.fill((45, 55, 80))
+        return placeholder
+
     def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:
         """Reçoit une icône demandée à l'agent ; la met en cache et redessine."""
         surface = self._decode_icon(icon_b64)
         if surface is not None:
             self._icon_cache[champion_id] = surface
-            self._dirty = True
+            self._last_state = None
 
     def _decode_icon(self, icon_b64) -> pygame.Surface | None:
         if not icon_b64:
@@ -247,6 +324,17 @@ class ChampSelectMode(Mode):
             raw = base64.b64decode(icon_b64)
             image = pygame.image.load(io.BytesIO(raw)).convert_alpha()
             return pygame.transform.smoothscale(image, (ICON, ICON))
+        except Exception:
+            return None
+
+    def _decode_splash(self, splash_b64) -> pygame.Surface | None:
+        if not splash_b64:
+            return None
+        try:
+            raw = base64.b64decode(splash_b64)
+            image = pygame.image.load(io.BytesIO(raw)).convert()
+            w, h = image.get_size()
+            return pygame.transform.smoothscale(image, (PANEL_W, int(PANEL_W * h / w)))
         except Exception:
             return None
 

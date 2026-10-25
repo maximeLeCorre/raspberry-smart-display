@@ -19,10 +19,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from champ_select import build_player_info, icon_b64
+from champ_select import build_player_info, icon_b64, splash_b64
 from lcu import LcuClient
 from riot_web import RiotWeb
-from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_mode
+from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_mode, msg_splash
 
 # Notre compte réel : ses stats sont récupérées en vrai via l'API Web.
 REAL_PLAYER = ("maxoulefou", "EUW")
@@ -134,6 +134,12 @@ def _install_click_handler(sender: Sender, riot, lcu, real_puuids: set) -> None:
             # Vraie icône si le client League est ouvert, sinon None (placeholder).
             champ_id = int(message.get("championId") or 0)
             sender.send_safe(msg_icon(champ_id, icon_b64(lcu, champ_id)))
+            return
+
+        if msg_type == "request_splash":
+            # Les splash arts viennent de Data Dragon : dispo même sans client.
+            champ_id = int(message.get("championId") or 0)
+            sender.send_safe(msg_splash(champ_id, splash_b64(lcu, champ_id)))
             return
 
         if msg_type != "request_player_info":

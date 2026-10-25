@@ -25,13 +25,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from champ_select import build_champ_select_payload, build_player_info, icon_b64
+from champ_select import build_champ_select_payload, build_player_info, icon_b64, splash_b64
 from detector import is_any_process_running
 from lcu import LcuClient
 from phases import build_postgame_payload, build_queue_payload
 from riot_api import get_all_game_data, summarize_full
 from riot_web import RiotWeb
-from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_mode
+from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_mode, msg_splash
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.toml"
@@ -94,6 +94,9 @@ def make_request_handler(sender: Sender, build_info, lcu: LcuClient):
         elif msg_type == "request_icon":
             champ_id = int(message.get("championId") or 0)
             sender.send_safe(msg_icon(champ_id, icon_b64(lcu, champ_id)))
+        elif msg_type == "request_splash":
+            champ_id = int(message.get("championId") or 0)
+            sender.send_safe(msg_splash(champ_id, splash_b64(lcu, champ_id)))
     return handle
 
 
