@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 from champ_select import build_champ_select_payload, build_player_info, icon_b64
 from detector import is_any_process_running
 from lcu import LcuClient
+from phases import build_queue_payload
 from riot_api import get_all_game_data, summarize_full
 from riot_web import RiotWeb
 from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_mode
@@ -50,7 +51,7 @@ def parse_args():
     p.add_argument("--simulate", action="store_true",
                    help="Scénario simulé, sans lancer le jeu.")
     p.add_argument("--scenario", default="full",
-                   choices=["full", "champselect", "game"],
+                   choices=["full", "champselect", "game", "queue"],
                    help="Scénario de simulation (défaut : full).")
     p.add_argument("--duration", type=int, default=None,
                    help="Durée d'une étape de simulation en secondes.")
@@ -121,7 +122,13 @@ def run_real(url: str, config: dict) -> None:
         while True:
             phase = lcu.gameflow_phase()
 
-            if phase == "ChampSelect":
+            if phase in ("Matchmaking", "ReadyCheck"):
+                if last_mode != "queue":
+                    sender.send_safe(msg_set_mode("queue"))
+                    last_mode = "queue"
+                sender.send_safe(msg_data("queue", build_queue_payload(lcu, phase)))
+
+            elif phase == "ChampSelect":
                 payload = build_champ_select_payload(lcu, riot)
                 if payload is not None:
                     if last_mode != "champselect":

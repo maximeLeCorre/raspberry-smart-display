@@ -27,6 +27,7 @@ from inputs import ACTION_BACK, ACTION_NEXT, InputManager
 from modes.champ_select_mode import ChampSelectMode
 from modes.default_mode import DefaultMode
 from modes.lol_mode import LolMode
+from modes.queue_mode import QueueMode
 from network import NetworkServer
 
 
@@ -56,11 +57,13 @@ class App:
         self.server.start()
         self.inputs = InputManager(config, self.action_queue, debug)
 
-        # Modes disponibles. L'ordre sert au bouton « mode suivant ».
+        # Modes disponibles. Les modes transitoires (queue...) sont pilotés par
+        # l'agent uniquement : ils ne sont pas dans mode_order (cycle « suivant »).
         self.modes = {
             DefaultMode.name: DefaultMode(self),
             ChampSelectMode.name: ChampSelectMode(self),
             LolMode.name: LolMode(self),
+            QueueMode.name: QueueMode(self),
         }
         self.mode_order = [DefaultMode.name, ChampSelectMode.name, LolMode.name]
         self.current = None
@@ -124,6 +127,10 @@ class App:
         print(f"[app] Mode actif : {name}")
 
     def _next_mode(self) -> str:
+        # Si le mode courant n'est pas dans le cycle (mode transitoire), on
+        # repart du premier.
+        if self.current.name not in self.mode_order:
+            return self.mode_order[0]
         idx = self.mode_order.index(self.current.name)
         return self.mode_order[(idx + 1) % len(self.mode_order)]
 
