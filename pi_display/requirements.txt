@@ -1,0 +1,12 @@
+# Dépendances de l'appli d'affichage (Pi + test sur PC)
+pygame>=2.5
+websockets>=12.0
+
+# Génération des fonds placeholder (script tools/gen_backgrounds.py uniquement).
+# Pas nécessaire au fonctionnement de l'appli une fois les PNG générés.
+Pillow>=10.0
+
+# gpiozero n'est installé QUE sur le Raspberry Pi (boutons physiques).
+# L'appli fonctionne sans, avec le fallback clavier. Sur le Pi, décommenter :
+# gpiozero>=2.0
+# RPi.GPIO>=0.7
