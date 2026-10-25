@@ -52,9 +52,11 @@ PC → Pi :
 - `{"type":"data","mode":"lol","payload":{...}}`
 - `{"type":"data","mode":"champselect","payload":{"phase":"champselect","players":[...]}}`
 - `{"type":"player_info","puuid":"...","info":{...}}` (réponse à une demande)
+- `{"type":"icon","championId":...,"iconB64":"..."}` (réponse à une demande d'icône)
 
 Pi → PC :
 - `{"type":"request_player_info","puuid":"...","summonerId":...,"championId":...}`
+- `{"type":"request_icon","championId":...}`
 
 Interne (synthétisé par le serveur Pi, pas envoyé par l'agent) :
 - `{"type":"_connected"}` / `{"type":"_disconnected"}`
@@ -129,8 +131,10 @@ implémenter `draw()` (et `update_data()` si réseau) ; l'enregistrer dans
 ### Flux « sélection de champions »
 
 `champ_select.build_champ_select_payload` : pour chaque joueur de notre équipe,
-récupère le Riot ID (complété via `lcu.summoner_by_id` si masqué), résout le
-vrai PUUID, joint l'icône (base64). `build_player_info` (au clic) agrège rang /
+récupère le Riot ID (complété via `lcu.summoner_by_id` si masqué) et résout le
+vrai PUUID. **Les icônes ne sont PAS dans le payload** : le Pi les réclame à la
+carte (`request_icon` → `icon`), une seule fois chacune (cache par `championId`,
+survit aux redémarrages du Pi). `build_player_info` (au clic) agrège rang /
 niveau / maîtrise / winrate / mains via l'API Web.
 
 - ⚠️ Pour les **coéquipiers**, l'enrichissement dépend de la visibilité de leur
@@ -145,7 +149,13 @@ niveau / maîtrise / winrate / mains via l'API Web.
 Mise à jour ≤ 1 fois / `update_interval` (config, 1–2 s).
 
 Mode simulation (`simulator.py`) : scénarios `full`/`champselect`/`game` avec
-fausses données, et réponses aux clics (fausses infos joueur).
+fausses données. Le joueur **maxoulefou** (notre compte, constante `REAL_PLAYER`)
+renvoie de **vraies** stats au clic via l'API Web (si `RIOT_API_KEY` présent),
+sans lancer de partie ; les autres joueurs restent fictifs.
+
+> Note : le PUUID renvoyé par `account-v1` est **chiffré par clé d'API** — il
+> change quand la clé change (clé dev renouvelée). Cohérent tant qu'on garde la
+> même clé sur une session, ce qui est le cas.
 
 ## Config & secrets
 

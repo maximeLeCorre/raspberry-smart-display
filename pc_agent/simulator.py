@@ -5,15 +5,28 @@ Scénarios (--scenario) :
   - champselect : reste en sélection de champions (test du clic sur un joueur)
   - game        : reste en partie (ancien comportement)
 
-Répond aussi aux demandes d'infos joueur (clic sur un joueur) avec de fausses
-données. À l'arrêt (Ctrl+C), repasse en mode par défaut puis se déconnecte.
+Répond aussi aux demandes d'infos joueur (clic sur un joueur). Le joueur
+« maxoulefou » (notre compte) renvoie de VRAIES stats via l'API Web Riot si
+RIOT_API_KEY est présent dans .env (aucune partie à lancer) ; les autres
+joueurs restent fictifs. À l'arrêt (Ctrl+C), repasse en mode par défaut.
 """
 
 from __future__ import annotations
 
+import os
 import time
+from pathlib import Path
 
-from sender import Sender, msg_data, msg_player_info, msg_set_mode
+from dotenv import load_dotenv
+
+from champ_select import build_player_info, icon_b64
+from lcu import LcuClient
+from riot_web import RiotWeb
+from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_mode
+
+# Notre compte réel : ses stats sont récupérées en vrai via l'API Web.
+REAL_PLAYER = ("maxoulefou", "EUW")
+ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 # Équipe fictive (5 joueurs, dont nous). Pas d'icône -> le Pi affiche un
 # placeholder avec le nom du champion.
@@ -26,7 +39,7 @@ FAKE_TEAM = [
      "gameName": "GankMaster", "tagLine": "EUW", "isSelf": False, "iconB64": None},
     {"cellId": 2, "summonerId": 103, "puuid": "puuid-mid",
      "championId": 103, "championName": "Ahri", "position": "Mid",
-     "gameName": "Moi", "tagLine": "EUW", "isSelf": True, "iconB64": None},
+     "gameName": REAL_PLAYER[0], "tagLine": REAL_PLAYER[1], "isSelf": True, "iconB64": None},
     {"cellId": 3, "summonerId": 104, "puuid": "puuid-adc",
      "championId": 22, "championName": "Ashe", "position": "ADC",
      "gameName": "FarmAndGo", "tagLine": "EUW", "isSelf": False, "iconB64": None},
@@ -88,16 +101,31 @@ def _connect(sender: Sender) -> bool:
     return False
 
 
-def _install_click_handler(sender: Sender) -> None:
-    """Répond aux clics sur un joueur avec de fausses infos."""
+def _install_click_handler(sender: Sender, riot, lcu, real_puuids: set) -> None:
+    """Répond aux clics : vraies stats pour maxoulefou, fictives sinon."""
     def handle(message: dict):
-        if message.get("type") != "request_player_info":
+        msg_type = message.get("type")
+
+        if msg_type == "request_icon":
+            # Vraie icône si le client League est ouvert, sinon None (placeholder).
+            champ_id = int(message.get("championId") or 0)
+            sender.send_safe(msg_icon(champ_id, icon_b64(lcu, champ_id)))
             return
+
+        if msg_type != "request_player_info":
+            return
+
         puuid = message.get("puuid", "")
-        info = dict(FAKE_INFO.get(puuid, {"error": "Joueur inconnu (simu)."}))
-        info["puuid"] = puuid
-        info["championId"] = message.get("championId")
-        print(f"[simu] Demande d'infos joueur {puuid} -> réponse envoyée")
+        champion_id = int(message.get("championId") or 0)
+        if riot and puuid in real_puuids:
+            # Notre compte : vraies données via l'API Web.
+            print(f"[simu] Infos RÉELLES pour {puuid[:12]}… (API Riot)")
+            info = build_player_info(lcu, riot, puuid, None, champion_id)
+        else:
+            info = dict(FAKE_INFO.get(puuid, {"error": "Joueur inconnu (simu)."}))
+            info["puuid"] = puuid
+            info["championId"] = message.get("championId")
+
         sender.send_safe(msg_player_info(puuid, info))
     sender.start_receiver(handle)
 
@@ -120,12 +148,47 @@ def _phase_game(sender: Sender, interval: float, duration: int) -> None:
         time.sleep(interval)
 
 
-def run_simulation(url: str, interval: float = 1.0,
-                   scenario: str = "full", duration: int | None = None) -> None:
+def _setup_real_player(platform: str, regional: str) -> tuple:
+    """Prépare l'API Web pour maxoulefou : (riot, lcu, {vrais_puuids}).
+
+    Si la clé est absente ou le Riot ID introuvable, renvoie (None, lcu, set()).
+    """
+    load_dotenv(ENV_PATH)
+    api_key = os.getenv("RIOT_API_KEY")
+    lcu = LcuClient()  # sert uniquement aux noms de champions (via Community Dragon)
+    if not api_key:
+        print("[simu] Pas de RIOT_API_KEY : maxoulefou aura des stats fictives.")
+        return None, lcu, set()
+
+    riot = RiotWeb(api_key, platform, regional)
+    real_puuids = set()
+    real_puuid = riot.resolve_puuid(*REAL_PLAYER)
+    if real_puuid:
+        # On injecte le vrai PUUID dans le joueur 'isSelf' de l'équipe.
+        for player in FAKE_TEAM:
+            if player.get("isSelf"):
+                player["puuid"] = real_puuid
+        real_puuids.add(real_puuid)
+        print(f"[simu] maxoulefou résolu -> vraies stats au clic.")
+    else:
+        print("[simu] maxoulefou introuvable via l'API : stats fictives.")
+    return riot, lcu, real_puuids
+
+
+def run_simulation(url: str, interval: float = 1.0, scenario: str = "full",
+                   duration: int | None = None,
+                   platform: str = "euw1", regional: str = "europe") -> None:
     sender = Sender(url)
     if not _connect(sender):
         return
-    _install_click_handler(sender)
+
+    # Vraies stats pour maxoulefou uniquement dans les scénarios avec sélection.
+    if scenario in ("champselect", "full"):
+        riot, lcu, real_puuids = _setup_real_player(platform, regional)
+    else:
+        riot, lcu, real_puuids = None, LcuClient(), set()
+
+    _install_click_handler(sender, riot, lcu, real_puuids)
 
     try:
         if scenario == "champselect":
