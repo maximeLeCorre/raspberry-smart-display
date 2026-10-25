@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 from champ_select import build_champ_select_payload, build_player_info, icon_b64
 from detector import is_any_process_running
 from lcu import LcuClient
-from riot_api import get_all_game_data, summarize
+from riot_api import get_all_game_data, summarize_full
 from riot_web import RiotWeb
 from sender import Sender, msg_data, msg_icon, msg_player_info, msg_set_mode
 
@@ -136,7 +136,7 @@ def run_real(url: str, config: dict) -> None:
                 # Données live : disponibles une fois réellement chargé en jeu.
                 data = get_all_game_data()
                 if data is not None:
-                    sender.send_safe(msg_data("lol", summarize(data)))
+                    sender.send_safe(msg_data("lol", summarize_full(data, lcu.champion_id_by_name)))
 
             else:
                 # Menu, lobby, file d'attente, client fermé... -> mode par défaut.

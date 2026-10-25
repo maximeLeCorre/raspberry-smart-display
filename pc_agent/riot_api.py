@@ -83,3 +83,83 @@ def summarize(data: dict) -> dict:
         "level": int(level or 0),
         "score": {"order": order, "chaos": chaos},
     }
+
+
+def _format_event(e: dict) -> str | None:
+    """Transforme un événement de la Live Client API en texte français court.
+
+    Renvoie None pour les événements non affichés (GameStart, MinionsSpawning...).
+    """
+    name = e.get("EventName")
+    k = e.get("KillerName", "")
+    if name == "ChampionKill":
+        return f"{k} a tué {e.get('VictimName', '')}"
+    if name == "Multikill":
+        return f"{k} multikill x{e.get('KillStreak', '')}"
+    if name == "FirstBlood":
+        return f"First Blood : {e.get('Recipient', '')}"
+    if name == "Ace":
+        return f"ACE ({e.get('AcingTeam', '')})"
+    if name == "DragonKill":
+        return f"{k} a pris le Dragon {e.get('DragonType', '')}".strip()
+    if name == "BaronKill":
+        return f"{k} a pris le Baron Nashor"
+    if name == "HeraldKill":
+        return f"{k} a pris le Héraut"
+    if name == "TurretKilled":
+        return f"Tourelle détruite ({k})"
+    if name == "InhibKilled":
+        return f"Inhibiteur détruit ({k})"
+    return None
+
+
+def summarize_full(data: dict, id_resolver=None) -> dict:
+    """Résumé complet de la partie : scoreboard des 10 joueurs + événements.
+
+    `id_resolver` : fonction nom_de_champion -> championId (ex. la LCU), pour
+    permettre au Pi d'afficher les icônes. Optionnel.
+    """
+    game_data = data.get("gameData", {})
+    active = data.get("activePlayer", {})
+    me_name = active.get("riotIdGameName") or active.get("summonerName")
+
+    players = []
+    team_scores = {"order": 0, "chaos": 0}
+    for p in data.get("allPlayers", []) or []:
+        scores = p.get("scores", {})
+        team = p.get("team", "")
+        kills = scores.get("kills", 0)
+        if team == "ORDER":
+            team_scores["order"] += kills
+        elif team == "CHAOS":
+            team_scores["chaos"] += kills
+        name = p.get("riotIdGameName") or p.get("summonerName", "")
+        champion = p.get("championName", "")
+        players.append({
+            "name": name,
+            "champion": champion,
+            "championId": (id_resolver(champion) if id_resolver else 0) or 0,
+            "position": p.get("position", ""),
+            "team": team,
+            "k": kills, "d": scores.get("deaths", 0), "a": scores.get("assists", 0),
+            "cs": int(scores.get("creepScore", 0) or 0),
+            "level": p.get("level", 0),
+            "isDead": bool(p.get("isDead", False)),
+            "respawn": round(p.get("respawnTimer", 0) or 0),
+            "isSelf": name == me_name,
+        })
+
+    events = []
+    for e in (data.get("events", {}).get("Events", []) or []):
+        txt = _format_event(e)
+        if txt:
+            events.append(txt)
+    events = events[-12:][::-1]  # les plus récents d'abord
+
+    return {
+        "game_time": int(game_data.get("gameTime", 0)),
+        "scores": team_scores,
+        "players": players,
+        "events": events,
+        "self": {"gold": int(active.get("currentGold", 0) or 0)},
+    }
