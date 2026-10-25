@@ -52,11 +52,16 @@ PC → Pi :
 - `{"type":"data","mode":"lol","payload":{...}}`
 - `{"type":"data","mode":"champselect","payload":{"phase":"champselect","players":[...]}}`
 - `{"type":"player_info","puuid":"...","info":{...}}` (réponse à une demande)
-- `{"type":"icon","championId":...,"iconB64":"..."}` (réponse à une demande d'icône)
+- `{"type":"icon","championId":...,"iconB64":"..."}` (réponse à request_icon)
+- `{"type":"splash","championId":...,"splashB64":"..."}` (réponse à request_splash)
 
 Pi → PC :
 - `{"type":"request_player_info","puuid":"...","summonerId":...,"championId":...}`
 - `{"type":"request_icon","championId":...}`
+- `{"type":"request_splash","championId":...}`
+
+Modes pilotés par l'agent via `set_mode` : `default`, `queue`, `champselect`,
+`lol`, `postgame`. Les `data` portent le `mode` cible.
 
 Interne (synthétisé par le serveur Pi, pas envoyé par l'agent) :
 - `{"type":"_connected"}` / `{"type":"_disconnected"}`
@@ -70,9 +75,16 @@ La déconnexion du client fait revenir le Pi au **mode par défaut**.
   Repli couleur unie si le PNG manque.
 - `default_mode.py` : heure/date, placeholder météo, et un **badge « Rejoindre »**
   (voir plus bas).
-- `champ_select_mode.py` : grille de notre équipe (icône + pseudo + position),
-  clic sur un joueur → `app.request_player_info(...)` → panneau de détails.
-- `lol_mode.py` : résumé de la partie en direct (temps, KDA, or, CS, score).
+- `queue_mode.py` : file d'attente (temps + estimé) et ready-check (compte à rebours).
+- `champ_select_mode.py` : grille de notre équipe, **timer de phase**, **bans**
+  (panneau par défaut), clic → détails joueur + **splash art** du champion.
+- `lol_mode.py` : scoreboard 5v5 en direct (KDA/CS/niveau, timers de mort,
+  bandeau d'événements, or).
+- `postgame_mode.py` : bilan de la dernière partie (victoire/défaite, KDA, etc.).
+
+Icônes/splash : réclamés à la demande (request_icon/request_splash) et mis en
+cache côté Pi. Splash = art de chargement **Data Dragon** par alias
+(`https://ddragon.leagueoflegends.com/cdn/img/champion/loading/{alias}_0.jpg`).
 
 Ajouter un mode : hériter de `Mode`, définir `name`/`background_name`,
 implémenter `draw()` (et `update_data()` si réseau) ; l'enregistrer dans
@@ -144,11 +156,13 @@ niveau / maîtrise / winrate / mains via l'API Web.
 
 ## Détection de phase (agent, `main.py`)
 
-`gameflow_phase` pilote le mode : menu/lobby/file → `default` ;
-`ChampSelect` → `champselect` ; `InProgress` → `lol` (via Live Client Data API).
-Mise à jour ≤ 1 fois / `update_interval` (config, 1–2 s).
+`gameflow_phase` pilote le mode : `Matchmaking`/`ReadyCheck` → `queue` ;
+`ChampSelect` → `champselect` ; `InProgress` → `lol` (via Live Client Data API) ;
+`WaitingForStats`/`PreEndOfGame`/`EndOfGame` → `postgame` (historique LCU) ;
+menu/lobby → `default`. Mise à jour ≤ 1 fois / `update_interval` (config, 1–2 s).
+Les builders queue/postgame sont dans `phases.py`.
 
-Mode simulation (`simulator.py`) : scénarios `full`/`champselect`/`game` avec
+Mode simulation (`simulator.py`) : scénarios `full`/`champselect`/`game`/`queue`/`postgame` avec
 fausses données. Le joueur **maxoulefou** (notre compte, constante `REAL_PLAYER`)
 renvoie de **vraies** stats au clic via l'API Web (si `RIOT_API_KEY` présent),
 sans lancer de partie ; les autres joueurs restent fictifs.
@@ -172,6 +186,13 @@ instancier `App`, piloter les handlers (`_handle_network`, `do_action`,
 `current.draw`) et vérifier l'état. On peut sauver une capture avec
 `pygame.image.save(app.surface, "x.png")` pour inspecter le rendu. Les scripts
 de diagnostic sont temporaires (préfixe `_`) et supprimés après usage.
+
+## Fonds d'écran (design)
+
+Les PNG de `pi_display/assets/` sont produits depuis **`design/backgrounds.html`**
+(SVG réglable, style hextech) rasterisé par **`design/rasterize.py`** (Playwright
+headless, **outil dev uniquement**, pas sur le Pi). `tools/gen_backgrounds.py`
+(Pillow) reste un repli procédural sans dépendance.
 
 ## Git / GitHub
 
