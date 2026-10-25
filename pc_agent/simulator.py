@@ -163,6 +163,24 @@ def _phase_champselect(sender: Sender, interval: float, duration: int) -> None:
         time.sleep(interval)
 
 
+def _phase_queue(sender: Sender, interval: float, duration: int) -> None:
+    print(f"[simu] File d'attente ({duration}s) puis ready-check.")
+    sender.send_safe(msg_set_mode("queue"))
+    start = time.time()
+    while time.time() - start < duration:
+        t = int(time.time() - start)
+        sender.send_safe(msg_data("queue", {"state": "searching",
+                                            "timeInQueue": t, "estimated": 95}))
+        time.sleep(interval)
+    for remaining in range(10, -1, -1):
+        sender.send_safe(msg_data("queue", {"state": "readycheck",
+                                            "remaining": remaining, "response": "None"}))
+        time.sleep(1)
+    sender.send_safe(msg_data("queue", {"state": "readycheck",
+                                        "remaining": 0, "response": "Accepted"}))
+    time.sleep(1)
+
+
 def _phase_game(sender: Sender, interval: float, duration: int) -> None:
     print(f"[simu] Partie en cours ({duration}s).")
     sender.send_safe(msg_set_mode("lol"))
@@ -219,10 +237,13 @@ def run_simulation(url: str, interval: float = 1.0, scenario: str = "full",
             _phase_champselect(sender, interval, duration or 10 ** 9)
         elif scenario == "game":
             _phase_game(sender, interval, duration or 10 ** 9)
+        elif scenario == "queue":
+            _phase_queue(sender, interval, duration or 8)
         else:  # full
             print("[simu] Scénario complet. Ctrl+C pour arrêter.")
             sender.send_safe(msg_set_mode("default"))
             time.sleep(duration or 5)
+            _phase_queue(sender, interval, duration or 8)
             _phase_champselect(sender, interval, duration or 20)
             _phase_game(sender, interval, duration or 20)
             sender.send_safe(msg_set_mode("default"))
