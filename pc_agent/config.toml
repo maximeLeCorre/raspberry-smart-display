@@ -1,0 +1,16 @@
+# Configuration de l'agent PC.
+# Pour viser le vrai Pi : remplacer host par l'IP du Pi sur ton réseau local.
+
+[pi]
+host = "127.0.0.1"   # en test local : le Pi-display tourne sur la même machine
+port = 8765
+
+[agent]
+# Intervalle entre deux mises à jour envoyées au Pi (secondes).
+# Le cahier des charges demande 1 à 2 s max.
+update_interval = 1.0
+
+[lol]
+# Noms des processus à surveiller (Windows).
+client_process = "LeagueClientUx.exe"
+game_process = "League of Legends.exe"
