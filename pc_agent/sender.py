@@ -7,6 +7,9 @@ sans asyncio. Gère une (re)connexion paresseuse et un envoi sûr.
 from __future__ import annotations
 
 import json
+import threading
+import time
+from typing import Callable
 
 from websockets.sync.client import connect
 
@@ -15,6 +18,7 @@ class Sender:
     def __init__(self, url: str):
         self.url = url
         self._ws = None
+        self._receiver_started = False
 
     @property
     def connected(self) -> bool:
@@ -55,6 +59,36 @@ class Sender:
                 print(f"[envoi] Échec d'envoi : {exc}")
         return False
 
+    def start_receiver(self, on_message: Callable[[dict], None]) -> None:
+        """Démarre un thread qui écoute les messages venant du Pi (ex. demande
+        d'infos joueur) et appelle `on_message` pour chacun."""
+        if self._receiver_started:
+            return
+        self._receiver_started = True
+
+        def loop():
+            while True:
+                ws = self._ws
+                if ws is None:
+                    time.sleep(0.2)
+                    continue
+                try:
+                    raw = ws.recv()
+                except Exception:
+                    time.sleep(0.2)
+                    continue
+                try:
+                    data = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if isinstance(data, dict):
+                    try:
+                        on_message(data)
+                    except Exception as exc:
+                        print(f"[envoi] Erreur de traitement d'un message reçu : {exc}")
+
+        threading.Thread(target=loop, name="ws-receiver", daemon=True).start()
+
 
 # Raccourcis de construction des messages du protocole.
 def msg_set_mode(mode: str) -> dict:
@@ -63,3 +97,7 @@ def msg_set_mode(mode: str) -> dict:
 
 def msg_data(mode: str, payload: dict) -> dict:
     return {"type": "data", "mode": mode, "payload": payload}
+
+
+def msg_player_info(puuid: str, info: dict) -> dict:
+    return {"type": "player_info", "puuid": puuid, "info": info}

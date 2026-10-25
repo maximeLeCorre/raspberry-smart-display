@@ -1,4 +1,5 @@
 # Dépendances de l'agent PC (Windows)
-psutil>=5.9        # détection des processus (client + jeu)
-requests>=2.31     # lecture de la Live Client Data API locale de Riot
-websockets>=12.0   # envoi des messages au Pi (client WebSocket synchrone)
+psutil>=5.9          # détection des processus + lecture des args LCU
+requests>=2.31       # Live Client Data API, LCU API, API Web Riot
+websockets>=12.0     # WebSocket bidirectionnel avec le Pi (client synchrone)
+python-dotenv>=1.0   # chargement de la clé RIOT_API_KEY depuis .env

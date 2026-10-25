@@ -1,0 +1,129 @@
+"""Construction des données de sélection de champions envoyées au Pi,
+et des détails d'un joueur (au clic).
+
+On combine :
+  - la LCU (session de sélection, icônes de champions, pseudos de notre équipe) ;
+  - l'API Web Riot (rang, niveau, winrate, champions mains) pour enrichir.
+"""
+
+from __future__ import annotations
+
+import base64
+
+from lcu import LcuClient
+from riot_web import RiotWeb
+
+# Positions LoL -> libellé court français.
+POSITIONS = {
+    "top": "Top", "jungle": "Jungle", "middle": "Mid",
+    "bottom": "ADC", "utility": "Support", "": "",
+}
+
+
+def _icon_b64(lcu: LcuClient, champion_id: int) -> str | None:
+    raw = lcu.champion_icon(champion_id)
+    if not raw:
+        return None
+    return base64.b64encode(raw).decode("ascii")
+
+
+def build_champ_select_payload(lcu: LcuClient, riot: RiotWeb | None = None) -> dict | None:
+    """Résumé de la sélection pour NOTRE équipe (les 5, dont nous).
+
+    Renvoie None si on n'est pas en sélection.
+    """
+    session = lcu.champ_select_session()
+    if not session:
+        return None
+
+    my_cell = session.get("localPlayerCellId")
+    players = []
+    for cell in session.get("myTeam", []):
+        # championId = pick verrouillé ; sinon l'intention de pick.
+        champ_id = cell.get("championId") or cell.get("championPickIntentId") or 0
+
+        game_name = cell.get("gameName", "") or ""
+        tag_line = cell.get("tagLine", "") or ""
+        puuid = cell.get("puuid", "") or ""
+
+        # Le pseudo est parfois masqué dans la session : on tente l'API Web.
+        if not game_name and puuid and riot and riot.enabled:
+            summoner = riot.summoner_by_puuid(puuid)
+            # (summoner-v4 ne renvoie pas le Riot ID ; on laisse vide si inconnu)
+
+        players.append({
+            "cellId": cell.get("cellId"),
+            "summonerId": cell.get("summonerId"),
+            "puuid": puuid,
+            "championId": champ_id,
+            "championName": lcu.champion_name(champ_id),
+            "position": POSITIONS.get((cell.get("assignedPosition") or "").lower(),
+                                      cell.get("assignedPosition", "")),
+            "gameName": game_name,
+            "tagLine": tag_line,
+            "isSelf": cell.get("cellId") == my_cell,
+            "iconB64": _icon_b64(lcu, champ_id),
+        })
+
+    return {"phase": "champselect", "players": players}
+
+
+def build_player_info(lcu: LcuClient, riot: RiotWeb | None,
+                      puuid: str, summoner_id, champion_id: int) -> dict:
+    """Détails d'un joueur (au clic). Champs manquants = None/absents.
+
+    Sans clé Riot valide, on renvoie au moins ce qu'on a (souvent peu pour les
+    autres joueurs) ; l'affichage s'adapte.
+    """
+    info: dict = {"puuid": puuid, "championId": champion_id,
+                  "championName": lcu.champion_name(champion_id)}
+
+    if not (riot and riot.enabled and puuid):
+        info["error"] = "Clé Riot absente ou joueur sans PUUID."
+        return info
+
+    # Niveau d'invocateur.
+    summoner = riot.summoner_by_puuid(puuid)
+    if summoner:
+        info["summonerLevel"] = summoner.get("summonerLevel")
+
+    # Rang (solo & flex).
+    entries = riot.league_entries_by_puuid(puuid)
+    if entries:
+        ranks = {}
+        for e in entries:
+            queue = e.get("queueType", "")
+            label = {"RANKED_SOLO_5x5": "Solo/Duo",
+                     "RANKED_FLEX_SR": "Flex"}.get(queue, queue)
+            ranks[label] = {
+                "tier": e.get("tier"), "rank": e.get("rank"),
+                "lp": e.get("leaguePoints"),
+                "wins": e.get("wins"), "losses": e.get("losses"),
+            }
+        info["ranks"] = ranks
+
+    # Maîtrise sur le champion sélectionné.
+    if champion_id:
+        mastery = riot.mastery_on_champion(puuid, champion_id)
+        if mastery:
+            info["championMastery"] = {
+                "level": mastery.get("championLevel"),
+                "points": mastery.get("championPoints"),
+            }
+
+    # Champions mains (top maîtrise).
+    top = riot.mastery_top(puuid, count=3)
+    if top:
+        info["mains"] = [
+            {"championId": m.get("championId"),
+             "championName": lcu.champion_name(m.get("championId", 0)),
+             "points": m.get("championPoints")}
+            for m in top
+        ]
+
+    # Winrate récent (quelques parties seulement, car coûteux).
+    winrate = riot.recent_winrate(puuid, count=8)
+    if winrate:
+        info["recent"] = winrate
+
+    return info
