@@ -59,12 +59,17 @@ class ChampSelectMode(Mode):
         self.players: list[dict] = []
         self.selected_puuid: str | None = None
         self.player_info: dict[str, dict] = {}   # puuid -> détails
+        # Icônes reçues (championId -> surface). Persistant entre sessions :
+        # une icône ne change jamais, inutile de la redemander.
         self._icon_cache: dict[int, pygame.Surface] = {}
+        self._requested: set[int] = set()         # icônes déjà demandées à l'agent
         self._rows: list[tuple[pygame.Rect, dict]] = []  # zones cliquables
         self._dirty = True  # force un premier rendu
 
     def enter(self) -> None:
         self._dirty = True
+        # Nouvelle session : on pourra re-demander les icônes encore manquantes.
+        self._requested.clear()
 
     def update_data(self, payload: dict) -> None:
         players = payload.get("players", [])
@@ -221,11 +226,19 @@ class ChampSelectMode(Mode):
         if champ_id in self._icon_cache:
             return self._icon_cache[champ_id]
 
-        surface = self._decode_icon(player.get("iconB64"))
-        if surface is None:
-            surface = self._placeholder_icon(player.get("championName") or "?")
-        self._icon_cache[champ_id] = surface
-        return surface
+        # Icône pas encore reçue : on la demande à l'agent (une seule fois) et
+        # on affiche un placeholder en attendant qu'elle arrive.
+        if champ_id > 0 and champ_id not in self._requested:
+            self._requested.add(champ_id)
+            self.app.request_icon(champ_id)
+        return self._placeholder_icon(player.get("championName") or "?")
+
+    def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:
+        """Reçoit une icône demandée à l'agent ; la met en cache et redessine."""
+        surface = self._decode_icon(icon_b64)
+        if surface is not None:
+            self._icon_cache[champion_id] = surface
+            self._dirty = True
 
     def _decode_icon(self, icon_b64) -> pygame.Surface | None:
         if not icon_b64:

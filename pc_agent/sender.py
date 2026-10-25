@@ -101,3 +101,7 @@ def msg_data(mode: str, payload: dict) -> dict:
 
 def msg_player_info(puuid: str, info: dict) -> dict:
     return {"type": "player_info", "puuid": puuid, "info": info}
+
+
+def msg_icon(champion_id, icon_b64) -> dict:
+    return {"type": "icon", "championId": champion_id, "iconB64": icon_b64}

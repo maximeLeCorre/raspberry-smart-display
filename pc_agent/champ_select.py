@@ -20,7 +20,8 @@ POSITIONS = {
 }
 
 
-def _icon_b64(lcu: LcuClient, champion_id: int) -> str | None:
+def icon_b64(lcu: LcuClient, champion_id: int) -> str | None:
+    """Icône d'un champion en base64 (demandée à la carte par le Pi)."""
     raw = lcu.champion_icon(champion_id)
     if not raw:
         return None
@@ -69,7 +70,8 @@ def build_champ_select_payload(lcu: LcuClient, riot: RiotWeb | None = None) -> d
             "gameName": game_name,
             "tagLine": tag_line,
             "isSelf": cell.get("cellId") == my_cell,
-            "iconB64": _icon_b64(lcu, champ_id),
+            # Les icônes ne sont plus envoyées ici : le Pi les réclame une à une
+            # (message request_icon) et ne les reçoit qu'une fois chacune.
         })
 
     return {"phase": "champselect", "players": players}
