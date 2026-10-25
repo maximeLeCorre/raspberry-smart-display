@@ -73,7 +73,8 @@ class LcuClient:
         self.token: str | None = None
         self.session = requests.Session()
         self.session.verify = False
-        self._champions: dict[int, str] | None = None  # cache id -> nom
+        self._champions: dict[int, str] | None = None     # cache id -> nom
+        self._champion_ids: dict[str, int] | None = None  # cache nom (minuscule) -> id
 
     @property
     def connected(self) -> bool:
@@ -160,8 +161,17 @@ class LcuClient:
             self._load_champion_summary()
         return (self._champions or {}).get(champion_id, "")
 
+    def champion_id_by_name(self, name: str) -> int:
+        """Id d'un champion depuis son nom affiché (0 si inconnu)."""
+        if not name:
+            return 0
+        if self._champion_ids is None:
+            self._load_champion_summary()
+        return (self._champion_ids or {}).get(name.lower(), 0)
+
     def _load_champion_summary(self) -> None:
         self._champions = {}
+        self._champion_ids = {}
         try:
             resp = requests.get(CHAMPION_SUMMARY_URL, timeout=8)
         except requests.RequestException:
@@ -174,5 +184,8 @@ class LcuClient:
             return
         for champ in data:
             cid = champ.get("id")
+            name = champ.get("name", "")
             if isinstance(cid, int) and cid > 0:
-                self._champions[cid] = champ.get("name", "")
+                self._champions[cid] = name
+                if name:
+                    self._champion_ids[name.lower()] = cid

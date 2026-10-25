@@ -75,17 +75,41 @@ FAKE_INFO = {
 }
 
 
+# Équipe adverse fictive (pour le scoreboard de partie).
+FAKE_ENEMIES = [
+    ("Greed", "Zed", 238, "Mid"), ("409", "Darius", 122, "Top"),
+    ("Tacadoll", "Master Yi", 11, "Jungle"), ("Bober", "Jinx", 222, "ADC"),
+    ("Azaka", "Lux", 99, "Support"),
+]
+
+
 def _fake_game_payload(elapsed: int) -> dict:
-    kills = elapsed // 60
-    deaths = elapsed // 90
-    assists = elapsed // 40
+    """Scoreboard complet fictif qui évolue dans le temps (10 joueurs)."""
+    step = elapsed // 25
+
+    def row(name, champ, cid, pos, team, is_self=False, dead=False):
+        return {
+            "name": name, "champion": champ, "championId": cid, "position": pos,
+            "team": team, "k": step + (1 if is_self else 0), "d": step // 2,
+            "a": step + 1, "cs": elapsed // 3, "level": min(18, 1 + elapsed // 45),
+            "isDead": dead, "respawn": 8 if dead else 0, "isSelf": is_self,
+        }
+
+    dead_self = (elapsed // 5) % 8 == 0  # on "meurt" de temps en temps
+    order = [row(p["gameName"], p["championName"], p["championId"],
+                 p["position"], "ORDER", is_self=p.get("isSelf", False),
+                 dead=p.get("isSelf", False) and dead_self)
+             for p in FAKE_TEAM]
+    chaos = [row(n, c, cid, pos, "CHAOS") for (n, c, cid, pos) in FAKE_ENEMIES]
+
+    events = ["maxoulefou a tué Greed", "Dragon Infernal pris par ORDER",
+              "First Blood : Greed", "Tourelle détruite (maxoulefou)"]
     return {
         "game_time": elapsed,
-        "kda": [kills, deaths, assists],
-        "gold": 500 + elapsed * 8,
-        "cs": elapsed // 3,
-        "level": min(18, 1 + elapsed // 45),
-        "score": {"order": kills + 2, "chaos": deaths + assists},
+        "scores": {"order": 5 * step, "chaos": 3 * step},
+        "players": order + chaos,
+        "events": events[:1 + elapsed // 12],
+        "self": {"gold": 500 + elapsed * 8},
     }
 
 

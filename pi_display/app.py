@@ -250,10 +250,11 @@ class App:
                 champ_select.set_player_info(msg.get("puuid", ""), msg.get("info", {}))
 
         elif msg_type == "icon":
-            # Réponse à une demande d'icône de champion (mode sélection).
-            champ_select = self.modes.get(ChampSelectMode.name)
-            if champ_select is not None:
-                champ_select.set_champion_icon(msg.get("championId"), msg.get("iconB64"))
+            # Réponse à une demande d'icône : on la transmet aux modes qui en
+            # affichent (sélection et partie). Chacun garde son propre cache.
+            for mode in self.modes.values():
+                if hasattr(mode, "set_champion_icon"):
+                    mode.set_champion_icon(msg.get("championId"), msg.get("iconB64"))
 
     def _draw_debug(self, dirty):
         rect = pygame.Rect(0, 0, 340, 58)
