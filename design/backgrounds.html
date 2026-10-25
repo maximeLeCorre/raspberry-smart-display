@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Maquette des fonds — écran 5"</title>
+<style>
+  body { background:#0b0d12; color:#cfd6e4; font-family:system-ui, sans-serif; margin:24px; }
+  h1 { font-weight:600; font-size:20px; }
+  p { color:#8a93a6; max-width:820px; }
+  .panel { margin:22px 0; }
+  .label { font-size:13px; color:#aab3c6; margin-bottom:6px; letter-spacing:.5px; }
+  svg { display:block; border-radius:6px; box-shadow:0 4px 24px rgba(0,0,0,.5); }
+</style>
+</head>
+<body>
+  <h1>Maquette des fonds (800×480)</h1>
+  <p>
+    Trois fonds pour les modes <b>défaut</b>, <b>sélection</b> et <b>partie</b>.
+    Pour ajuster : modifie l'objet <code>CONFIG</code> en haut du script
+    (couleurs, intensité du halo/vignette, ornements). La rasterisation en PNG
+    (<code>design/rasterize.py</code>) produit les fichiers de
+    <code>pi_display/assets/</code>.
+  </p>
+
+  <div class="panel"><div class="label">DÉFAUT (default.png)</div>
+    <svg id="bg-default" width="800" height="480" viewBox="0 0 800 480"></svg></div>
+  <div class="panel"><div class="label">SÉLECTION (champselect.png)</div>
+    <svg id="bg-champselect" width="800" height="480" viewBox="0 0 800 480"></svg></div>
+  <div class="panel"><div class="label">PARTIE (lol.png)</div>
+    <svg id="bg-lol" width="800" height="480" viewBox="0 0 800 480"></svg></div>
+
+<script>
+// ----- RÉGLAGES (ajuste ici) ---------------------------------------------
+const CONFIG = {
+  default:     { top:"#0d1526", bottom:"#152140", glow:"#4f84d8", line:"#5f86c0", glowA:0.40, vigA:0.55 },
+  champselect: { top:"#0c1020", bottom:"#1a1533", glow:"#c8922f", line:"#d2af5f", glowA:0.38, vigA:0.55 },
+  lol:         { top:"#0a0f1c", bottom:"#17101c", glow:"#b84a3a", line:"#b4675a", glowA:0.34, vigA:0.58 },
+};
+const HEX = { show:true, radii:[270,205,140], opacity:0.10 };
+const DOTS = { show:true, step:26, opacity:0.05 };
+const BRACKETS = { show:true, inset:22, arm:66, width:2 };
+// -------------------------------------------------------------------------
+
+function hexPath(cx, cy, r) {
+  let pts = [];
+  for (let i=0; i<6; i++) {
+    const a = Math.PI/180 * (60*i - 90);       // pointy-top
+    pts.push([cx + r*Math.cos(a), cy + r*Math.sin(a)]);
+  }
+  return "M" + pts.map(p => p[0].toFixed(1)+","+p[1].toFixed(1)).join("L") + "Z";
+}
+
+function buildSVG(key, c) {
+  const W=800, H=480, g=key;
+  const defs = `
+    <defs>
+      <linearGradient id="grad-${g}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="${c.top}"/><stop offset="1" stop-color="${c.bottom}"/>
+      </linearGradient>
+      <radialGradient id="glow-${g}" cx="50%" cy="-6%" r="70%">
+        <stop offset="0" stop-color="${c.glow}" stop-opacity="${c.glowA}"/>
+        <stop offset="60%" stop-color="${c.glow}" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="vig-${g}" cx="50%" cy="42%" r="72%">
+        <stop offset="55%" stop-color="#000" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#000" stop-opacity="${c.vigA}"/>
+      </radialGradient>
+      <pattern id="dots-${g}" width="${DOTS.step}" height="${DOTS.step}" patternUnits="userSpaceOnUse">
+        <circle cx="1.5" cy="1.5" r="1.1" fill="#ffffff" opacity="${DOTS.opacity}"/>
+      </pattern>
+    </defs>`;
+
+  const hexes = HEX.show ? `<g fill="none" stroke="${c.line}" stroke-opacity="${HEX.opacity}" stroke-width="1.5">`
+      + HEX.radii.map(r => `<path d="${hexPath(400,240,r)}"/>`).join("") + `</g>` : "";
+  const dots = DOTS.show ? `<rect width="${W}" height="${H}" fill="url(#dots-${g})"/>` : "";
+
+  let brackets = "";
+  if (BRACKETS.show) {
+    const i=BRACKETS.inset, a=BRACKETS.arm, w=W, h=H;
+    const L = (x1,y1,x2,y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+    brackets = `<g stroke="${c.line}" stroke-opacity="0.55" stroke-width="${BRACKETS.width}">`
+      + L(i,i,i+a,i)+L(i,i,i,i+a)                       // haut-gauche
+      + L(w-i,i,w-i-a,i)+L(w-i,i,w-i,i+a)               // haut-droit
+      + L(i,h-i,i+a,h-i)+L(i,h-i,i,h-i-a)               // bas-gauche
+      + L(w-i,h-i,w-i-a,h-i)+L(w-i,h-i,w-i,h-i-a)       // bas-droit
+      + `</g>`;
+  }
+
+  return defs
+    + `<rect width="${W}" height="${H}" fill="url(#grad-${g})"/>`
+    + dots + hexes
+    + `<rect width="${W}" height="${H}" fill="url(#glow-${g})"/>`
+    + brackets
+    + `<rect width="${W}" height="${H}" fill="url(#vig-${g})"/>`
+    + `<rect x="0" y="0" width="${W}" height="2.5" fill="${c.line}" opacity="0.8"/>`;
+}
+
+for (const key of Object.keys(CONFIG)) {
+  document.getElementById("bg-"+key).innerHTML = buildSVG(key, CONFIG[key]);
+}
+</script>
+</body>
+</html>
