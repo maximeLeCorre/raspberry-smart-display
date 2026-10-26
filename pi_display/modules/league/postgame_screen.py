@@ -17,7 +17,7 @@ from inputs import ACTION_BACK
 from screen import Screen
 
 RETOUR_RECT = pygame.Rect(700, 8, 92, 40)
-ICON = 72
+ICON = 44
 
 GREEN = (110, 210, 130)
 RED = (225, 95, 95)
@@ -33,18 +33,18 @@ def _mmss(seconds: int) -> str:
 
 class PostGameScreen(Screen):
     name = "postgame"
-    background_name = "lol.png"
+    background_name = "postgame.png"
     bg_color = (8, 12, 24)
 
     def __init__(self, app):
         super().__init__(app)
-        self.font_title = pygame.font.Font(None, 90)
-        self.font_champ = pygame.font.Font(None, 40)
+        self.font_title = pygame.font.Font(None, 58)
+        self.font_champ = pygame.font.Font(None, 34)
         self.font_kda = pygame.font.Font(None, 72)
         self.font_label = pygame.font.Font(None, 26)
         self.font_value = pygame.font.Font(None, 46)
         self.font_hint = pygame.font.Font(None, 22)
-        self.font_sub = pygame.font.Font(None, 28)
+        self.font_sub = pygame.font.Font(None, 26)
 
         self.data: dict = {}
         self._icon_cache: dict[int, pygame.Surface] = {}
@@ -86,41 +86,43 @@ class PostGameScreen(Screen):
             surface.blit(msg, msg.get_rect(center=(self.width // 2, self.height // 2)))
             return [pygame.Rect(0, 0, self.width, self.height)]
 
+        # Titre dans le bandeau haut (y 14-54).
         win = self.data.get("win")
         title = self.font_title.render("VICTOIRE" if win else "DÉFAITE", True,
                                        GREEN if win else RED)
-        surface.blit(title, title.get_rect(center=(self.width // 2, 66)))
+        surface.blit(title, title.get_rect(center=(self.width // 2, 34)))
 
-        # Champion : icône + nom + file + durée.
+        # Ligne champion (bandeau y 66-106) : icône + nom, centrés en groupe.
         icon = self._get_icon()
-        icon_rect = pygame.Rect(self.width // 2 - 175, 120, ICON, ICON)
-        surface.blit(icon, icon_rect)
-        champ = self.font_champ.render(self.data.get("championName") or "", True, WHITE)
-        surface.blit(champ, (icon_rect.right + 16, 128))
-        sub = self.font_sub.render(
-            f"{self.data.get('queue', '')}  •  {_mmss(self.data.get('duration', 0))}  "
-            f"•  Niv {self.data.get('level', 0)}", True, GREY)
-        surface.blit(sub, (icon_rect.right + 16, 168))
+        champ_name = self.data.get("championName") or ""
+        name_surf = self.font_champ.render(champ_name, True, WHITE)
+        group_w = ICON + 12 + name_surf.get_width()
+        gx = (self.width - group_w) // 2
+        surface.blit(icon, (gx, 64))
+        surface.blit(name_surf, (gx + ICON + 12, 64 + (ICON - name_surf.get_height()) // 2))
 
-        # KDA au centre.
+        # Bloc score central (y 120-316) : sous-titre, gros KDA, label.
+        sub = self.font_sub.render(
+            f"{self.data.get('queue', '')}  •  {_mmss(self.data.get('duration', 0))}"
+            f"  •  Niv {self.data.get('level', 0)}", True, GREY)
+        surface.blit(sub, sub.get_rect(center=(self.width // 2, 150)))
         k, d, a = (self.data.get("kda") or [0, 0, 0])[:3]
         kda = self.font_kda.render(f"{k} / {d} / {a}", True, GOLD)
-        surface.blit(kda, kda.get_rect(center=(self.width // 2, 255)))
+        surface.blit(kda, kda.get_rect(center=(self.width // 2, 215)))
         lbl = self.font_label.render("KDA", True, GREY)
-        surface.blit(lbl, lbl.get_rect(center=(self.width // 2, 300)))
+        surface.blit(lbl, lbl.get_rect(center=(self.width // 2, 262)))
 
-        # Trois stats en bas.
+        # Trois cases stats (centres x 136 / 400 / 664, y 337-466).
         cells = [
             ("CS", str(self.data.get("cs", 0))),
             ("Or", f"{self.data.get('gold', 0)}"),
             ("Dégâts", f"{self.data.get('damage', 0)}"),
         ]
-        for i, (label, value) in enumerate(cells):
-            cx = self.width * (i + 1) // 4
+        for (label, value), cx in zip(cells, (136, 400, 664)):
             v = self.font_value.render(value, True, WHITE)
-            surface.blit(v, v.get_rect(center=(cx, 380)))
+            surface.blit(v, v.get_rect(center=(cx, 392)))
             l = self.font_label.render(label, True, GREY)
-            surface.blit(l, l.get_rect(center=(cx, 420)))
+            surface.blit(l, l.get_rect(center=(cx, 430)))
 
         return [pygame.Rect(0, 0, self.width, self.height)]
 

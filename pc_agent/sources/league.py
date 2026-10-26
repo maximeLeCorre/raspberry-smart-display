@@ -59,7 +59,13 @@ class LeagueSource(Source):
 
     def _lol_payload(self):
         data = get_all_game_data()
-        return summarize_full(data, self.lcu.champion_id_by_name) if data else None
+        if not data:
+            return None
+        # Résolveur de PUUID pour le dossier au clic (rang/winrate/mains) ; None
+        # si l'API Web est désactivée (pas de clé). Mis en cache -> gratuit après
+        # le 1er tick malgré les 10 joueurs.
+        resolver = self.riot.resolve_puuid if (self.riot and self.riot.enabled) else None
+        return summarize_full(data, self.lcu.champion_id_by_name, resolver)
 
     def poll(self):
         phase = self.lcu.gameflow_phase()

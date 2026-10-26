@@ -6,6 +6,15 @@ websockets>=12.0
 # Pas nécessaire au fonctionnement de l'appli une fois les PNG générés.
 Pillow>=10.0
 
+# Lecture du jeton d'auth (DISPLAY_AUTH_TOKEN) depuis .env. Optionnel : sans lui,
+# le jeton est lu via les variables d'environnement (auth désactivée si absent).
+python-dotenv>=1.0
+
+# Génération du certificat TLS auto-signé (script tools/gen_cert.py uniquement).
+# Pas nécessaire au fonctionnement : une fois le certificat généré, le TLS
+# marche sans cryptography. Installer seulement si tu dois (re)générer le cert.
+cryptography>=42.0
+
 # gpiozero n'est installé QUE sur le Raspberry Pi (boutons physiques).
 # L'appli fonctionne sans, avec le fallback clavier. Sur le Pi, décommenter :
 # gpiozero>=2.0

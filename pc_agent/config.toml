@@ -4,6 +4,11 @@
 [pi]
 host = "127.0.0.1"   # en test local : le Pi-display tourne sur la même machine
 port = 8765
+# TLS : doit correspondre au réglage du Pi (pi_display/config.toml [network].tls).
+# true = connexion wss:// en épinglant le certificat du Pi (cert_file = le .crt
+# copié depuis le Pi). false = ws:// en clair. Chemin relatif à la racine du dépôt.
+tls = false
+cert_file = "certs/pi-display.crt"
 
 [agent]
 # Intervalle entre deux mises à jour envoyées au Pi (secondes).

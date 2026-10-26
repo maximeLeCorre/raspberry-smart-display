@@ -30,7 +30,8 @@ DEFAULT_SCREEN = "default"
 
 
 class App:
-    def __init__(self, config, *, fullscreen, scale, monitor, debug, host, port):
+    def __init__(self, config, *, fullscreen, scale, monitor, debug, host, port,
+                 auth_token="", ssl_context=None):
         self.config = config
         self.width = config["display"]["width"]
         self.height = config["display"]["height"]
@@ -51,7 +52,8 @@ class App:
         self.action_queue: "queue.Queue[str]" = queue.Queue()
 
         # Serveur réseau + entrées physiques.
-        self.server = NetworkServer(host, port, self.net_queue)
+        self.server = NetworkServer(host, port, self.net_queue,
+                                    auth_token=auth_token, ssl_context=ssl_context)
         self.server.start()
         self.inputs = InputManager(config, self.action_queue, debug)
 
@@ -246,9 +248,11 @@ class App:
                 self.screens[screen].update_data(payload)
 
         elif msg_type == "player_info":
-            target = self.screens.get("champselect")
-            if target is not None and hasattr(target, "set_player_info"):
-                target.set_player_info(msg.get("puuid", ""), msg.get("info", {}))
+            # Le dossier joueur sert en sélection ET en partie : on route vers
+            # tout écran qui sait l'afficher.
+            for screen in self.screens.values():
+                if hasattr(screen, "set_player_info"):
+                    screen.set_player_info(msg.get("puuid", ""), msg.get("info", {}))
 
         elif msg_type == "icon":
             for screen in self.screens.values():

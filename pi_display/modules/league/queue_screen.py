@@ -22,14 +22,14 @@ def _mmss(seconds: int) -> str:
 
 class QueueScreen(Screen):
     name = "queue"
-    background_name = "champselect.png"
+    background_name = "queue.png"
     bg_color = (12, 16, 30)
 
     def __init__(self, app):
         super().__init__(app)
-        self.font_title = pygame.font.Font(None, 54)
-        self.font_big = pygame.font.Font(None, 150)
-        self.font_sub = pygame.font.Font(None, 36)
+        self.font_title = pygame.font.Font(None, 46)
+        self.font_big = pygame.font.Font(None, 132)
+        self.font_sub = pygame.font.Font(None, 34)
         self.font_hint = pygame.font.Font(None, 24)
         self.data: dict = {}
         self._last_signature = None

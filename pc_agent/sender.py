@@ -15,8 +15,10 @@ from websockets.sync.client import connect
 
 
 class Sender:
-    def __init__(self, url: str):
+    def __init__(self, url: str, auth_token: str = "", ssl_context=None):
         self.url = url
+        self.auth_token = auth_token or ""
+        self.ssl_context = ssl_context
         self._ws = None
         self._receiver_started = False
 
@@ -25,8 +27,14 @@ class Sender:
         return self._ws is not None
 
     def connect(self) -> None:
-        """Ouvre la connexion (lève une exception si le Pi est injoignable)."""
-        self._ws = connect(self.url, open_timeout=3)
+        """Ouvre la connexion (lève une exception si le Pi est injoignable).
+
+        Si un jeton est configuré, on envoie immédiatement le handshake d'auth
+        (premier message attendu par le Pi). Fait à chaque (re)connexion.
+        """
+        self._ws = connect(self.url, open_timeout=3, ssl=self.ssl_context)
+        if self.auth_token:
+            self._ws.send(json.dumps({"type": "auth", "token": self.auth_token}))
         print(f"[envoi] Connecté à {self.url}")
 
     def close(self) -> None:

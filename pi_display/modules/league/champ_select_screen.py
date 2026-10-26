@@ -25,14 +25,16 @@ from screen import Screen
 
 RETOUR_RECT = pygame.Rect(690, 0, 110, 58)
 
-# Colonne gauche (liste des joueurs) et panneau droit (détails).
-LIST_X = 12
-LIST_TOP = 92
-ROW_H = 74
-ROW_W = 414
-ICON = 58
-PANEL_X = 440
-PANEL_W = 800 - PANEL_X - 12
+# Zones alignées sur les cadres du fond (champselect.png).
+# Colonne gauche = liste des joueurs (5 lignes) ; panneau droit = détails.
+LIST_X = 27
+LIST_TOP = 84
+ROW_H = 75
+ROW_W = 428
+ICON = 56
+PANEL_X = 468
+PANEL_TOP = 72
+PANEL_W = 783 - PANEL_X
 
 
 def _format_points(points) -> str:
@@ -134,13 +136,13 @@ class ChampSelectScreen(Screen):
 
         surface.blit(self.bg, (0, 0))
 
+        # Titre dans le bandeau haut (y 12-60) ; timer de phase à gauche.
         title = self.font_title.render("SÉLECTION DE CHAMPIONS", True, (210, 175, 95))
-        surface.blit(title, title.get_rect(midtop=(self.width // 2, 16)))
-        # Timer de phase (ex. « Sélection — 24s »).
+        surface.blit(title, title.get_rect(center=(self.width // 2, 32)))
         phase, left = self.timer.get("phase"), self.timer.get("left")
         if phase and left is not None:
             t = self.font_small.render(f"{phase} — {left}s", True, (160, 180, 210))
-            surface.blit(t, t.get_rect(midtop=(self.width // 2, 56)))
+            surface.blit(t, (18, 24))
         hint = self.font_hint.render("RETOUR", True, (200, 200, 210))
         surface.blit(hint, hint.get_rect(center=RETOUR_RECT.center))
 
@@ -156,12 +158,13 @@ class ChampSelectScreen(Screen):
             selected = (player.get("puuid") or "") == self.selected_puuid
             is_self = player.get("isSelf")
 
-            # Fond de ligne : surligné si sélectionné ou si c'est nous.
+            # Le cadre de ligne est fourni par le fond : on ne dessine qu'un
+            # léger surlignage si la ligne est sélectionnée ou que c'est nous.
             if selected:
                 pygame.draw.rect(surface, (40, 60, 95), row, border_radius=6)
+                pygame.draw.rect(surface, (120, 150, 210), row, width=2, border_radius=6)
             elif is_self:
                 pygame.draw.rect(surface, (28, 40, 64), row, border_radius=6)
-            pygame.draw.rect(surface, (70, 85, 120), row, width=1, border_radius=6)
 
             # Icône du champion.
             icon = self._get_icon(player)
@@ -183,9 +186,8 @@ class ChampSelectScreen(Screen):
             self._rows.append((row, player))
 
     def _draw_detail_panel(self, surface: pygame.Surface) -> None:
-        panel = pygame.Rect(PANEL_X, LIST_TOP, PANEL_W, self.height - LIST_TOP - 12)
-        pygame.draw.rect(surface, (18, 24, 40), panel, border_radius=8)
-        pygame.draw.rect(surface, (70, 85, 120), panel, width=1, border_radius=8)
+        # Le cadre du panneau est dans le fond : on n'écrit que le contenu.
+        panel = pygame.Rect(PANEL_X, PANEL_TOP, PANEL_W, self.height - PANEL_TOP - 13)
 
         x = panel.x + 14
 

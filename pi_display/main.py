@@ -18,7 +18,8 @@ import argparse
 import os
 from pathlib import Path
 
-from config import is_raspberry_pi, load_config
+from config import (build_server_ssl, is_raspberry_pi, load_auth_token,
+                    load_config)
 
 CONFIG_PATH = Path(__file__).resolve().parent / "config.toml"
 
@@ -64,6 +65,8 @@ def main():
         debug=args.debug,
         host=host,
         port=port,
+        auth_token=load_auth_token(),
+        ssl_context=build_server_ssl(config),
     )
     app.run()
 

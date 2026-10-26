@@ -15,6 +15,13 @@ Deux événements internes sont aussi déposés dans la queue pour que l'appli
 réagisse aux (dé)connexions :
     {"type": "_connected"}
     {"type": "_disconnected"}   -> l'appli revient à l'écran par défaut
+
+Authentification (optionnelle) : si un jeton est configuré (DISPLAY_AUTH_TOKEN
+dans .env), le premier message du client DOIT être {"type":"auth","token":...}
+avec le bon jeton, sinon la connexion est refusée et fermée (sans jamais devenir
+le client courant). Jeton vide = authentification désactivée (on accepte tout le
+réseau local, comportement historique pour les tests). Cela protège aussi d'un
+client fantôme : tant qu'il n'est pas authentifié, il n'écrase pas le vrai agent.
 """
 
 from __future__ import annotations
@@ -29,10 +36,16 @@ from websockets.sync.server import serve
 class NetworkServer:
     """Serveur WebSocket léger tournant dans un thread démon."""
 
-    def __init__(self, host: str, port: int, event_queue: "queue.Queue[dict]"):
+    # Délai max accordé au client pour envoyer son message d'auth (secondes).
+    AUTH_TIMEOUT = 5.0
+
+    def __init__(self, host: str, port: int, event_queue: "queue.Queue[dict]",
+                 auth_token: str = "", ssl_context=None):
         self.host = host
         self.port = port
         self.event_queue = event_queue
+        self.auth_token = auth_token or ""
+        self.ssl_context = ssl_context
         self._server = None
         self._thread: threading.Thread | None = None
         # Client connecté courant + verrou (pour envoyer depuis le thread Pygame).
@@ -41,12 +54,15 @@ class NetworkServer:
 
     def start(self) -> None:
         """Démarre le serveur en arrière-plan (non bloquant)."""
-        self._server = serve(self._handler, self.host, self.port)
+        self._server = serve(self._handler, self.host, self.port, ssl=self.ssl_context)
         self._thread = threading.Thread(
             target=self._server.serve_forever, name="websocket-server", daemon=True
         )
         self._thread.start()
-        print(f"[reseau] Serveur WebSocket en écoute sur ws://{self.host}:{self.port}")
+        scheme = "wss" if self.ssl_context else "ws"
+        etat_auth = "jeton requis" if self.auth_token else "ouverte (aucun jeton)"
+        print(f"[reseau] Serveur WebSocket en écoute sur {scheme}://{self.host}:{self.port} "
+              f"(TLS : {'oui' if self.ssl_context else 'non'}, authentification : {etat_auth})")
 
     def stop(self) -> None:
         if self._server is not None:
@@ -67,8 +83,34 @@ class NetworkServer:
         except Exception:
             return False
 
+    def _authenticate(self, websocket) -> bool:
+        """Vérifie le handshake d'auth. Renvoie True si l'accès est accordé.
+
+        Sans jeton configuré : toujours True (accès ouvert). Sinon, on attend le
+        premier message et on exige {"type":"auth","token":<jeton exact>}. La
+        connexion est fermée sans devenir le client courant en cas d'échec.
+        """
+        if not self.auth_token:
+            return True
+        try:
+            first = websocket.recv(timeout=self.AUTH_TIMEOUT)
+            data = json.loads(first)
+            ok = (isinstance(data, dict) and data.get("type") == "auth"
+                  and data.get("token") == self.auth_token)
+        except Exception:
+            ok = False
+        if not ok:
+            try:
+                websocket.send(json.dumps({"type": "auth_result", "ok": False}))
+            except Exception:
+                pass
+            print("[reseau] Connexion refusée (authentification invalide)")
+        return ok
+
     def _handler(self, websocket) -> None:
         """Appelé pour chaque client connecté (dans un thread dédié)."""
+        if not self._authenticate(websocket):
+            return  # socket fermée en sortant ; pas de _connected émis
         with self._lock:
             self._client = websocket
         self.event_queue.put({"type": "_connected"})
