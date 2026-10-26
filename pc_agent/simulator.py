@@ -3,7 +3,8 @@
 Scénarios (--scenario) :
   - full        : défaut -> sélection de champions -> partie -> défaut
   - champselect : reste en sélection de champions (test du clic sur un joueur)
-  - game        : reste en partie (ancien comportement)
+  - game        : reste en partie Faille (timers d'objectifs + dossier au clic)
+  - aram        : reste en partie ARAM (pas d'objectifs ; dossier adverse au clic)
 
 Répond aussi aux demandes d'infos joueur (clic sur un joueur). Le joueur
 « maxoulefou » (notre compte) renvoie de VRAIES stats via l'API Web Riot si
@@ -72,43 +73,83 @@ FAKE_INFO = {
                   "championMastery": {"level": 4, "points": 22000},
                   "mains": [{"championName": "Thresh", "points": 22000}],
                   "recent": {"wins": 3, "losses": 5, "winrate": 38}},
+    # Adversaires (dossier au clic pendant la partie).
+    "puuid-e1": {"summonerLevel": 412, "ranks": {"Solo/Duo": {"tier": "MASTER", "rank": "I", "lp": 120, "wins": 410, "losses": 360}},
+                 "championMastery": {"level": 7, "points": 520000},
+                 "mains": [{"championName": "Zed", "points": 520000},
+                           {"championName": "Yasuo", "points": 300000}],
+                 "recent": {"wins": 7, "losses": 1, "winrate": 88}},
+    "puuid-e2": {"summonerLevel": 188, "ranks": {"Solo/Duo": {"tier": "GOLD", "rank": "IV", "lp": 20, "wins": 80, "losses": 78}},
+                 "mains": [{"championName": "Darius", "points": 180000}],
+                 "recent": {"wins": 4, "losses": 4, "winrate": 50}},
+    "puuid-e3": {"summonerLevel": 90, "ranks": {}, "mains": [{"championName": "Master Yi", "points": 60000}],
+                 "recent": {"wins": 2, "losses": 6, "winrate": 25}},
+    "puuid-e4": {"summonerLevel": 260, "ranks": {"Solo/Duo": {"tier": "PLATINUM", "rank": "II", "lp": 55, "wins": 220, "losses": 200}},
+                 "mains": [{"championName": "Jinx", "points": 240000}],
+                 "recent": {"wins": 5, "losses": 3, "winrate": 63}},
+    "puuid-e5": {"summonerLevel": 140, "ranks": {"Solo/Duo": {"tier": "SILVER", "rank": "III", "lp": 40, "wins": 70, "losses": 72}},
+                 "mains": [{"championName": "Lux", "points": 110000}],
+                 "recent": {"wins": 3, "losses": 4, "winrate": 43}},
 }
 
 
-# Équipe adverse fictive (pour le scoreboard de partie).
+# Équipe adverse fictive (nom, champion, championId, position, puuid).
 FAKE_ENEMIES = [
-    ("Greed", "Zed", 238, "Mid"), ("409", "Darius", 122, "Top"),
-    ("Tacadoll", "Master Yi", 11, "Jungle"), ("Bober", "Jinx", 222, "ADC"),
-    ("Azaka", "Lux", 99, "Support"),
+    ("Greed", "Zed", 238, "Mid", "puuid-e1"),
+    ("409", "Darius", 122, "Top", "puuid-e2"),
+    ("Tacadoll", "Master Yi", 11, "Jungle", "puuid-e3"),
+    ("Bober", "Jinx", 222, "ADC", "puuid-e4"),
+    ("Azaka", "Lux", 99, "Support", "puuid-e5"),
 ]
 
 
-def _fake_game_payload(elapsed: int) -> dict:
+def _fake_objectives(elapsed: int) -> list[dict]:
+    """Objectifs fictifs dont les compteurs défilent (temps de jeu absolu)."""
+    dragon_at = elapsed + (300 - elapsed % 300)          # décompte 5:00 en boucle
+    if elapsed < 1200:
+        baron_at = 1200
+    else:
+        baron_at = elapsed + (360 - (elapsed - 1200) % 360)
+    herald_at = 840 if elapsed < 840 else None           # pris après 14:00
+    return [
+        {"key": "dragon", "label": "Dragon", "at": dragon_at, "by": "maxoulefou", "detail": "Infernal"},
+        {"key": "baron", "label": "Baron", "at": baron_at, "by": None},
+        {"key": "herald", "label": "Héraut", "at": herald_at, "by": "Greed" if herald_at is None else None},
+    ]
+
+
+def _fake_game_payload(elapsed: int, mode: str = "CLASSIC") -> dict:
     """Scoreboard complet fictif qui évolue dans le temps (10 joueurs)."""
     step = elapsed // 25
+    level = min(18, 1 + elapsed // 45)
 
-    def row(name, champ, cid, pos, team, is_self=False, dead=False):
+    def row(name, champ, cid, pos, team, puuid="", is_self=False, dead=False):
         return {
-            "name": name, "champion": champ, "championId": cid, "position": pos,
-            "team": team, "k": step + (1 if is_self else 0), "d": step // 2,
-            "a": step + 1, "cs": elapsed // 3, "level": min(18, 1 + elapsed // 45),
-            "isDead": dead, "respawn": 8 if dead else 0, "isSelf": is_self,
+            "name": name, "puuid": puuid, "champion": champ, "championId": cid,
+            "position": pos, "team": team,
+            "k": step + (1 if is_self else 0), "d": step // 2, "a": step + 1,
+            "cs": elapsed // 3, "level": level,
+            "isDead": dead, "respawn": (6 + 2 * level) if dead else 0,
+            "isSelf": is_self,
         }
 
     dead_self = (elapsed // 5) % 8 == 0  # on "meurt" de temps en temps
-    order = [row(p["gameName"], p["championName"], p["championId"],
-                 p["position"], "ORDER", is_self=p.get("isSelf", False),
+    order = [row(p["gameName"], p["championName"], p["championId"], p["position"],
+                 "ORDER", puuid=p.get("puuid", ""), is_self=p.get("isSelf", False),
                  dead=p.get("isSelf", False) and dead_self)
              for p in FAKE_TEAM]
-    chaos = [row(n, c, cid, pos, "CHAOS") for (n, c, cid, pos) in FAKE_ENEMIES]
+    chaos = [row(n, c, cid, pos, "CHAOS", puuid=pu)
+             for (n, c, cid, pos, pu) in FAKE_ENEMIES]
 
     events = ["maxoulefou a tué Greed", "Dragon Infernal pris par ORDER",
               "First Blood : Greed", "Tourelle détruite (maxoulefou)"]
     return {
         "game_time": elapsed,
+        "game_mode": mode,
         "scores": {"order": 5 * step, "chaos": 3 * step},
         "players": order + chaos,
         "events": events[:1 + elapsed // 12],
+        "objectives": _fake_objectives(elapsed) if mode == "CLASSIC" else [],
         "self": {"gold": 500 + elapsed * 8},
     }
 
@@ -187,12 +228,14 @@ def _phase_queue(sender: Sender, interval: float, duration: int) -> None:
     time.sleep(1)
 
 
-def _phase_game(sender: Sender, interval: float, duration: int) -> None:
-    print(f"[simu] Partie en cours ({duration}s).")
+def _phase_game(sender: Sender, interval: float, duration: int,
+                mode: str = "CLASSIC") -> None:
+    print(f"[simu] Partie en cours ({mode}, {duration}s). Clique un joueur !")
     sender.send_safe(msg_set_screen("lol"))
     start = time.time()
     while time.time() - start < duration:
-        sender.send_safe(msg_data("lol", _fake_game_payload(int(time.time() - start))))
+        payload = _fake_game_payload(int(time.time() - start), mode)
+        sender.send_safe(msg_data("lol", payload))
         time.sleep(interval)
 
 
@@ -237,13 +280,14 @@ def _setup_real_player(platform: str, regional: str) -> tuple:
 
 def run_simulation(url: str, interval: float = 1.0, scenario: str = "full",
                    duration: int | None = None,
-                   platform: str = "euw1", regional: str = "europe") -> None:
-    sender = Sender(url)
+                   platform: str = "euw1", regional: str = "europe",
+                   auth_token: str = "", ssl_context=None) -> None:
+    sender = Sender(url, auth_token=auth_token, ssl_context=ssl_context)
     if not _connect(sender):
         return
 
-    # Vraies stats pour maxoulefou uniquement dans les scénarios avec sélection.
-    if scenario in ("champselect", "full"):
+    # Vraies stats pour maxoulefou dès qu'il peut être cliqué (sélection/partie).
+    if scenario in ("champselect", "full", "game", "aram"):
         riot, lcu, real_puuids = _setup_real_player(platform, regional)
     else:
         riot, lcu, real_puuids = None, LcuClient(), set()
@@ -255,6 +299,8 @@ def run_simulation(url: str, interval: float = 1.0, scenario: str = "full",
             _phase_champselect(sender, interval, duration or 10 ** 9)
         elif scenario == "game":
             _phase_game(sender, interval, duration or 10 ** 9)
+        elif scenario == "aram":
+            _phase_game(sender, interval, duration or 10 ** 9, mode="ARAM")
         elif scenario == "queue":
             _phase_queue(sender, interval, duration or 8)
         elif scenario == "postgame":

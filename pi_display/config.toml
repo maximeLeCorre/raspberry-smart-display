@@ -8,11 +8,26 @@
 # recevoir les messages du PC). En test local pur, "127.0.0.1" suffit aussi.
 host = "0.0.0.0"
 port = 8765
+# TLS : chiffre le lien (wss://) et authentifie le Pi via un certificat
+# auto-signé épinglé par l'agent. false = ws:// en clair (pratique en test
+# local). Doit valoir la MÊME chose côté agent (pc_agent/config.toml [pi].tls).
+# Générer le certificat une fois : `python pi_display/tools/gen_cert.py`.
+# Le jeton d'auth (.env) reste utile EN PLUS de TLS (il authentifie le client).
+tls = false
+cert_file = "certs/pi-display.crt"   # chemins relatifs à la racine du dépôt
+key_file = "certs/pi-display.key"    # (clé privée, reste sur le Pi)
 
 [display]
 width = 800        # résolution interne de rendu (ne pas changer : écran 5")
 height = 480
 fps = 15           # FPS max de la boucle d'affichage (Pi 3 = peu puissant)
+
+[rss]
+# Flux d'actualité affiché sur l'accueil (3 derniers titres) et l'écran France
+# Info (liste complète). Le Pi récupère le flux lui-même. url = "" pour désactiver.
+url = "https://www.francetvinfo.fr/titres.rss"
+refresh_minutes = 15     # fréquence de rafraîchissement du flux
+max_items = 15           # nombre d'articles gardés (liste France Info)
 
 [modules]
 # Modules activés (source de vérité unique : le Pi l'annonce à l'agent).

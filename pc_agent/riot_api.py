@@ -10,6 +10,8 @@ from __future__ import annotations
 import urllib3
 import requests
 
+from objectives import compute_objectives
+
 # On coupe l'avertissement SSL lié à verify=False (certificat auto-signé local).
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -113,15 +115,36 @@ def _format_event(e: dict) -> str | None:
     return None
 
 
-def summarize_full(data: dict, id_resolver=None) -> dict:
+def _riot_id(player: dict) -> tuple[str, str]:
+    """(gameName, tagLine) d'un joueur de la Live Client API (plusieurs formats)."""
+    name = player.get("riotIdGameName") or ""
+    tag = player.get("riotIdTagLine") or ""
+    if not name:
+        riot_id = player.get("riotId") or player.get("summonerName", "") or ""
+        if "#" in riot_id:
+            name, tag = riot_id.split("#", 1)
+        else:
+            name = riot_id
+    return name, tag
+
+
+def summarize_full(data: dict, id_resolver=None, puuid_resolver=None) -> dict:
     """Résumé complet de la partie : scoreboard des 10 joueurs + événements.
 
-    `id_resolver` : fonction nom_de_champion -> championId (ex. la LCU), pour
-    permettre au Pi d'afficher les icônes. Optionnel.
+    `id_resolver`    : fonction nom_de_champion -> championId (ex. la LCU), pour
+                       que le Pi affiche les icônes. Optionnel.
+    `puuid_resolver` : fonction (gameName, tagLine) -> vrai PUUID externe (ex.
+                       `RiotWeb.resolve_puuid`), pour permettre le « dossier » au
+                       clic pendant la partie (rang/winrate/mains). Optionnel ;
+                       mis en cache côté RiotWeb, donc gratuit après le 1er tick.
+
+    Ajoute aussi `game_mode` (CLASSIC, ARAM, ...) et, en Faille uniquement, les
+    `objectives` (timers Dragon/Baron/Héraut) — infos peu accessibles en jeu.
     """
     game_data = data.get("gameData", {})
     active = data.get("activePlayer", {})
     me_name = active.get("riotIdGameName") or active.get("summonerName")
+    game_mode = game_data.get("gameMode", "") or ""
 
     players = []
     team_scores = {"order": 0, "chaos": 0}
@@ -133,10 +156,14 @@ def summarize_full(data: dict, id_resolver=None) -> dict:
             team_scores["order"] += kills
         elif team == "CHAOS":
             team_scores["chaos"] += kills
-        name = p.get("riotIdGameName") or p.get("summonerName", "")
+        name, tag = _riot_id(p)
         champion = p.get("championName", "")
+        puuid = ""
+        if puuid_resolver and name and tag:
+            puuid = puuid_resolver(name, tag) or ""
         players.append({
             "name": name,
+            "puuid": puuid,
             "champion": champion,
             "championId": (id_resolver(champion) if id_resolver else 0) or 0,
             "position": p.get("position", ""),
@@ -156,10 +183,14 @@ def summarize_full(data: dict, id_resolver=None) -> dict:
             events.append(txt)
     events = events[-12:][::-1]  # les plus récents d'abord
 
+    objectives = compute_objectives(data) if game_mode == "CLASSIC" else []
+
     return {
         "game_time": int(game_data.get("gameTime", 0)),
+        "game_mode": game_mode,
         "scores": team_scores,
         "players": players,
         "events": events,
+        "objectives": objectives,
         "self": {"gold": int(active.get("currentGold", 0) or 0)},
     }

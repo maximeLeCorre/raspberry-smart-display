@@ -15,6 +15,11 @@ ENV/
 # --- Secrets / configuration locale ---
 .env
 
+# --- TLS (certificat auto-signé du lien Pi <-> agent) ---
+# La clé privée ne doit JAMAIS être committée. Le .crt est public mais on ignore
+# tout le dossier par simplicité (le régénérer via tools/gen_cert.py).
+certs/
+
 # --- IDE / éditeurs ---
 .idea/
 .vscode/

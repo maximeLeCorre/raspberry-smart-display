@@ -58,6 +58,7 @@ serveur, l'agent est client.
   `.\.venv\Scripts\python ...`.
 - Installer : `.\.venv\Scripts\python -m pip install -r pi_display\requirements.txt -r pc_agent\requirements.txt`
 - Générer les fonds : `.\.venv\Scripts\python pi_display\tools\gen_backgrounds.py`
+- Générer le certificat TLS : `.\.venv\Scripts\python pi_display\tools\gen_cert.py` (puis `tls = true` dans les deux config.toml)
 - Lancer l'affichage : `.\.venv\Scripts\python pi_display\main.py --scale 2`
 - Lancer l'agent (simulation) : `.\.venv\Scripts\python pc_agent\main.py --simulate --scenario champselect|game|full`
 - Lancer l'agent (réel) : `.\.venv\Scripts\python pc_agent\main.py`
@@ -67,8 +68,39 @@ serveur, l'agent est client.
 
 ## Protocole réseau (messages JSON)
 
+**Sécurité du lien = deux couches complémentaires, chacune activable.**
+- **TLS (`wss://`), chiffre le canal + authentifie le Pi.** Activé par
+  `tls = true` dans **les deux** `config.toml` (`pi_display [network]` et
+  `pc_agent [pi]`) — doivent concorder. Le Pi sert avec un **certificat
+  auto-signé** (`certs/pi-display.crt`+`.key`, générés par
+  `pi_display/tools/gen_cert.py`, dossier `certs/` **ignoré par Git**) ; l'agent
+  l'**épingle** (`cert_file`) : il vérifie le certificat mais **pas le nom
+  d'hôte** (`check_hostname=False`, donc l'IP du Pi peut changer). Si le Pi et
+  l'agent sont sur deux machines, **copier le `.crt`** (public) côté agent.
+  Contextes construits par `config.build_server_ssl` (Pi) et
+  `main.build_client_ssl` (agent) ; `tls=false` ⇒ `ws://` en clair (test local).
+  ⚠️ `cryptography` n'est requis **que** pour (re)générer le certificat.
+- **Jeton (`DISPLAY_AUTH_TOKEN`), authentifie le client.** TLS est à sens unique
+  (le Pi accepte tout client, son cert étant public) : le jeton reste donc utile
+  **en plus** de TLS, et TLS chiffre le jeton (plus interceptable/rejouable).
+
+**Authentification (optionnelle, jeton partagé).** Si `DISPLAY_AUTH_TOKEN` est
+défini dans `.env` (racine, lu par les **deux** côtés), le **premier** message de
+l'agent doit être `{"type":"auth","token":"..."}` ; sinon le Pi refuse et ferme
+la connexion (tant qu'il n'est pas authentifié, un client n'écrase pas l'agent
+courant — règle aussi le bug du « client fantôme »). Jeton **vide/absent =
+authentification désactivée** (le Pi accepte tout le réseau local, comportement
+historique, pratique en test local — mais sur le vrai réseau, **mettre un jeton**
+identique des deux côtés). Côté Pi : `config.load_auth_token()` → `NetworkServer`
+(`_authenticate`, timeout 5 s). Côté agent : `Sender(url, auth_token=...)` envoie
+le handshake à chaque (re)connexion. En cas de refus, le Pi renvoie
+`{"type":"auth_result","ok":false}` puis ferme.
+
 Pi → PC (à la connexion) :
 - `{"type":"hello","modules":["system","league"]}` (modules actifs annoncés)
+
+PC → Pi (premier message si jeton configuré) :
+- `{"type":"auth","token":"..."}`
 
 PC → Pi :
 - `{"type":"set_screen","screen":"default|queue|champselect|lol|postgame"}`
@@ -92,11 +124,33 @@ La déconnexion du client fait revenir le Pi à l'écran par défaut.
 - `screen.py` : classe de base `Screen` (+ attribut `cycle` = inclus dans le
   cycle du bouton « suivant »). Fond PNG chargé **une fois** ; redessin par
   **dirty rects** (ménage le Pi 3) ; repli couleur si PNG absent.
-- `modules/system/default_screen.py` : `DefaultScreen` (horloge, date, météo
-  placeholder, **badge « Rejoindre »**). Module système, toujours actif.
+- `modules/system/default_screen.py` : `DefaultScreen` (horloge, date, **3
+  dernières actus RSS** cliquables, onglet **« France Info »** en haut à gauche,
+  et **bandeau LoL « Rejoindre »** en haut, conditionnel). Module système,
+  toujours actif. La météo a été retirée.
+- `modules/system/news_screen.py` : `NewsScreen` (écran **« France Info »**,
+  `name="news"`, hors cycle) : liste défilante des articles (flèches ▲/▼) et vue
+  détail (titre + date + résumé + lien). Ouvert depuis l'accueil (onglet ou clic
+  sur un titre → détail) ; RETOUR en détail → liste, en liste → accueil. Dessiné
+  **entièrement en code** (pas de PNG de fond).
+- `modules/system/rss_feed.py` : flux RSS récupéré **par le Pi lui-même** (thread
+  de fond, stdlib `urllib`+`xml.etree`, gère RSS et Atom). `get_feed(app)` =
+  instance **unique partagée** accueil ↔ France Info (lit la config `[rss]`). Le
+  flux n'a pas besoin du PC : l'accueil marche agent déconnecté. Pas de message
+  réseau RSS (tout est local au Pi).
 - `modules/league/` : `QueueScreen` (file + ready-check), `ChampSelectScreen`
   (équipe, timer de phase, bans, clic → détails + **splash art**), `LolScreen`
-  (scoreboard 5v5, timers de mort, événements), `PostGameScreen` (bilan).
+  (complément à l'écran de jeu, voir ci-dessous), `PostGameScreen` (bilan).
+
+**`LolScreen` (partie en cours) — philosophie** : le scoreboard brut (KDA/CS/or/
+killfeed) est déjà visible en jeu, donc l'écran privilégie ce qu'on n'a PAS
+facilement en jeu : (1) **timers d'objectifs** Dragon/Baron/Héraut (**Faille
+uniquement**, logés en haut du **panneau bas**) ; (2) **dossier adverse au clic**
+(rang/winrate/mains via l'API Web) — surtout utile en ARAM où on ne scoute pas en
+sélection ; le dossier remplace le contenu du panneau bas. Horloge et compteurs
+**extrapolés** localement (l'agent n'envoie que ~1/s) pour un décompte fluide.
+S'adapte au `game_mode` (pas d'objectifs en ARAM). Clic sur une ligne =
+`request_player_info` (réutilise le flux du champ select) ; re-clic = referme.
 
 Icônes/splash : réclamés à la demande (request_icon/request_splash), cache côté
 Pi. Splash = art de chargement **Data Dragon** par alias
@@ -106,15 +160,29 @@ Ajouter un écran : hériter de `Screen`, définir `name`/`background_name`,
 implémenter `draw()` (et `update_data()` si réseau) ; l'ajouter à la liste
 `screens` du `Module` concerné ; ajouter son fond.
 
+> **Cadres = dans le fond, pas en code.** Les cadres/panneaux/zones sont
+> **dessinés directement dans les PNG de fond** (un par écran). Le code ne trace
+> plus de bordures : il **positionne le contenu au pixel** dans les zones de
+> l'image (constantes `*_X/_TOP/ROW_H/PANEL…` en tête de chaque écran). Si tu
+> changes un fond, réaligne ces constantes (mesure les zones sombres de l'image,
+> ex. via Pillow). ⚠️ Le fond de `default` décale le contenu vers la droite
+> (illustration à gauche) → `DefaultScreen` centre sur `CENTER_X`, pas `width/2`.
+> Le fond `default.png` est **régénéré** par `tools/gen_default_bg.py` (bake les
+> panneaux horloge/actu/onglet sur l'art d'origine `assets/default_base.png`) : si
+> tu déplaces un panneau, édite ce script ET les constantes de `default_screen.py`
+> (elles doivent rester identiques), puis relance le script.
+
 ### Comportements clés (app.py)
 
 - `App` construit `self.screens` depuis les **modules activés** (registre
   `MODULES` filtré par `config[modules]`) ; `screen_order` = écrans `cycle=True`.
 - **Verrou manuel** (`manual_screen`) : un retour manuel force l'écran `default`
   et **ignore les `set_screen` réseau** jusqu'à reconnexion ou `default` explicite.
-- **Badge « Rejoindre »** : `network_screen` mémorise le dernier écran demandé ;
-  `DefaultScreen` affiche un badge cliquable (`app.joinable_screen()` /
-  `app.join_screen()`) pour y retourner.
+- **Bandeau « Rejoindre » (LoL)** : `network_screen` mémorise le dernier écran
+  demandé ; `DefaultScreen` affiche en haut un bandeau cliquable
+  (`app.joinable_screen()` / `app.join_screen()`) pour y retourner.
+- **Onglet France Info** : l'accueil ouvre l'écran `news` en posant
+  `manual_screen = "news"` (verrou) ; le RETOUR de `news` ramène au défaut.
 
 ### Entrées
 
@@ -178,13 +246,17 @@ Mise à jour ≤ 1 fois / `update_interval` (config, 1–2 s).
 
 `sources/league.py` (`LeagueSource`) mappe `gameflow_phase` → écran :
 `Matchmaking`/`ReadyCheck` → `queue` ; `ChampSelect` → `champselect` ;
-`InProgress` → `lol` (Live Client Data API) ;
+`InProgress` → `lol` (Live Client Data API ; payload `summarize_full` enrichi de
+`game_mode`, `objectives` [Faille, calculés dans `objectives.py`] et du `puuid`
+de chaque joueur pour le dossier au clic — résolu via `RiotWeb.resolve_puuid`,
+mis en cache donc gratuit après le 1er tick) ;
 `WaitingForStats`/`PreEndOfGame`/`EndOfGame` → `postgame` (historique LCU) ;
 client fermé/menu → `poll()` renvoie None (l'agent affiche `default`). Les
 builders queue/postgame sont dans `phases.py`, la sélection dans `champ_select.py`.
 
-Mode simulation (`simulator.py`) : scénarios `full`/`champselect`/`game`/`queue`/`postgame` avec
-fausses données. Le joueur **maxoulefou** (notre compte, constante `REAL_PLAYER`)
+Mode simulation (`simulator.py`) : scénarios `full`/`champselect`/`game`/`aram`/
+`queue`/`postgame` avec fausses données (`game` = Faille avec objectifs, `aram` =
+ARAM sans objectifs ; les adversaires fictifs ont un dossier cliquable). Le joueur **maxoulefou** (notre compte, constante `REAL_PLAYER`)
 renvoie de **vraies** stats au clic via l'API Web (si `RIOT_API_KEY` présent),
 sans lancer de partie ; les autres joueurs restent fictifs.
 
@@ -195,11 +267,16 @@ sans lancer de partie ; les autres joueurs restent fictifs.
 ## Config & secrets
 
 - `pi_display/config.toml` : host/port d'écoute, résolution, FPS, broches GPIO,
-  **`[modules]`** (active/désactive les modules — source de vérité, poussée à l'agent).
+  **`[rss]`** (flux d'actualité de l'accueil : `url`/`refresh_minutes`/`max_items` ;
+  `url = ""` pour désactiver), **`[modules]`** (active/désactive les modules —
+  source de vérité, poussée à l'agent).
 - `pc_agent/config.toml` : IP/port du Pi, `update_interval`, noms des process
   LoL, `[riot] platform/regional`, `[features] player_info`.
-- **`.env`** (racine, **ignoré** par Git) : `RIOT_API_KEY=...`. Modèle versionné :
-  `.env.example`. Ne **jamais** committer de clé.
+- **`.env`** (racine, **ignoré** par Git) : `RIOT_API_KEY=...` et
+  `DISPLAY_AUTH_TOKEN=...` (jeton d'auth du lien Pi↔agent, voir « Protocole
+  réseau » ; vide = auth désactivée). Modèle versionné : `.env.example`. Ne
+  **jamais** committer de secret. Le `.env` doit exister **sur le Pi aussi** (au
+  moins le jeton) pour que l'authentification soit active.
 
 ## Tests
 
@@ -211,10 +288,19 @@ de diagnostic sont temporaires (préfixe `_`) et supprimés après usage.
 
 ## Fonds d'écran (design)
 
-Les PNG de `pi_display/assets/` sont produits depuis **`design/backgrounds.html`**
-(SVG réglable, style hextech) rasterisé par **`design/rasterize.py`** (Playwright
-headless, **outil dev uniquement**, pas sur le Pi). `tools/gen_backgrounds.py`
-(Pillow) reste un repli procédural sans dépendance.
+**Un PNG 800×480 par écran** dans `pi_display/assets/` : `default`, `queue`,
+`champselect`, `lol`, `postgame`. Ils **contiennent les cadres/panneaux/zones**
+(le code ne dessine que le contenu, aligné dessus — voir « Cadres = dans le fond »
+plus haut). Les fonds actuels ont été générés par un outil de design externe
+(IA), pas procéduralement — **chaque fond est propre à la mise en page de son
+écran** (ne plus les partager entre écrans). Exceptions : l'écran `news` (France
+Info) n'a **pas** de PNG (dessiné en code) ; `default.png` est **dérivé** de
+`default_base.png` (l'art brut) par `tools/gen_default_bg.py`, qui y bake les
+panneaux horloge/actu + l'onglet — régénérer via ce script, pas à la main.
+
+Anciens outils procéduraux conservés en repli/historique : `design/backgrounds.html`
++ `design/rasterize.py` (SVG hextech, Playwright) et `tools/gen_backgrounds.py`
+(Pillow). Non utilisés par les fonds courants.
 
 ## Git / GitHub
 
