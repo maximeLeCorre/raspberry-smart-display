@@ -255,22 +255,40 @@ class App:
                 target.set_champion_splash(cid, b64)
         self.async_call(fetch, deliver)
 
-    def request_match_history(self, count: int = 10) -> None:
-        """Historique des dernières parties (API Web), en tâche de fond."""
+    def request_match_history(self, start: int = 0, count: int = 10,
+                              queue=None, match_type=None, exclude_queue=None) -> None:
+        """Historique (API Web), en tâche de fond — paginé/filtré par l'écran."""
         def deliver(games):
             hist = self.screens.get("history")
             if hist is not None:
                 hist.update_data({"games": games or []})
         self.async_call(
-            lambda: build_match_history(self.riot, self._my_puuid(), count), deliver)
+            lambda: build_match_history(self.riot, self._my_puuid(), start, count,
+                                        queue, match_type, exclude_queue), deliver)
+
+    def request_lcu_history(self, start: int = 0, count: int = 10) -> None:
+        """Historique des parties spéciales (ARAM chaos…) : demandé à l'AGENT
+        (seule la LCU les expose). Réponse async via le message `lcu_history`."""
+        self.server.send({"type": "request_lcu_history", "start": start, "count": count})
+
+    def _mark_friends(self, payload: dict) -> dict:
+        """Colore les amis (rose) sur un bilan venu de l'agent (qui n'a pas la
+        liste d'amis) via le `riotId` de chaque joueur."""
+        for p in (payload or {}).get("players", []):
+            rid = p.get("riotId") or ""
+            if not p.get("isSelf") and "#" in rid:
+                gn, tl = rid.split("#", 1)
+                p["isFriend"] = normalize_riot_id(gn, tl) in self.friends
+        return payload
 
     def open_history(self) -> None:
         """Ouvre la liste des dernières parties (verrou manuel) et la charge."""
-        if "history" not in self.screens:
+        hist = self.screens.get("history")
+        if hist is None:
             return
         self.manual_screen = "history"
         self.set_screen("history")
-        self.request_match_history()
+        hist.start_fresh()
 
     def _load_postgame(self, game_id, retries: int = 0) -> None:
         """Charge le bilan d'une partie (donnée ou la dernière si None) et le
@@ -298,14 +316,20 @@ class App:
     def open_postgame_review(self, game_id) -> None:
         """Ouvre le bilan d'une partie choisie dans l'historique, en mode
         « revue » : RETOUR y ramène à l'historique, et l'écran reste verrouillé
-        tant que l'agent ne pousse pas une vraie partie."""
+        tant que l'agent ne pousse pas une vraie partie.
+
+        Le détail vient de l'API Web (matchId = chaîne) ou de l'agent/LCU pour
+        les parties spéciales (gameId = entier)."""
         if "postgame" not in self.screens:
             return
         self.screens["postgame"].update_data({})      # vide -> « en attente »
         self.postgame_return = "history"
         self.manual_screen = "postgame"
         self.set_screen("postgame")
-        self._load_postgame(game_id)
+        if isinstance(game_id, int):
+            self.server.send({"type": "request_lcu_detail", "gameId": game_id})
+        else:
+            self._load_postgame(game_id)
 
     def joinable_screen(self) -> str | None:
         """Écran non-défaut proposé par l'agent, qu'on peut rejoindre depuis le
@@ -415,6 +439,17 @@ class App:
             payload = msg.get("payload", {})
             if screen in self.screens:
                 self.screens[screen].update_data(payload)
+
+        elif msg_type == "lcu_history":
+            # Parties spéciales (ARAM chaos) lues par l'agent via la LCU.
+            hist = self.screens.get("history")
+            if hist is not None:
+                hist.update_data({"games": msg.get("games", [])})
+
+        elif msg_type == "lcu_detail":
+            pg = self.screens.get("postgame")
+            if pg is not None:
+                pg.update_data(self._mark_friends(msg.get("payload") or {}))
 
     def _draw_debug(self, dirty):
         rect = pygame.Rect(0, 0, 360, 58)

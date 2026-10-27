@@ -116,13 +116,18 @@ identique des deux côtés). Côté Pi : `config.load_auth_token()` → `Network
 le handshake à chaque (re)connexion. En cas de refus, le Pi renvoie
 `{"type":"auth_result","ok":false}` puis ferme.
 
-Le protocole est désormais **minimal** : l'agent ne fait que pousser l'écran
-courant et ses données locales ; **le Pi ne lui demande plus rien** (il enrichit
-tout seul). Le payload `postgame` n'est **plus** envoyé par l'agent (le Pi
-récupère la dernière partie via l'API Web à la réception de `set_screen postgame`).
+Le protocole est **minimal** : l'agent pousse l'écran courant et ses données
+locales ; le Pi enrichit tout seul via l'API Web. **Seule exception** : les
+parties **spéciales/customs** (ARAM chaos) que `match-v5` n'indexe pas — le Pi
+les **demande à l'agent** (seule la LCU, client RSO, y a accès). Le payload
+`postgame` n'est **plus** poussé par l'agent (le Pi récupère la dernière partie
+via l'API Web à la réception de `set_screen postgame`).
 
-Pi → PC (à la connexion) :
-- `{"type":"hello","modules":["system","league"]}` (modules actifs annoncés)
+Pi → PC :
+- `{"type":"hello","modules":["system","league"]}` (à la connexion)
+- `{"type":"request_lcu_history","start":0,"count":10}` (filtre « ARAM Chaos »)
+- `{"type":"request_lcu_detail","gameId":123}` (clic sur une partie spéciale ;
+  `gameId` **entier** = LCU, vs matchId chaîne `EUW1_…` = API Web côté Pi)
 
 PC → Pi (premier message si jeton configuré) :
 - `{"type":"auth","token":"..."}`
@@ -132,6 +137,10 @@ PC → Pi :
 - `{"type":"data","screen":"queue|champselect|lol","payload":{...}}`
   (données **locales** ; chaque joueur porte un `riotId` = 'Nom#TAG' que le Pi
   utilise pour enrichir au clic)
+- `{"type":"lcu_history","games":[...]}` (réponse ARAM Chaos ; même format que
+  l'historique Web)
+- `{"type":"lcu_detail","payload":{...}}` (bilan d'une partie spéciale ; le Pi y
+  colore les amis via `riotId`, l'agent n'ayant pas la liste)
 
 Interne (synthétisé par le serveur Pi, pas envoyé par l'agent) :
 - `{"type":"_connected"}` / `{"type":"_disconnected"}`
@@ -180,12 +189,21 @@ joueurs viennent de l'**API Web Riot (`match-v5`), calculées PAR LE PI**
 
 **`MatchHistoryScreen` (`name="history"`, hors cycle, dessiné en code)** : liste
 des dernières parties, **ouverte depuis l'accueil** (bouton « Dernières
-parties »). `App.open_history()` pose le verrou manuel et lance `request_match_history`
-→ **le Pi récupère la liste lui-même** (`riot_web.build_match_history`, en tâche
-de fond) et remplit l'écran. Un clic appelle `App.open_postgame_review(gameId)` :
-le Pi récupère le détail (`build_match_detail`), bascule sur `postgame` en **mode
-revue** (`app.postgame_return = "history"`, RETOUR → liste). Un `set_screen`
-poussé par l'agent (vraie partie) **annule** le mode revue.
+parties »). En haut, des **filtres** (`FILTERS`) à gauche de RETOUR ; en bas, des
+**flèches de pagination** (◀/▶ dessinées en triangles, `start = page*10`). Un clic
+appelle `App.open_postgame_review(gameId)` : bascule sur `postgame` en **mode
+revue** (`app.postgame_return = "history"`, RETOUR → liste ; `set_screen` agent
+l'annule). Filtres :
+- `Tout` / `Classé` (`type=ranked`) / `ARAM` (`queue=450`) → **API Web (Pi)**.
+- `Normale` (`type=normal`) : ⚠️ Riot classe l'ARAM dans `type=normal` → on
+  l'**exclut** (`exclude_queue=450`, filtré côté Pi dans `build_match_history`).
+- `ARAM Chaos` → **source LCU (agent)** : `match-v5` ne renvoie **pas** les
+  parties customs/spéciales (retirées de l'API Web publique) ; seule la LCU (RSO)
+  les a. Le Pi envoie `request_lcu_history`/`request_lcu_detail`, l'agent répond
+  via `phases.build_lcu_history`/`build_lcu_detail`. ⚠️ Le mode « ARAM Chaos » a
+  le **gameMode interne `KIWI`** (pas `ARAM`) → filtre `gameMode in CHAOS_MODES`
+  (`{"KIWI"}`), libellé via `GAME_MODE_LABELS`. **Nécessite le client League
+  ouvert** (sinon message « ouvre le client »).
 
 **Source des données = le Pi, via l'API Web Riot** (`pi_display/riot_web.py`,
 stdlib `urllib`) :
@@ -309,9 +327,10 @@ via le `riotId`).
 
 `main.py` instancie les Sources et, chaque tick, interroge celles des modules
 activés ; la première `poll()` non-None gagne → `set_screen` (+ `data` si
-payload). Mise à jour ≤ 1 fois / `update_interval` (config, 1–2 s). Le Pi ne
-demande plus rien à l'agent ⇒ `Source.handle_request` n'est plus utilisé par
-League (seul `hello` revient du Pi, pour la liste des modules actifs).
+payload). Mise à jour ≤ 1 fois / `update_interval` (config, 1–2 s). Le Pi
+n'enrichit plus via l'agent, **sauf** pour l'historique des parties spéciales
+(ARAM chaos) : `LeagueSource.handle_request` répond à `request_lcu_history` /
+`request_lcu_detail` (voir écran `history`). Le Pi renvoie aussi `hello`.
 
 `sources/league.py` (`LeagueSource`) mappe `gameflow_phase` → écran :
 `Matchmaking`/`ReadyCheck` → `queue` ; `ChampSelect` → `champselect` ;
