@@ -62,9 +62,11 @@ VALUE_RIGHT = 788        # valeurs alignées à droite
 STRIP_TOP = 432
 
 GREEN = (110, 210, 130)
-RED = (228, 86, 86)       # toi
-PINK = (240, 130, 190)    # amis (premade)
-BLUE = (92, 150, 235)     # autres
+# Couleurs des barres : toi=jaune, amis=rose, alliés=bleu, ennemis=rouge.
+YELLOW = (240, 210, 70)    # toi
+PINK = (240, 130, 190)     # amis (premade, ex. Matte Mwa)
+BLUE = (92, 150, 235)      # alliés (ton équipe)
+RED = (228, 86, 86)        # ennemis (équipe adverse)
 WHITE = (238, 238, 243)
 GREY = (155, 172, 200)
 GOLD = (210, 175, 95)
@@ -213,12 +215,20 @@ class PostGameScreen(Screen):
         rows = sorted(players, key=lambda p: (p.get("metrics") or {}).get(self.active, 0),
                       reverse=True)
         max_val = max((p.get("metrics") or {}).get(self.active, 0) for p in rows) or 1
+        # Mon équipe (pour distinguer alliés/ennemis).
+        my_team = next((p.get("team") for p in players if p.get("isSelf")), None)
 
         for i, p in enumerate(rows):
             top = ROW_TOP + i * ROW_H
             cy = top + ROW_H // 2
-            color = (RED if p.get("isSelf") else
-                     PINK if p.get("isFriend") else BLUE)
+            if p.get("isSelf"):
+                color = YELLOW
+            elif p.get("isFriend"):
+                color = PINK
+            elif my_team is not None and p.get("team") == my_team:
+                color = BLUE        # allié (ton équipe)
+            else:
+                color = RED         # ennemi (équipe adverse)
 
             # Icône + nom du champion.
             surface.blit(self._get_icon(p.get("championId") or 0,
@@ -251,7 +261,7 @@ class PostGameScreen(Screen):
                                     me.get("championName") or "?"),
                      (12, cy - ICON // 2))
         k, d, a = (me.get("kda") or [0, 0, 0])[:3]
-        name_surf = self.font_strip.render(me.get("championName") or "", True, RED)
+        name_surf = self.font_strip.render(me.get("championName") or "", True, YELLOW)
         surface.blit(name_surf, (46, cy - name_surf.get_height() // 2))
         detail = (f"{k} / {d} / {a}   •   CS {me.get('cs', 0)}   •   "
                   f"Or {_fmt(me.get('gold', 0))}   •   Dég {_fmt(me.get('damage', 0))}"

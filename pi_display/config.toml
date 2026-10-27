@@ -45,8 +45,9 @@ regional = "europe"   # région : europe, americas, asia
 # Ton Riot ID "Nom#TAG" : indispensable pour l'historique (le Pi tire les
 # parties de CE compte). Vide = historique désactivé.
 summoner = "maxoulefou#EUW"   # compte dont on tire l'historique
-# Amis (premade) mis en évidence en ROSE sur l'écran de fin. "Nom#TAG".
-friends = []    # ex. ["Pote#EUW", "Autre#1234"]
+# Amis (premade) mis en évidence en ROSE sur l'écran de fin. "Nom#TAG"
+# (insensible à la casse). Ajoute d'autres potes réguliers ici.
+friends = ["Matte mwa#EUW"]
 
 [gpio]
 # Broches BCM des boutons physiques (uniquement sur le Pi, ignorées sur PC).
