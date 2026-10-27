@@ -186,9 +186,15 @@ implémenter `draw()` (et `update_data()` si réseau) ; l'ajouter à la liste
 
 ### Entrées
 
-- Tactile = souris Pygame. Clavier = fallback des boutons GPIO :
+- Tactile : sur le Pi (SDL2/kmsdrm) l'écran capacitif (ex. `ft5x06`) émet des
+  événements **`FINGERDOWN`** (coords normalisées 0..1), **pas** des clics souris
+  → `app._handle_pygame_events` gère `FINGERDOWN` ET `MOUSEBUTTONDOWN` (souris =
+  test PC), via `_dispatch_touch`. On force `SDL_TOUCH_MOUSEEVENTS=0` (main.py)
+  pour éviter un double déclenchement. Curseur souris **masqué** en plein écran
+  (`pygame.mouse.set_visible(False)`). Clavier = fallback des boutons GPIO :
   **Échap** = retour défaut, **Tab** = écran suivant, **F1** = overlay debug.
-- GPIO réel via `gpiozero` (seulement sur le Pi ; absent sur PC → fallback).
+- GPIO réel via `gpiozero` (seulement sur le Pi ; absent sur PC → fallback). Sur
+  le Pi, un warning `Falling back from lgpio` est bénin (repli sur `RPi.GPIO`).
 - Options d'affichage : `--fullscreen`/`--windowed` (auto plein écran + SDL
   `kmsdrm` si Pi détecté), `--scale N`, `--monitor N`, `--debug`.
 
@@ -312,9 +318,42 @@ Anciens outils procéduraux conservés en repli/historique : `design/backgrounds
   `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 - Ne pas committer/pousser sans demande explicite de l'utilisateur.
 
-## Déploiement Pi (plus tard)
+## Déploiement Pi
 
-Raspberry Pi OS **Lite** (sans bureau), Python 3.11+, décommenter
-`gpiozero`/`RPi.GPIO` dans `pi_display/requirements.txt`. Lancer
-`SDL_VIDEODRIVER=kmsdrm python pi_display/main.py --fullscreen` (auto si Pi
-détecté). Mettre l'IP du Pi dans `pc_agent/config.toml`.
+**Script automatisé : `deploy/deploy_pi.py`** (lancé depuis le PC avec le Python
+du venv). Renseigner le bloc CONFIG en tête (IP, utilisateur, **mot de passe**
+SSH ; `INSTALL_DEPS`/`SETUP_SERVICE`/`FULLSCREEN`). Il :
+1. fabrique une archive de `pi_display/` (hors `__pycache__`/`.pyc`/`_*`) + le
+   `certs/` (certificat TLS) + un `.env` **réduit au seul `DISPLAY_AUTH_TOKEN`**
+   (la clé Riot ne part pas sur le Pi) ;
+2. se connecte en SSH via **paramiko** (mot de passe, non-interactif — à
+   installer sur le PC : `pip install paramiko`), envoie et extrait dans
+   `PI_DIR` (défaut `/home/<user>/pi-display`) ;
+3. installe les paquets système (SDL pour pygame, `python3-venv`), crée le venv
+   et les dépendances **runtime** (pygame, websockets, python-dotenv, gpiozero,
+   RPi.GPIO — pas Pillow/cryptography, inutiles au runtime), ajoute l'utilisateur
+   aux groupes `video,render,input,gpio` ;
+4. pose et active un service **systemd** `pi-display` (autostart au boot,
+   `SDL_VIDEODRIVER=kmsdrm`, `--fullscreen`, `Restart=always`).
+
+Le mot de passe sudo transite par un fichier temporaire `/tmp/.pi_sudo` (0600,
+supprimé aussitôt), jamais dans la ligne de commande. Pour un simple envoi de
+code ensuite : `INSTALL_DEPS=False`, `SETUP_SERVICE=False` (le script redémarre
+juste le service). Logs : `journalctl -u pi-display -f`. Si l'écran reste noir au
+1er coup, rebooter le Pi (les nouveaux groupes `video`/… prennent effet).
+
+Prérequis Pi : Raspberry Pi OS **Lite**, SSH activé, réseau. Ne pas oublier de
+mettre l'IP du Pi dans `pc_agent/config.toml [pi]` (et `tls`/jeton cohérents).
+
+**Pièges rencontrés (déjà gérés par le script, mais à savoir) :**
+- Ne **jamais** exclure les `__init__.py` de l'archive (le filtre n'exclut que
+  les noms `_simple`, pas les `__dunder__`) sinon `ImportError ... MODULES`.
+- `pygame.error: EGL not initialized` = il manque la couche **EGL/GLES de Mesa**
+  (`libegl1 libegl-mesa0 libgles2`) sur Pi OS Lite → installées par le script.
+- En plein écran kmsdrm, pygame doit être **DRM master** : le service est lié à
+  **tty1** (`PAMName=login` + `TTYPath=/dev/tty1` + `StandardInput=tty-force`,
+  `Conflicts=getty@tty1`). Sans ça, EGL échoue même avec les libs. L'écran reste
+  alors sur la console texte.
+
+Lancement manuel (sans service) : `SDL_VIDEODRIVER=kmsdrm python pi_display/main.py
+--fullscreen` (plein écran auto si Pi détecté).

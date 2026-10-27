@@ -102,6 +102,9 @@ class App:
 
         self.window = pygame.display.set_mode(window_size, flags, **kwargs)
         self.window_size = window_size
+        # Interface tactile : pas de curseur souris visible en plein écran (Pi).
+        if self.fullscreen:
+            pygame.mouse.set_visible(False)
         self.direct = (self.scale == 1)
         self.surface = self.window if self.direct else pygame.Surface((self.width, self.height))
 
@@ -176,6 +179,13 @@ class App:
             self.set_screen(target)
 
     # --------------------------------------------------------------- boucles
+    def _dispatch_touch(self, pos) -> None:
+        """Traite un appui (souris ou tactile) à la position interne `pos`."""
+        action = self.current.handle_touch(pos)
+        if action:
+            self.last_key = f"tactile {pos} -> {action}"
+            self.do_action(action)
+
     def _handle_pygame_events(self) -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -197,12 +207,15 @@ class App:
                         self.present([pygame.Rect(0, 0, self.width, self.height)])
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
+                # Souris (test PC). event.pos est en pixels fenêtre -> interne.
                 x, y = event.pos
-                pos = (x // self.scale, y // self.scale)
-                action = self.current.handle_touch(pos)
-                if action:
-                    self.last_key = f"tactile {pos} -> {action}"
-                    self.do_action(action)
+                self._dispatch_touch((x // self.scale, y // self.scale))
+
+            elif event.type == pygame.FINGERDOWN:
+                # Écran tactile (SDL2/kmsdrm) : event.x/y sont normalisés 0..1
+                # de la fenêtre -> on les ramène aux coordonnées internes.
+                self._dispatch_touch((int(event.x * self.width),
+                                      int(event.y * self.height)))
 
     def _handle_actions(self) -> None:
         while True:

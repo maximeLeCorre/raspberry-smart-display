@@ -2,7 +2,7 @@
 # Pour viser le vrai Pi : remplacer host par l'IP du Pi sur ton réseau local.
 
 [pi]
-host = "127.0.0.1"   # en test local : le Pi-display tourne sur la même machine
+host = "192.168.1.52"   # en test local : le Pi-display tourne sur la même machine
 port = 8765
 # TLS : doit correspondre au réglage du Pi (pi_display/config.toml [network].tls).
 # true = connexion wss:// en épinglant le certificat du Pi (cert_file = le .crt
