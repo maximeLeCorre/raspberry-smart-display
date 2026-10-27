@@ -24,13 +24,13 @@ from screen import Screen
 
 # Filtres : (libellé, paramètres API, source). source "web" = API Riot (le Pi),
 # "lcu" = l'agent/client PC (parties spéciales que l'API Web n'indexe pas).
+# « ARAM Chaos » en tête = filtre par défaut à l'ouverture (mode joué le plus).
 FILTERS = [
-    ("Tout", {}, "web"),
+    ("ARAM Chaos", {}, "lcu"),
     ("Classé", {"match_type": "ranked"}, "web"),
     # ⚠️ Riot range l'ARAM dans `type=normal` : on l'exclut pour « Normale ».
     ("Normale", {"match_type": "normal", "exclude_queue": 450}, "web"),
     ("ARAM", {"queue": 450}, "web"),
-    ("ARAM Chaos", {}, "lcu"),
 ]
 PER_PAGE = 10
 
