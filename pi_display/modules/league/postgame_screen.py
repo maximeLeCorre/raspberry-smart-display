@@ -162,6 +162,7 @@ class PostGameScreen(Screen):
         signature = (
             self.active,
             self.data.get("win"),
+            self.data.get("status"),
             str(self.data.get("me")),
             tuple((p.get("championId"), p.get("isSelf"), p.get("isFriend"),
                    (p.get("metrics") or {}).get(self.active, 0)) for p in players),
@@ -178,7 +179,10 @@ class PostGameScreen(Screen):
         surface.blit(hint, hint.get_rect(center=RETOUR_RECT.center))
 
         if not players:
-            msg = self.font_title.render("En attente du bilan…", True, GREY)
+            text = ("Détail non disponible"
+                    if self.data.get("status") == "unavailable"
+                    else "En attente du bilan…")
+            msg = self.font_title.render(text, True, GREY)
             surface.blit(msg, msg.get_rect(center=(self.width // 2, self.height // 2)))
             return [pygame.Rect(0, 0, self.width, self.height)]
 

@@ -66,6 +66,14 @@ class App:
         self.store = Store()
         # Bilan en mode « dernière partie » (fin de game) vs « revue » (clic).
         self._postgame_latest = False
+        # Id de la partie la plus récente AVANT la partie en cours : sert à
+        # savoir, en fin de partie, si celle qui vient de finir est bien
+        # arrivée dans le store (sinon on afficherait par erreur la précédente).
+        self._postgame_baseline = None
+        # Scan périodique de l'historique (LCU) : insensible au délai
+        # d'indexation. `_last_sync` = time.monotonic() du dernier scan.
+        self._sync_interval = max(0, int(lol_cfg.get("sync_minutes", 3) or 0)) * 60
+        self._last_sync = 0.0
 
         pygame.init()
         pygame.display.set_caption("Pi Display (simulateur écran 5\")")
@@ -262,10 +270,22 @@ class App:
 
     def sync_lcu(self) -> None:
         """Demande à l'agent les **nouvelles** parties (les 20 récentes de la LCU,
-        jusqu'à la dernière déjà stockée). Sans effet si le PC n'est pas connecté."""
+        jusqu'à la dernière déjà stockée). Sans effet si le PC n'est pas connecté.
+        Réarme le minuteur du scan périodique (toute synchro décale le prochain)."""
         if not self.agent_connected:
             return
+        self._last_sync = time.monotonic()
         self.server.send({"type": "request_lcu_sync", "since": self.store.newest_id()})
+
+    def _maybe_sync(self) -> None:
+        """Scan périodique (appelé chaque frame) : relance une synchro tous les
+        `sync_minutes`. Filet robuste au délai d'indexation LCU, en complément
+        de la synchro immédiate de fin de partie (qui, elle, tombe souvent trop
+        tôt mais marche quand la LCU indexe vite)."""
+        if self._sync_interval <= 0 or not self.agent_connected:
+            return
+        if time.monotonic() - self._last_sync >= self._sync_interval:
+            self.sync_lcu()
 
     def _sync_postgame_later(self, delay: float) -> None:
         """Re-synchro différée après une fin de partie : la LCU met parfois
@@ -278,6 +298,21 @@ class App:
             if (self.current is not None and self.current.name == "postgame"
                     and self._postgame_latest):
                 self.sync_lcu()
+        self.async_call(wait, go)
+
+    def _postgame_unavailable_later(self, delay: float) -> None:
+        """Après les re-synchros : si la partie qui vient de finir n'est toujours
+        pas dans le store (LCU lente à indexer), on affiche « détail non
+        disponible » plutôt qu'une attente indéfinie. Le scan périodique continue
+        et remplacera ce message par le vrai bilan dès que la partie arrive."""
+        def wait():
+            time.sleep(delay)
+
+        def go(_):
+            if (self.current is not None and self.current.name == "postgame"
+                    and self._postgame_latest
+                    and self.store.newest_id() == self._postgame_baseline):
+                self._show_postgame({"status": "unavailable"})
         self.async_call(wait, go)
 
     def lcu_action(self, action: str) -> None:
@@ -337,7 +372,11 @@ class App:
         if name == "history":
             self.screens["history"].reload()
         elif name == "postgame" and self._postgame_latest:
-            self._load_detail(self.store.newest_id())
+            # On n'affiche le bilan « dernière partie » que si une NOUVELLE
+            # partie est arrivée (sinon on montrerait par erreur la précédente).
+            newest = self.store.newest_id()
+            if newest and newest != self._postgame_baseline:
+                self._load_detail(newest)
 
     def joinable_screen(self) -> str | None:
         """Écran non-défaut proposé par l'agent, qu'on peut rejoindre depuis le
@@ -416,6 +455,7 @@ class App:
             # Nouvelle session : on repasse en auto et on annonce nos modules.
             self.manual_screen = None
             self.agent_connected = True
+            self._last_sync = 0.0        # force un scan au prochain _maybe_sync
             self.server.send({"type": "hello", "modules": self.enabled_modules})
 
         elif msg_type == "_disconnected":
@@ -434,15 +474,19 @@ class App:
                 self.manual_screen = None
             if self.manual_screen is None:
                 self.set_screen(screen)
-                # Fin de partie : on synchronise (la partie qui vient de finir
-                # arrive dans le store) puis on affiche son bilan. Re-synchros
-                # différées car la LCU peut mettre quelques secondes à l'indexer.
+                # Fin de partie : on tente une synchro immédiate (+ re-synchros
+                # différées : la LCU met parfois quelques secondes à indexer).
+                # Le scan périodique reste le filet. `_postgame_baseline` =
+                # dernière partie connue AVANT celle-ci, pour savoir quand la
+                # nouvelle est vraiment arrivée. À défaut : « non disponible ».
                 if screen == "postgame":
                     self._postgame_latest = True
+                    self._postgame_baseline = self.store.newest_id()
                     self._show_postgame({})      # « en attente du bilan… »
                     self.sync_lcu()
                     self._sync_postgame_later(8)
                     self._sync_postgame_later(20)
+                    self._postgame_unavailable_later(24)
 
         elif msg_type == "data":
             # L'agent ne pousse que les écrans « locaux » (queue/champselect/lol).
@@ -472,7 +516,7 @@ class App:
             if gid and detail:
                 self.store.set_detail(gid, detail)
             if self.current is not None and self.current.name == "postgame":
-                self._show_postgame(detail or {})
+                self._show_postgame(detail or {"status": "unavailable"})
 
     def _draw_debug(self, dirty):
         rect = pygame.Rect(0, 0, 360, 58)
@@ -495,6 +539,7 @@ class App:
                 self._handle_pygame_events()
                 self._handle_actions()
                 self._handle_network()
+                self._maybe_sync()    # scan périodique de l'historique (LCU)
                 self._drain_io()      # résultats des appels réseau asynchrones
 
                 dirty = self.current.draw(self.surface)

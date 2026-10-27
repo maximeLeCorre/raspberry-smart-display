@@ -76,8 +76,12 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
 - **Toutes les parties viennent de la LCU** (via agent), stockées avec résumé **+ bilan 10
   joueurs** (stats consultables PC éteint).
 - **Synchro** (`App.sync_lcu` → `request_lcu_sync{since}` → agent `iter_lcu_sync` → lots
-  `store_matches`) déclenchée à l'**ouverture de l'historique** et en **fin de partie**
-  (re-synchros différées = délai d'indexation LCU). ⚠️ La LCU **ne pagine pas**
+  `store_matches`) déclenchée à l'**ouverture de l'historique**, à la **connexion de
+  l'agent**, en **fin de partie** (immédiate + re-synchros différées 8/20 s), et par un
+  **scan périodique** (`_maybe_sync` dans `run()`, `[lol] sync_minutes`, défaut 3 min ;
+  filet insensible au délai d'indexation LCU). Bilan « dernière partie » : affiché quand
+  une partie **plus récente que `_postgame_baseline`** arrive ; sinon **« détail non
+  disponible »** (repli `_postgame_unavailable_later`). ⚠️ La LCU **ne pagine pas**
   (`begIndex/endIndex` ignorés) → seulement les **20 récentes** exposées ; l'historique
   **s'accumule au fil des parties jouées**.
 
