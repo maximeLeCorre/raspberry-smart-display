@@ -31,3 +31,6 @@ Thumbs.db
 
 # --- Base locale des parties (Pi) ---
 *.db
+
+# --- Journaux de l'agent PC (autostart) ---
+logs/
