@@ -129,16 +129,15 @@ class LolScreen(Screen):
             return ACTION_BACK
         for rect, player in self._rows:
             if rect.collidepoint(pos):
-                puuid = player.get("puuid") or ""
-                if puuid and puuid == self.selected_puuid:
+                rid = player.get("riotId") or ""      # clé = Riot ID 'Nom#TAG'
+                if rid and rid == self.selected_puuid:
                     self.selected_puuid = None      # re-clic = refermer le dossier
                 else:
-                    self.selected_puuid = puuid or None
-                    if puuid and puuid not in self.player_info \
-                            and puuid not in self._requested_info:
-                        self._requested_info.add(puuid)
-                        self.app.request_player_info(
-                            puuid, None, player.get("championId", 0))
+                    self.selected_puuid = rid or None
+                    if rid and rid not in self.player_info \
+                            and rid not in self._requested_info:
+                        self._requested_info.add(rid)
+                        self.app.request_player_info(rid, player.get("championId", 0))
                 self._last_signature = None
                 return None
         return None
@@ -228,8 +227,8 @@ class LolScreen(Screen):
         row = pygame.Rect(x, y + 2, COL_W, row_h - 4)
         self._rows.append((row, player))
 
-        selected = (player.get("puuid") or "") and \
-            (player.get("puuid") == self.selected_puuid)
+        selected = (player.get("riotId") or "") and \
+            (player.get("riotId") == self.selected_puuid)
         if selected:
             pygame.draw.rect(surface, (40, 60, 95), row, border_radius=6)
             pygame.draw.rect(surface, BLUE, row, width=1, border_radius=6)

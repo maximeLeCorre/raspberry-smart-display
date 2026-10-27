@@ -101,14 +101,13 @@ class ChampSelectScreen(Screen):
             return ACTION_BACK
         for rect, player in self._rows:
             if rect.collidepoint(pos):
-                puuid = player.get("puuid") or ""
+                rid = player.get("riotId") or ""
                 champ_id = player.get("championId", 0)
-                self.selected_puuid = puuid
+                self.selected_puuid = rid     # clé = Riot ID 'Nom#TAG'
                 self._last_state = None
-                # Détails joueur (si pas déjà en cache).
-                if puuid and puuid not in self.player_info:
-                    self.app.request_player_info(
-                        puuid, player.get("summonerId"), champ_id)
+                # Détails joueur (si pas déjà en cache). Le Pi résout/enrichit.
+                if rid and rid not in self.player_info:
+                    self.app.request_player_info(rid, champ_id)
                 # Splash art du champion (si pas déjà reçu).
                 if champ_id and champ_id not in self._splash_cache \
                         and champ_id not in self._splash_requested:
@@ -156,7 +155,7 @@ class ChampSelectScreen(Screen):
         self._rows = []
         for i, player in enumerate(self.players[:5]):
             row = pygame.Rect(LIST_X, LIST_TOP + i * ROW_H, ROW_W, ROW_H - 6)
-            selected = (player.get("puuid") or "") == self.selected_puuid
+            selected = (player.get("riotId") or "") == self.selected_puuid
             is_self = player.get("isSelf")
 
             # Le cadre de ligne est fourni par le fond : on ne dessine qu'un
@@ -246,7 +245,7 @@ class ChampSelectScreen(Screen):
 
     def _selected_champion_id(self) -> int:
         for p in self.players:
-            if (p.get("puuid") or "") == self.selected_puuid:
+            if (p.get("riotId") or "") == self.selected_puuid:
                 return p.get("championId", 0) or 0
         return 0
 
@@ -360,7 +359,7 @@ class ChampSelectScreen(Screen):
     @staticmethod
     def _players_signature(players: list[dict]):
         return tuple(
-            (p.get("puuid"), p.get("championId"), p.get("gameName"),
+            (p.get("riotId"), p.get("championId"), p.get("gameName"),
              p.get("position"))
             for p in players
         )

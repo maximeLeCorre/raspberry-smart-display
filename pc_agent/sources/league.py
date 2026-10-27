@@ -1,27 +1,19 @@
 """Source League of Legends : détecte la phase de jeu et produit les écrans.
 
-S'appuie sur la LCU (phase, sélection, après-partie), la Live Client Data API
-(partie en cours) et l'API Web Riot (détails joueur enrichis).
+Depuis que le Pi est autonome pour l'enrichissement Web (dossiers joueurs,
+icônes, splash, historique, bilan de fin), l'agent ne fournit plus que des
+données **locales** : la phase et la session de sélection (LCU) et le scoreboard
+d'une partie en cours (Live Client Data API). Il n'a **plus de clé Riot** et ne
+répond à aucune requête d'enrichissement (le Pi s'en charge directement).
 """
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-from champ_select import (build_champ_select_payload, build_player_info,
-                          icon_b64, splash_b64)
+from champ_select import build_champ_select_payload
 from lcu import LcuClient
-from phases import build_postgame_payload, build_queue_payload
+from phases import build_queue_payload
 from riot_api import get_all_game_data, summarize_full
-from riot_web import RiotWeb
-from sender import msg_icon, msg_player_info, msg_splash
 from sources.base import Source
-
-# .env à la racine du dépôt (deux niveaux au-dessus de pc_agent/sources/).
-ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 class LeagueSource(Source):
@@ -30,42 +22,27 @@ class LeagueSource(Source):
     def __init__(self, config: dict):
         super().__init__(config)
         self.lcu = LcuClient()
-        use_player_info = config.get("features", {}).get("player_info", True)
-        self.riot = self._make_riot(config) if use_player_info else None
 
         # (prédicat sur la phase, écran, constructeur du payload)
         self._rules = [
             (lambda p: p in ("Matchmaking", "ReadyCheck"), "queue",
              lambda p: build_queue_payload(self.lcu, p)),
             (lambda p: p == "ChampSelect", "champselect",
-             lambda p: build_champ_select_payload(self.lcu, self.riot)),
+             lambda p: build_champ_select_payload(self.lcu)),
             (lambda p: p == "InProgress", "lol",
              lambda p: self._lol_payload()),
+            # Fin de partie : on bascule l'écran, mais c'est le Pi qui récupère le
+            # bilan (via l'API Web, la dernière partie du compte configuré).
             (lambda p: p in ("WaitingForStats", "PreEndOfGame", "EndOfGame"), "postgame",
-             lambda p: build_postgame_payload(self.lcu)),
+             lambda p: None),
         ]
-
-    def _make_riot(self, config: dict) -> RiotWeb:
-        load_dotenv(ENV_PATH)
-        api_key = os.getenv("RIOT_API_KEY") or None
-        platform = config["riot"]["platform"]
-        regional = config["riot"]["regional"]
-        detected_platform, detected_regional = self.lcu.region_platform()
-        if detected_platform and detected_regional:
-            platform, regional = detected_platform, detected_regional
-        if not api_key:
-            print("[league] RIOT_API_KEY absente de .env : détails joueur limités.")
-        return RiotWeb(api_key, platform, regional)
 
     def _lol_payload(self):
         data = get_all_game_data()
         if not data:
             return None
-        # Résolveur de PUUID pour le dossier au clic (rang/winrate/mains) ; None
-        # si l'API Web est désactivée (pas de clé). Mis en cache -> gratuit après
-        # le 1er tick malgré les 10 joueurs.
-        resolver = self.riot.resolve_puuid if (self.riot and self.riot.enabled) else None
-        return summarize_full(data, self.lcu.champion_id_by_name, resolver)
+        # Le Pi enrichit les dossiers au clic via le `riotId` de chaque joueur.
+        return summarize_full(data, self.lcu.champion_id_by_name)
 
     def poll(self):
         phase = self.lcu.gameflow_phase()
@@ -75,22 +52,3 @@ class LeagueSource(Source):
             if matches(phase):
                 return (screen, build(phase))
         return None  # menu / lobby -> rien de spécial (défaut géré par l'agent)
-
-    def handle_request(self, message: dict, sender) -> bool:
-        msg_type = message.get("type")
-        if msg_type == "request_player_info":
-            puuid = message.get("puuid", "")
-            info = build_player_info(self.lcu, self.riot, puuid,
-                                     message.get("summonerId"),
-                                     int(message.get("championId") or 0))
-            sender.send_safe(msg_player_info(puuid, info))
-            return True
-        if msg_type == "request_icon":
-            cid = int(message.get("championId") or 0)
-            sender.send_safe(msg_icon(cid, icon_b64(self.lcu, cid)))
-            return True
-        if msg_type == "request_splash":
-            cid = int(message.get("championId") or 0)
-            sender.send_safe(msg_splash(cid, splash_b64(self.lcu, cid)))
-            return True
-        return False

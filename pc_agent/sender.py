@@ -98,22 +98,12 @@ class Sender:
         threading.Thread(target=loop, name="ws-receiver", daemon=True).start()
 
 
-# Raccourcis de construction des messages du protocole.
+# Raccourcis de construction des messages du protocole. L'agent ne pousse plus
+# que l'écran courant et ses données locales ; tout l'enrichissement (dossiers,
+# icônes, splash, historique, bilan) est fait par le Pi lui-même.
 def msg_set_screen(screen: str) -> dict:
     return {"type": "set_screen", "screen": screen}
 
 
 def msg_data(screen: str, payload: dict) -> dict:
     return {"type": "data", "screen": screen, "payload": payload}
-
-
-def msg_player_info(puuid: str, info: dict) -> dict:
-    return {"type": "player_info", "puuid": puuid, "info": info}
-
-
-def msg_icon(champion_id, icon_b64) -> dict:
-    return {"type": "icon", "championId": champion_id, "iconB64": icon_b64}
-
-
-def msg_splash(champion_id, splash_b64) -> dict:
-    return {"type": "splash", "championId": champion_id, "splashB64": splash_b64}

@@ -52,6 +52,20 @@ def load_auth_token() -> str:
     return (os.getenv("DISPLAY_AUTH_TOKEN") or "").strip()
 
 
+def load_riot_key() -> str:
+    """Clé de l'API Web Riot (RIOT_API_KEY), lue dans le .env du Pi.
+
+    Le Pi est désormais autonome pour l'enrichissement Web (rangs, winrate,
+    historique) : la clé vit ici, pas sur l'agent. Vide si non définie.
+    """
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(ENV_PATH)
+    except ImportError:
+        pass
+    return (os.getenv("RIOT_API_KEY") or "").strip()
+
+
 def build_server_ssl(config: dict) -> ssl.SSLContext | None:
     """Contexte TLS côté serveur (Pi), ou None si TLS désactivé.
 

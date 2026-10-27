@@ -35,6 +35,19 @@ max_items = 15           # nombre d'articles gardés (liste France Info)
 league = true      # League of Legends (file, sélection, partie, après-partie)
 # valorant = false  # (exemple futur)
 
+[riot]
+# Routing de l'API Web Riot (le Pi l'interroge lui-même : historique, rangs...).
+# La clé RIOT_API_KEY se met dans le .env du Pi (jamais ici, jamais sur Git).
+platform = "euw1"     # plateforme : euw1, eun1, na1, kr, br1, ...
+regional = "europe"   # région : europe, americas, asia
+
+[lol]
+# Ton Riot ID "Nom#TAG" : indispensable pour l'historique (le Pi tire les
+# parties de CE compte). Vide = historique désactivé.
+summoner = "maxoulefou#EUW"   # compte dont on tire l'historique
+# Amis (premade) mis en évidence en ROSE sur l'écran de fin. "Nom#TAG".
+friends = []    # ex. ["Pote#EUW", "Autre#1234"]
+
 [gpio]
 # Broches BCM des boutons physiques (uniquement sur le Pi, ignorées sur PC).
 # button_back : force le retour au mode par défaut (même si le jeu tourne).

@@ -21,10 +21,25 @@ sur `localhost`.
 
 ## Architecture : deux programmes
 
-- **`pi_display/`** — appli d'affichage (Pygame). Tournera sur le Pi ; se teste
-  en fenêtre sur PC. Serveur WebSocket qui reçoit écran + données.
-- **`pc_agent/`** — agent de fond (Windows). Détecte l'activité, lit les API
-  locales/Web de Riot, envoie au Pi. Client WebSocket.
+- **`pi_display/`** — appli d'affichage (Pygame) + **cerveau « internet »**.
+  Tournera sur le Pi ; se teste en fenêtre sur PC. Serveur WebSocket qui reçoit
+  écran + données. **Interroge lui-même l'API Web Riot et les CDN** (rangs,
+  winrate, mains, **historique**, **bilan de fin**, icônes, splash) → voir
+  `pi_display/riot_web.py`. C'est ici que vit **`RIOT_API_KEY`** (.env du Pi).
+- **`pc_agent/`** — agent de fond (Windows), **purement local, SANS clé**.
+  Détecte l'activité et lit les **API locales** de Riot (LCU = phase/sélection ;
+  Live Client Data = partie en cours), puis pousse écran + données au Pi. Client
+  WebSocket. **Utile uniquement quand une partie est en cours** (données
+  impossibles à obtenir autrement).
+
+> **Qui fait quoi (important)** : l'agent ne fournit plus que du **local** (phase,
+> sélection avec `riotId`, scoreboard live, objectifs). **Tout l'enrichissement
+> internet est fait par le Pi** : au clic sur un joueur, le Pi résout le PUUID et
+> interroge l'API Web ; l'historique et le bilan de fin sont récupérés par le Pi
+> via `match-v5` (le Pi marche donc **agent/PC éteint** pour consulter
+> l'historique). Appels réseau lancés hors de la boucle de rendu via
+> `App.async_call(fn, on_result)` (worker thread → résultat livré au thread
+> principal par `_drain_io`).
 
 Communication : **WebSocket JSON bidirectionnel** (lib `websockets`, API
 **synchrone** `websockets.sync` des deux côtés — pas d'asyncio). Le Pi est
@@ -60,8 +75,13 @@ serveur, l'agent est client.
 - Générer les fonds : `.\.venv\Scripts\python pi_display\tools\gen_backgrounds.py`
 - Générer le certificat TLS : `.\.venv\Scripts\python pi_display\tools\gen_cert.py` (puis `tls = true` dans les deux config.toml)
 - Lancer l'affichage : `.\.venv\Scripts\python pi_display\main.py --scale 2`
-- Lancer l'agent (simulation) : `.\.venv\Scripts\python pc_agent\main.py --simulate --scenario champselect|game|full`
+- Lancer l'agent (simulation) : `.\.venv\Scripts\python pc_agent\main.py --simulate --scenario champselect|game|aram|queue|home|postgame|full`
 - Lancer l'agent (réel) : `.\.venv\Scripts\python pc_agent\main.py`
+
+> ⚠️ En **`--simulate`**, l'agent vise **`127.0.0.1`** par défaut (test local),
+> pas l'IP du Pi de `config.toml [pi].host` (sinon « Pi injoignable » dérouteur
+> si le vrai Pi est absent). Utiliser `--host` pour viser un autre Pi. En mode
+> **réel**, c'est bien l'IP de la config qui est utilisée.
 
 > Python ne recharge pas à chaud : après une modif de code, **relancer** les
 > programmes concernés.
@@ -96,6 +116,11 @@ identique des deux côtés). Côté Pi : `config.load_auth_token()` → `Network
 le handshake à chaque (re)connexion. En cas de refus, le Pi renvoie
 `{"type":"auth_result","ok":false}` puis ferme.
 
+Le protocole est désormais **minimal** : l'agent ne fait que pousser l'écran
+courant et ses données locales ; **le Pi ne lui demande plus rien** (il enrichit
+tout seul). Le payload `postgame` n'est **plus** envoyé par l'agent (le Pi
+récupère la dernière partie via l'API Web à la réception de `set_screen postgame`).
+
 Pi → PC (à la connexion) :
 - `{"type":"hello","modules":["system","league"]}` (modules actifs annoncés)
 
@@ -104,20 +129,15 @@ PC → Pi (premier message si jeton configuré) :
 
 PC → Pi :
 - `{"type":"set_screen","screen":"default|queue|champselect|lol|postgame"}`
-- `{"type":"data","screen":"lol","payload":{...}}` (le payload dépend de l'écran)
-- `{"type":"player_info","puuid":"...","info":{...}}` (réponse à une demande)
-- `{"type":"icon","championId":...,"iconB64":"..."}` (réponse à request_icon)
-- `{"type":"splash","championId":...,"splashB64":"..."}` (réponse à request_splash)
-
-Pi → PC (requêtes) :
-- `{"type":"request_player_info","puuid":"...","summonerId":...,"championId":...}`
-- `{"type":"request_icon","championId":...}`
-- `{"type":"request_splash","championId":...}`
+- `{"type":"data","screen":"queue|champselect|lol","payload":{...}}`
+  (données **locales** ; chaque joueur porte un `riotId` = 'Nom#TAG' que le Pi
+  utilise pour enrichir au clic)
 
 Interne (synthétisé par le serveur Pi, pas envoyé par l'agent) :
 - `{"type":"_connected"}` / `{"type":"_disconnected"}`
 
-La déconnexion du client fait revenir le Pi à l'écran par défaut.
+La déconnexion du client fait revenir le Pi à l'écran par défaut (mais
+l'historique/bilan restent consultables : ils ne dépendent pas de l'agent).
 
 ## Écrans (`pi_display/`)
 
@@ -126,8 +146,10 @@ La déconnexion du client fait revenir le Pi à l'écran par défaut.
   **dirty rects** (ménage le Pi 3) ; repli couleur si PNG absent.
 - `modules/system/default_screen.py` : `DefaultScreen` (horloge, date, **3
   dernières actus RSS** cliquables, onglet **« France Info »** en haut à gauche,
-  et **bandeau LoL « Rejoindre »** en haut, conditionnel). Module système,
-  toujours actif. La météo a été retirée.
+  **bandeau LoL « Rejoindre »** en haut, conditionnel, et bouton **« Dernières
+  parties »** à droite de l'en-tête ACTU — affiché seulement si le module League
+  est actif, ouvre l'écran `history`). Module système, toujours actif. La météo a
+  été retirée.
 - `modules/system/news_screen.py` : `NewsScreen` (écran **« France Info »**,
   `name="news"`, hors cycle) : liste défilante des articles (flèches ▲/▼) et vue
   détail (titre + date + résumé + lien). Ouvert depuis l'accueil (onglet ou clic
@@ -140,7 +162,48 @@ La déconnexion du client fait revenir le Pi à l'écran par défaut.
   réseau RSS (tout est local au Pi).
 - `modules/league/` : `QueueScreen` (file + ready-check), `ChampSelectScreen`
   (équipe, timer de phase, bans, clic → détails + **splash art**), `LolScreen`
-  (complément à l'écran de jeu, voir ci-dessous), `PostGameScreen` (bilan).
+  (complément à l'écran de jeu, voir ci-dessous), `PostGameScreen` (bilan, voir
+  ci-dessous).
+
+**`PostGameScreen` (après-partie)** : comparatif des **10 joueurs en barres
+horizontales**, **dessiné entièrement en code** (pas de PNG, comme `news` — tout
+est dynamique ; `postgame.png` n'est plus utilisé). Barre d'onglets en haut = une
+**métrique** chacun (`dmg`/`taken`/`gold`/`cs`/`vision`/`heal` → Dégâts/Subis/Or/
+CS/Vision/Soins), clic = change le graphe ; les barres sont triées par valeur
+décroissante (icône + valeur). **Code couleur : TOI = rouge, amis (premade) =
+rose, autres = bleu.** Un bandeau bas rappelle tes stats en petit en permanence.
+Les **amis** sont reconnus via leur Riot ID listé dans **`pi_display/config.toml`
+`[lol] friends = ["Nom#TAG", …]`** (insensible à la casse). Les stats des 10
+joueurs viennent de l'**API Web Riot (`match-v5`), calculées PAR LE PI**
+(`riot_web.build_match_detail`). La liste `METRICS` (écran) et les clés des
+`metrics` (builder) doivent rester alignées.
+
+**`MatchHistoryScreen` (`name="history"`, hors cycle, dessiné en code)** : liste
+des dernières parties, **ouverte depuis l'accueil** (bouton « Dernières
+parties »). `App.open_history()` pose le verrou manuel et lance `request_match_history`
+→ **le Pi récupère la liste lui-même** (`riot_web.build_match_history`, en tâche
+de fond) et remplit l'écran. Un clic appelle `App.open_postgame_review(gameId)` :
+le Pi récupère le détail (`build_match_detail`), bascule sur `postgame` en **mode
+revue** (`app.postgame_return = "history"`, RETOUR → liste). Un `set_screen`
+poussé par l'agent (vraie partie) **annule** le mode revue.
+
+**Source des données = le Pi, via l'API Web Riot** (`pi_display/riot_web.py`,
+stdlib `urllib`) :
+- Nécessite **`RIOT_API_KEY`** (dans le **.env du Pi**) **et** `[lol] summoner =
+  "Nom#TAG"` (le compte dont on tire l'historique). `[riot] platform/regional`
+  pour le routing. **Marche agent/PC éteint.**
+- `gameId` = **matchId** `match-v5` (ex. `EUW1_123`) ; cache dans
+  `RiotWeb._match_cache` (liste↔détail partagés, winrate réutilise).
+- **Bilan de fin de partie** : à la réception de `set_screen postgame`, le Pi
+  appelle `_load_postgame(None, retries=4)` → récupère la **dernière** partie du
+  compte (réessais pour le délai d'indexation de l'API juste après la game).
+- **Icônes** = CDN Community Dragon (`riot_web.icon_bytes`), **splash** = Data
+  Dragon (`splash_bytes`) — récupérés par le Pi (plus de round-trip agent).
+- Clé des dossiers joueurs = le **`riotId`** (`Nom#TAG`) envoyé par l'agent ; le
+  Pi résout le PUUID (`resolve_puuid`, en cache) et enrichit (`build_player_info`).
+- Testable (écrans locaux) : `pc_agent/main.py --simulate --scenario home` — mais
+  l'enrichissement réel exige la clé/compte configurés **sur le Pi** (les joueurs
+  fictifs du simulateur n'ont pas de vrai dossier).
 
 **`LolScreen` (partie en cours) — philosophie** : le scoreboard brut (KDA/CS/or/
 killfeed) est déjà visible en jeu, donc l'écran privilégie ce qu'on n'a PAS
@@ -198,91 +261,89 @@ implémenter `draw()` (et `update_data()` si réseau) ; l'ajouter à la liste
 - Options d'affichage : `--fullscreen`/`--windowed` (auto plein écran + SDL
   `kmsdrm` si Pi détecté), `--scale N`, `--monitor N`, `--debug`.
 
-## Les API Riot utilisées (pc_agent) — et leurs pièges
+## Les API Riot utilisées — et leurs pièges
 
-1. **LCU API** (`lcu.py`) — API du **client** League, dispo dès qu'il est ouvert.
+**Répartition** : les API **locales** (LCU, Live Client Data) sont sur l'**agent**
+(`pc_agent/`) ; l'**API Web** et les CDN sont sur le **Pi** (`pi_display/riot_web.py`).
+
+1. **LCU API** (`pc_agent/lcu.py`) — API du **client** League, dispo dès qu'il est ouvert.
    - Auth : port + token lus dans les args du process `LeagueClientUx.exe`
      (`--app-port` / `--remoting-auth-token`), HTTP Basic user `riot`,
      certificat auto-signé → `verify=False`.
-   - Sert à : phase de jeu (`/lol-gameflow/v1/gameflow-phase`), session de
-     sélection (`/lol-champ-select/v1/session`), **icônes** de champions
-     (`/lol-game-data/assets/v1/champion-icons/{id}.png`, OK), summoner par id.
-   - ⚠️ **PIÈGE 1** : le `puuid` renvoyé par la LCU est un identifiant **interne**
-     (format UUID 36 car.) que l'API Web **rejette** (`400 Exception decrypting`).
-     Il faut résoudre le **vrai PUUID externe** (78 car.) via `account-v1
-     by-riot-id` (voir `riot_web.resolve_puuid`).
-   - ⚠️ **PIÈGE 2** : la LCU **n'expose pas** de résumé id→nom de champion
-     (les chemins `champion-summary.json` renvoient 404). On récupère le mapping
-     depuis **Community Dragon** (`CHAMPION_SUMMARY_URL` dans `lcu.py`, CDN
-     public, pas de clé). Le PC a Internet, donc OK.
+   - Sert (côté agent) à : phase de jeu (`/lol-gameflow/v1/gameflow-phase`),
+     session de sélection (`/lol-champ-select/v1/session`), summoner par id, et le
+     mapping id→nom de champion (**Community Dragon**, `CHAMPION_SUMMARY_URL`, CDN
+     public — la LCU ne l'expose pas, 404).
+   - ⚠️ **PIÈGE** : le `puuid` LCU est **interne** (36 car.) et **rejeté** par
+     l'API Web. On ne l'utilise plus : l'agent envoie le **Riot ID** (`riotId`),
+     et **le Pi** résout le vrai PUUID externe via `account-v1 by-riot-id`
+     (`riot_web.resolve_puuid`).
 
-2. **Live Client Data API** (`riot_api.py`) — `https://127.0.0.1:2999/liveclientdata/allgamedata`.
-   - Dispo **uniquement pendant une partie** (phase `InProgress` chargée).
+2. **Live Client Data API** (`pc_agent/riot_api.py`) — `https://127.0.0.1:2999/liveclientdata/allgamedata`.
+   - Dispo **uniquement pendant une partie** (phase `InProgress` chargée). Agent.
    - Certificat auto-signé → `verify=False`. Gérer les erreurs (souvent None).
 
-3. **API Web Riot** (`riot_web.py`) — nécessite `RIOT_API_KEY` (dans `.env`).
-   - Clé **dev** : expire toutes les 24 h (régénérer sur developer.riotgames.com).
-   - Routing : endpoints **plateforme** (euw1…) vs **régional** (europe/americas/asia).
-   - Utilisé pour enrichir un joueur au clic : `account-v1 by-riot-id`
-     (→ vrai PUUID), `summoner-v4`, `league-v4 entries by-puuid` (rang),
-     `champion-mastery-v4` (maîtrise + mains), `match-v5` (winrate récent).
-   - Tolérant aux erreurs : renvoie None/partiel, ne casse jamais la boucle.
-   - Région **auto-détectée** via la LCU si le client est ouvert.
+3. **API Web Riot** (`pi_display/riot_web.py`, **sur le Pi**, stdlib `urllib`) —
+   nécessite `RIOT_API_KEY` (**.env du Pi**, clé permanente) + `[riot]
+   platform/regional` + `[lol] summoner`.
+   - `account-v1 by-riot-id` (→ vrai PUUID), `summoner-v4`, `league-v4` (rang),
+     `champion-mastery-v4` (maîtrise + mains), `match-v5` (ids/match → historique,
+     bilan, winrate récent). Caches : PUUID et matchs.
+   - Tolérant aux erreurs : renvoie None/partiel. **CDN** : icônes (Community
+     Dragon, `icon_bytes`) et splash (Data Dragon, `splash_bytes`).
 
 ### Flux « sélection de champions »
 
 `champ_select.build_champ_select_payload` : pour chaque joueur de notre équipe,
-récupère le Riot ID (complété via `lcu.summoner_by_id` si masqué) et résout le
-vrai PUUID. **Les icônes ne sont PAS dans le payload** : le Pi les réclame à la
-carte (`request_icon` → `icon`), une seule fois chacune (cache par `championId`,
-survit aux redémarrages du Pi). `build_player_info` (au clic) agrège rang /
-niveau / maîtrise / winrate / mains via l'API Web.
+récupère le **Riot ID** (`gameName`/`tagLine`, complété via `lcu.summoner_by_id`
+si masqué) et le met dans `riotId`. **Pas de PUUID, pas d'icône, pas
+d'enrichissement côté agent** : le Pi réclame les icônes au CDN (`request_icon`,
+cache par `championId`) et, au clic, enrichit le dossier (`riot_web.build_player_info`
+via le `riotId`).
 
-- ⚠️ Pour les **coéquipiers**, l'enrichissement dépend de la visibilité de leur
-  Riot ID dans le client pendant la sélection (pour **soi**, toujours dispo).
-- Un champion **non encore pické** (`championId=0`) n'a pas d'icône → placeholder
-  avec initiales, jusqu'au pick.
+- ⚠️ Pour les **coéquipiers**, le dossier dépend de la visibilité de leur Riot ID
+  dans le client pendant la sélection (pour **soi**, toujours dispo).
+- Un champion **non encore pické** (`championId=0`) → placeholder avec initiales.
 
 ## Agent : boucle agnostique + Sources (`main.py`, `sources/`)
 
 `main.py` instancie les Sources et, chaque tick, interroge celles des modules
-activés ; la première `poll()` non-None gagne → `set_screen` + `data` ; sinon
-`default`. Dispatch des requêtes (infos/icône/splash) à `Source.handle_request`.
-Mise à jour ≤ 1 fois / `update_interval` (config, 1–2 s).
+activés ; la première `poll()` non-None gagne → `set_screen` (+ `data` si
+payload). Mise à jour ≤ 1 fois / `update_interval` (config, 1–2 s). Le Pi ne
+demande plus rien à l'agent ⇒ `Source.handle_request` n'est plus utilisé par
+League (seul `hello` revient du Pi, pour la liste des modules actifs).
 
 `sources/league.py` (`LeagueSource`) mappe `gameflow_phase` → écran :
 `Matchmaking`/`ReadyCheck` → `queue` ; `ChampSelect` → `champselect` ;
-`InProgress` → `lol` (Live Client Data API ; payload `summarize_full` enrichi de
-`game_mode`, `objectives` [Faille, calculés dans `objectives.py`] et du `puuid`
-de chaque joueur pour le dossier au clic — résolu via `RiotWeb.resolve_puuid`,
-mis en cache donc gratuit après le 1er tick) ;
-`WaitingForStats`/`PreEndOfGame`/`EndOfGame` → `postgame` (historique LCU) ;
-client fermé/menu → `poll()` renvoie None (l'agent affiche `default`). Les
-builders queue/postgame sont dans `phases.py`, la sélection dans `champ_select.py`.
+`InProgress` → `lol` (Live Client Data ; `summarize_full` enrichi de `game_mode`,
+`objectives` [Faille, `objectives.py`] et du **`riotId`** de chaque joueur pour le
+dossier au clic côté Pi) ; `WaitingForStats`/`PreEndOfGame`/`EndOfGame` →
+`postgame` **avec payload None** (c'est le Pi qui récupère le bilan de la dernière
+partie) ; client fermé/menu → `poll()` renvoie None. Builder `queue` dans
+`phases.py`, sélection dans `champ_select.py`. **L'agent n'a plus ni clé Riot ni
+`RiotWeb`.**
 
 Mode simulation (`simulator.py`) : scénarios `full`/`champselect`/`game`/`aram`/
-`queue`/`postgame` avec fausses données (`game` = Faille avec objectifs, `aram` =
-ARAM sans objectifs ; les adversaires fictifs ont un dossier cliquable). Le joueur **maxoulefou** (notre compte, constante `REAL_PLAYER`)
-renvoie de **vraies** stats au clic via l'API Web (si `RIOT_API_KEY` présent),
-sans lancer de partie ; les autres joueurs restent fictifs.
-
-> Note : le PUUID renvoyé par `account-v1` est **chiffré par clé d'API** — il
-> change quand la clé change (clé dev renouvelée). Cohérent tant qu'on garde la
-> même clé sur une session, ce qui est le cas.
+`queue`/`home`/`postgame`, **données locales fictives seulement** (`game` = Faille
+avec objectifs, `aram` = ARAM sans objectifs). L'enrichissement (dossiers, icônes,
+historique, bilan) étant désormais fait par le Pi via l'API Web, il dépend de la
+**clé/compte configurés sur le Pi** — les joueurs fictifs n'ont pas de vrai
+dossier, et `--scenario postgame` fait récupérer au Pi **ta** dernière vraie partie.
 
 ## Config & secrets
 
 - `pi_display/config.toml` : host/port d'écoute, résolution, FPS, broches GPIO,
-  **`[rss]`** (flux d'actualité de l'accueil : `url`/`refresh_minutes`/`max_items` ;
-  `url = ""` pour désactiver), **`[modules]`** (active/désactive les modules —
-  source de vérité, poussée à l'agent).
-- `pc_agent/config.toml` : IP/port du Pi, `update_interval`, noms des process
-  LoL, `[riot] platform/regional`, `[features] player_info`.
-- **`.env`** (racine, **ignoré** par Git) : `RIOT_API_KEY=...` et
-  `DISPLAY_AUTH_TOKEN=...` (jeton d'auth du lien Pi↔agent, voir « Protocole
-  réseau » ; vide = auth désactivée). Modèle versionné : `.env.example`. Ne
-  **jamais** committer de secret. Le `.env` doit exister **sur le Pi aussi** (au
-  moins le jeton) pour que l'authentification soit active.
+  **`[rss]`**, **`[modules]`** (source de vérité, poussée à l'agent), **`[riot]
+  platform/regional`** (routing API Web) et **`[lol] summoner`/`friends`** (compte
+  dont on tire l'historique + amis en rose).
+- `pc_agent/config.toml` : IP/port du Pi, `update_interval`, noms des process LoL.
+  **Plus de `[riot]`/`[features]`** (l'agent n'a plus de clé).
+- **`.env`** (racine, **ignoré** par Git) : `RIOT_API_KEY=...` (clé **permanente**)
+  et `DISPLAY_AUTH_TOKEN=...` (jeton d'auth du lien Pi↔agent ; vide = désactivé).
+  Modèle versionné : `.env.example`. Ne **jamais** committer de secret.
+  ⚠️ **Le `.env` du Pi doit contenir `RIOT_API_KEY`** (le Pi est autonome pour
+  l'API Web) **et** le jeton d'auth. L'agent (PC) n'a besoin que du jeton.
+  `deploy_pi.py` copie les deux sur le Pi.
 
 ## Tests
 
@@ -295,12 +356,13 @@ de diagnostic sont temporaires (préfixe `_`) et supprimés après usage.
 ## Fonds d'écran (design)
 
 **Un PNG 800×480 par écran** dans `pi_display/assets/` : `default`, `queue`,
-`champselect`, `lol`, `postgame`. Ils **contiennent les cadres/panneaux/zones**
+`champselect`, `lol`. Ils **contiennent les cadres/panneaux/zones**
 (le code ne dessine que le contenu, aligné dessus — voir « Cadres = dans le fond »
 plus haut). Les fonds actuels ont été générés par un outil de design externe
 (IA), pas procéduralement — **chaque fond est propre à la mise en page de son
-écran** (ne plus les partager entre écrans). Exceptions : l'écran `news` (France
-Info) n'a **pas** de PNG (dessiné en code) ; `default.png` est **dérivé** de
+écran** (ne plus les partager entre écrans). Exceptions dessinées **en code**
+(sans PNG) : l'écran `news` (France Info) et l'écran `postgame` (barres
+dynamiques — `postgame.png` n'est plus chargé). `default.png` est **dérivé** de
 `default_base.png` (l'art brut) par `tools/gen_default_bg.py`, qui y bake les
 panneaux horloge/actu + l'onglet — régénérer via ce script, pas à la main.
 
@@ -324,8 +386,9 @@ Anciens outils procéduraux conservés en repli/historique : `design/backgrounds
 du venv). Renseigner le bloc CONFIG en tête (IP, utilisateur, **mot de passe**
 SSH ; `INSTALL_DEPS`/`SETUP_SERVICE`/`FULLSCREEN`). Il :
 1. fabrique une archive de `pi_display/` (hors `__pycache__`/`.pyc`/`_*`) + le
-   `certs/` (certificat TLS) + un `.env` **réduit au seul `DISPLAY_AUTH_TOKEN`**
-   (la clé Riot ne part pas sur le Pi) ;
+   `certs/` (certificat TLS) + un `.env` contenant **`DISPLAY_AUTH_TOKEN` ET
+   `RIOT_API_KEY`** (le Pi est autonome pour l'API Web : la clé part désormais sur
+   le Pi — `read_env_value` dans `deploy_pi.py`) ;
 2. se connecte en SSH via **paramiko** (mot de passe, non-interactif — à
    installer sur le PC : `pip install paramiko`), envoie et extrait dans
    `PI_DIR` (défaut `/home/<user>/pi-display`) ;

@@ -128,15 +128,15 @@ def _riot_id(player: dict) -> tuple[str, str]:
     return name, tag
 
 
-def summarize_full(data: dict, id_resolver=None, puuid_resolver=None) -> dict:
+def summarize_full(data: dict, id_resolver=None) -> dict:
     """Résumé complet de la partie : scoreboard des 10 joueurs + événements.
 
-    `id_resolver`    : fonction nom_de_champion -> championId (ex. la LCU), pour
-                       que le Pi affiche les icônes. Optionnel.
-    `puuid_resolver` : fonction (gameName, tagLine) -> vrai PUUID externe (ex.
-                       `RiotWeb.resolve_puuid`), pour permettre le « dossier » au
-                       clic pendant la partie (rang/winrate/mains). Optionnel ;
-                       mis en cache côté RiotWeb, donc gratuit après le 1er tick.
+    `id_resolver` : fonction nom_de_champion -> championId (ex. la LCU), pour que
+                    le Pi affiche les icônes. Optionnel.
+
+    Chaque joueur porte son **Riot ID** (`riotId` = 'Nom#TAG') : le Pi s'en sert
+    pour enrichir son dossier au clic (il résout le PUUID et interroge l'API Web
+    lui-même — l'agent n'a plus de clé).
 
     Ajoute aussi `game_mode` (CLASSIC, ARAM, ...) et, en Faille uniquement, les
     `objectives` (timers Dragon/Baron/Héraut) — infos peu accessibles en jeu.
@@ -158,12 +158,9 @@ def summarize_full(data: dict, id_resolver=None, puuid_resolver=None) -> dict:
             team_scores["chaos"] += kills
         name, tag = _riot_id(p)
         champion = p.get("championName", "")
-        puuid = ""
-        if puuid_resolver and name and tag:
-            puuid = puuid_resolver(name, tag) or ""
         players.append({
             "name": name,
-            "puuid": puuid,
+            "riotId": f"{name}#{tag}" if (name and tag) else "",
             "champion": champion,
             "championId": (id_resolver(champion) if id_resolver else 0) or 0,
             "position": p.get("position", ""),
