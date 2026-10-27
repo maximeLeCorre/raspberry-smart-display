@@ -17,7 +17,7 @@ import time
 import psutil
 
 from champ_select import build_champ_select_payload
-from lcu import LcuClient
+from lcu import LcuClient, find_lcu_credentials
 from riot_client import RiotClient
 from phases import build_lcu_detail, build_queue_payload, iter_lcu_sync
 from riot_api import get_all_game_data, summarize_full
@@ -33,6 +33,8 @@ LCU_ACTIONS = {
 # Démarrage à froid du client (Riot Client -> maj -> League -> login -> menu) :
 # lent, surtout au 1er lancement de la journée. On attend jusqu'à 5 min.
 READY_TIMEOUT = 300.0
+# Démarrage de League (patch inclus) après la commande au Riot Client.
+LAUNCH_TIMEOUT = 240.0
 
 # Processus League (bootstrapper + client) : présence = League démarre/est ouverte.
 LEAGUE_PROCESSES = ("leagueclient.exe", "leagueclientux.exe")
@@ -43,6 +45,15 @@ def league_process_running() -> bool:
         if (proc.info["name"] or "").lower() in LEAGUE_PROCESSES:
             return True
     return False
+
+
+def vanguard_stopped() -> bool:
+    """Service anti-triche Vanguard (`vgc`) à l'arrêt ? Après un kill forcé de
+    League, il peut rester cassé et bloquer le lancement jusqu'au redémarrage."""
+    try:
+        return psutil.win_service_get("vgc").status() != "running"
+    except Exception:
+        return False
 
 
 class LeagueSource(Source):
@@ -137,7 +148,8 @@ class LeagueSource(Source):
             if self.lcu.gameflow_phase() is None:          # client fermé -> lancer
                 status("Lancement de League…")
                 if not self._launch_client():
-                    final = "Lancement impossible (voir config)"
+                    final = ("Vanguard arrêté - redémarre le PC" if vanguard_stopped()
+                             else "Lancement impossible (voir config)")
                     return
                 status("Connexion au client… (1-2 min)")
                 if not self._wait_ready(READY_TIMEOUT):
@@ -185,18 +197,23 @@ class LeagueSource(Source):
                 return False
             if not self._wait_riot_logged_in(180):
                 print("[league] Riot Client non connecté (connexion manuelle ?).")
-        for attempt in range(1, 6):
-            if league_process_running():
+        # Succès = la LCU de League répond (pas juste un process présent : un
+        # zombie laissé par un plantage Vanguard existe SANS LCU et piégeait la
+        # détection). On ne re-commande que si RIEN ne démarre (sinon on laisse
+        # League patcher/charger).
+        posted = 0
+        deadline = time.monotonic() + LAUNCH_TIMEOUT
+        while time.monotonic() < deadline:
+            if find_lcu_credentials() is not None:
                 return True
-            if self.riot.launch_league():
-                print(f"[league] Lancement de League demandé (essai {attempt}).")
-            else:
-                print("[league] Le Riot Client n'a pas accepté le lancement.")
-            for _ in range(15):               # ~30 s d'attente de démarrage
-                if league_process_running():
-                    return True
-                time.sleep(2)
-        print("[league] League ne démarre pas (Riot Client pas prêt ?).")
+            if not league_process_running() and posted < 6:
+                if self.riot.launch_league():
+                    posted += 1
+                    print(f"[league] Lancement de League demandé (essai {posted}).")
+                else:
+                    print("[league] Le Riot Client n'a pas accepté le lancement.")
+            time.sleep(4)
+        print("[league] League ne démarre pas (process zombie ou Vanguard ?).")
         return False
 
     def _spawn_riot_client(self) -> bool:
