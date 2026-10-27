@@ -1,22 +1,15 @@
-"""Construction des données de sélection de champions envoyées au Pi,
-et des détails d'un joueur (au clic).
+"""Construction des données de sélection de champions envoyées au Pi.
 
-On combine :
-  - la LCU (session de sélection, icônes de champions, pseudos de notre équipe) ;
-  - l'API Web Riot (rang, niveau, winrate, champions mains) pour enrichir.
+Depuis que le Pi est autonome pour l'enrichissement Web (rangs, winrate, mains,
+icônes, splash), l'agent ne fait plus que du **local** : il lit la session de
+sélection via la LCU et transmet, pour chaque joueur de notre équipe, son
+champion, sa position et son **Riot ID** (`gameName#tagLine`). Le Pi se charge
+d'enrichir au clic (il résout le PUUID et interroge l'API Web lui-même).
 """
 
 from __future__ import annotations
 
-import base64
-
-import requests
-
 from lcu import LcuClient
-from riot_web import RiotWeb
-
-# Art de chargement (portrait) depuis Data Dragon, par alias de champion.
-LOADING_ART_URL = "https://ddragon.leagueoflegends.com/cdn/img/champion/loading/{alias}_0.jpg"
 
 # Phases de sélection -> libellé français.
 SELECT_PHASES = {
@@ -31,29 +24,7 @@ POSITIONS = {
 }
 
 
-def icon_b64(lcu: LcuClient, champion_id: int) -> str | None:
-    """Icône d'un champion en base64 (demandée à la carte par le Pi)."""
-    raw = lcu.champion_icon(champion_id)
-    if not raw:
-        return None
-    return base64.b64encode(raw).decode("ascii")
-
-
-def splash_b64(lcu: LcuClient, champion_id: int) -> str | None:
-    """Art de chargement (portrait) d'un champion en base64 (demandé au clic)."""
-    alias = lcu.champion_alias(champion_id)
-    if not alias:
-        return None
-    try:
-        resp = requests.get(LOADING_ART_URL.format(alias=alias), timeout=8)
-    except requests.RequestException:
-        return None
-    if resp.status_code != 200:
-        return None
-    return base64.b64encode(resp.content).decode("ascii")
-
-
-def build_champ_select_payload(lcu: LcuClient, riot: RiotWeb | None = None) -> dict | None:
+def build_champ_select_payload(lcu: LcuClient) -> dict | None:
     """Résumé de la sélection pour NOTRE équipe (les 5, dont nous).
 
     Renvoie None si on n'est pas en sélection.
@@ -78,16 +49,11 @@ def build_champ_select_payload(lcu: LcuClient, riot: RiotWeb | None = None) -> d
             game_name = game_name or summoner.get("gameName", "") or ""
             tag_line = tag_line or summoner.get("tagLine", "") or ""
 
-        # On résout le VRAI PUUID externe (le PUUID LCU ne marche pas avec
-        # l'API Web). Vide si pseudo masqué / pas de clé -> pas d'enrichissement.
-        puuid = ""
-        if riot and riot.enabled and game_name and tag_line:
-            puuid = riot.resolve_puuid(game_name, tag_line) or ""
+        # riotId = clé d'enrichissement côté Pi (vide si pseudo masqué).
+        riot_id = f"{game_name}#{tag_line}" if (game_name and tag_line) else ""
 
         players.append({
-            "cellId": cell.get("cellId"),
-            "summonerId": summoner_id,
-            "puuid": puuid,
+            "riotId": riot_id,
             "championId": champ_id,
             "championName": lcu.champion_name(champ_id),
             "position": POSITIONS.get((cell.get("assignedPosition") or "").lower(),
@@ -95,8 +61,6 @@ def build_champ_select_payload(lcu: LcuClient, riot: RiotWeb | None = None) -> d
             "gameName": game_name,
             "tagLine": tag_line,
             "isSelf": cell.get("cellId") == my_cell,
-            # Les icônes ne sont plus envoyées ici : le Pi les réclame une à une
-            # (message request_icon) et ne les reçoit qu'une fois chacune.
         })
 
     timer = session.get("timer", {}) or {}
@@ -113,64 +77,3 @@ def build_champ_select_payload(lcu: LcuClient, riot: RiotWeb | None = None) -> d
             "theirTeam": [c for c in bans.get("theirTeamBans", []) if c],
         },
     }
-
-
-def build_player_info(lcu: LcuClient, riot: RiotWeb | None,
-                      puuid: str, summoner_id, champion_id: int) -> dict:
-    """Détails d'un joueur (au clic). Champs manquants = None/absents.
-
-    Sans clé Riot valide, on renvoie au moins ce qu'on a (souvent peu pour les
-    autres joueurs) ; l'affichage s'adapte.
-    """
-    info: dict = {"puuid": puuid, "championId": champion_id,
-                  "championName": lcu.champion_name(champion_id)}
-
-    if not (riot and riot.enabled and puuid):
-        info["error"] = "Clé Riot absente ou joueur sans PUUID."
-        return info
-
-    # Niveau d'invocateur.
-    summoner = riot.summoner_by_puuid(puuid)
-    if summoner:
-        info["summonerLevel"] = summoner.get("summonerLevel")
-
-    # Rang (solo & flex).
-    entries = riot.league_entries_by_puuid(puuid)
-    if entries:
-        ranks = {}
-        for e in entries:
-            queue = e.get("queueType", "")
-            label = {"RANKED_SOLO_5x5": "Solo/Duo",
-                     "RANKED_FLEX_SR": "Flex"}.get(queue, queue)
-            ranks[label] = {
-                "tier": e.get("tier"), "rank": e.get("rank"),
-                "lp": e.get("leaguePoints"),
-                "wins": e.get("wins"), "losses": e.get("losses"),
-            }
-        info["ranks"] = ranks
-
-    # Maîtrise sur le champion sélectionné.
-    if champion_id:
-        mastery = riot.mastery_on_champion(puuid, champion_id)
-        if mastery:
-            info["championMastery"] = {
-                "level": mastery.get("championLevel"),
-                "points": mastery.get("championPoints"),
-            }
-
-    # Champions mains (top maîtrise).
-    top = riot.mastery_top(puuid, count=3)
-    if top:
-        info["mains"] = [
-            {"championId": m.get("championId"),
-             "championName": lcu.champion_name(m.get("championId", 0)),
-             "points": m.get("championPoints")}
-            for m in top
-        ]
-
-    # Winrate récent (quelques parties seulement, car coûteux).
-    winrate = riot.recent_winrate(puuid, count=8)
-    if winrate:
-        info["recent"] = winrate
-
-    return info

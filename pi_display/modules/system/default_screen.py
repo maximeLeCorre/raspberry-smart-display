@@ -35,6 +35,9 @@ NEWS_BULLET_X = 338
 NEWS_TITLE_X = 354
 NEWS_TITLE_MAX = 774 - NEWS_TITLE_X
 
+# Bouton « Dernières parties » (droite de l'en-tête ACTU ; LoL uniquement).
+HISTORY_BTN = pygame.Rect(584, 291, 193, 28)
+
 # Onglet « France Info » (haut gauche) et bandeau LoL (haut, conditionnel).
 TAB_RECT = pygame.Rect(18, 12, 186, 40)
 BANNER_RECT = pygame.Rect(372, 10, 416, 34)
@@ -156,7 +159,14 @@ class DefaultScreen(Screen):
         surface.blit(tab, tab.get_rect(center=TAB_RECT.center))
         header = self.font_header.render("ACTUALITÉS", True, GOLD)
         surface.blit(header, NEWS_HEADER_POS)
-        return [TAB_RECT, pygame.Rect(*NEWS_HEADER_POS, 200, 22)]
+        dirty = [TAB_RECT, pygame.Rect(*NEWS_HEADER_POS, 200, 22)]
+        # Bouton « Dernières parties » : seulement si le module League est actif.
+        if "history" in self.app.screens:
+            pygame.draw.rect(surface, GOLD, HISTORY_BTN, width=1, border_radius=7)
+            label = self.font_banner.render("Dernières parties  »", True, GOLD)
+            surface.blit(label, label.get_rect(center=HISTORY_BTN.center))
+            dirty.append(HISTORY_BTN)
+        return dirty
 
     def _draw_news(self, surface: pygame.Surface, articles: list) -> pygame.Rect:
         self.clear_region(surface, NEWS_ROWS_AREA)   # restaure fond + séparateurs
@@ -198,6 +208,9 @@ class DefaultScreen(Screen):
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         if TAB_RECT.collidepoint(pos):
             self._open_news(None)
+            return None
+        if "history" in self.app.screens and HISTORY_BTN.collidepoint(pos):
+            self.app.open_history()
             return None
         for rect, art in self._news_rows:
             if rect.collidepoint(pos):

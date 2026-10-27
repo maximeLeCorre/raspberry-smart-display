@@ -28,6 +28,15 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+# La sortie du Pi peut contenir de l'Unicode (ex. '●' du statut systemd) : on
+# force une sortie UTF-8 tolérante pour ne pas planter sur une console Windows
+# cp1252 lorsqu'on réaffiche les logs distants.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 try:
@@ -75,15 +84,15 @@ if not PI_DISPLAY_DIR.is_dir():
     sys.exit(f"Dossier introuvable : {PI_DISPLAY_DIR}")
 
 
-# ----------------------------------------------------- jeton d'auth -> .env Pi
-def read_auth_token() -> str:
-    """Jeton DISPLAY_AUTH_TOKEN du .env local (le Pi n'a besoin que de ça)."""
+# --------------------------------------------- secrets -> .env Pi
+def read_env_value(key: str) -> str:
+    """Lit une valeur du .env local (racine). Vide si absente."""
     env_local = REPO_ROOT / ".env"
     if not env_local.exists():
         return ""
     for line in env_local.read_text(encoding="utf-8", errors="replace").splitlines():
         s = line.strip()
-        if s.startswith("DISPLAY_AUTH_TOKEN") and "=" in s:
+        if s.startswith(key) and "=" in s:
             return s.split("=", 1)[1].strip()
     return ""
 
@@ -106,7 +115,7 @@ def _skip(tarinfo: tarfile.TarInfo):
 
 
 def build_tarball(dst: Path, env_content: str) -> None:
-    """Crée l'archive : pi_display/, certs/ (si présent) et .env (jeton seul)."""
+    """Crée l'archive : pi_display/, certs/ (si présent) et .env (jeton + clé Riot)."""
     with tarfile.open(dst, "w:gz") as tar:
         tar.add(PI_DISPLAY_DIR, arcname="pi_display", filter=_skip)
         if CERTS_DIR.is_dir():
@@ -227,7 +236,10 @@ def put_bytes(sftp, data: bytes, remote: str, mode: int | None = None) -> None:
 
 
 def main() -> None:
-    env_content = f"DISPLAY_AUTH_TOKEN={read_auth_token()}\n"
+    # Le Pi a besoin du jeton d'auth ET de la clé Riot (il est autonome pour
+    # l'enrichissement Web : historique, dossiers, rangs...).
+    env_content = (f"DISPLAY_AUTH_TOKEN={read_env_value('DISPLAY_AUTH_TOKEN')}\n"
+                   f"RIOT_API_KEY={read_env_value('RIOT_API_KEY')}\n")
 
     tmp = Path(tempfile.mkdtemp(prefix="pi-deploy-"))
     tgz = tmp / "pi-display-deploy.tgz"

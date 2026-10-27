@@ -69,7 +69,7 @@ def parse_args():
     p.add_argument("--simulate", action="store_true",
                    help="Scénario simulé, sans lancer de jeu.")
     p.add_argument("--scenario", default="full",
-                   choices=["full", "champselect", "game", "aram", "queue", "postgame"],
+                   choices=["full", "champselect", "game", "aram", "queue", "home", "postgame"],
                    help="Scénario de simulation (défaut : full).")
     p.add_argument("--duration", type=int, default=None,
                    help="Durée d'une étape de simulation en secondes.")
@@ -143,7 +143,15 @@ def main():
     args = parse_args()
     config = load_config(args.config)
 
-    host = args.host if args.host is not None else config["pi"]["host"]
+    # Hôte du Pi : --host en priorité ; sinon, en simulation on vise le **local**
+    # (test sur le PC) plutôt que l'IP du vrai Pi de la config (évite un échec de
+    # connexion déroutant). En mode réel, on prend l'IP de la config.
+    if args.host is not None:
+        host = args.host
+    elif args.simulate:
+        host = "127.0.0.1"
+    else:
+        host = config["pi"]["host"]
     port = args.port if args.port is not None else config["pi"]["port"]
     ssl_context = build_client_ssl(config)
     scheme = "wss" if ssl_context else "ws"
@@ -154,8 +162,6 @@ def main():
         from simulator import run_simulation
         run_simulation(url, interval=config["agent"]["update_interval"],
                        scenario=args.scenario, duration=args.duration,
-                       platform=config["riot"]["platform"],
-                       regional=config["riot"]["regional"],
                        auth_token=auth_token, ssl_context=ssl_context)
     else:
         run_real(url, config, auth_token, ssl_context)

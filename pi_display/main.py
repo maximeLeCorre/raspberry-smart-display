@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 
 from config import (build_server_ssl, is_raspberry_pi, load_auth_token,
-                    load_config)
+                    load_config, load_riot_key)
 
 CONFIG_PATH = Path(__file__).resolve().parent / "config.toml"
 
@@ -72,6 +72,7 @@ def main():
         port=port,
         auth_token=load_auth_token(),
         ssl_context=build_server_ssl(config),
+        riot_key=load_riot_key(),
     )
     app.run()
 
