@@ -48,6 +48,10 @@ summoner = "maxoulefou#EUW"   # compte dont on tire l'historique
 # Amis (premade) mis en évidence en ROSE sur l'écran de fin. "Nom#TAG"
 # (insensible à la casse). Ajoute d'autres potes réguliers ici.
 friends = ["Matte mwa#EUW"]
+# Scan automatique de l'historique (minutes) : le Pi demande à l'agent les
+# nouvelles parties à ce rythme (en plus de l'ouverture de l'historique et de
+# la connexion). Insensible au délai d'indexation LCU. 0 = scan périodique off.
+sync_minutes = 3
 
 [gpio]
 # Broches BCM des boutons physiques (uniquement sur le Pi, ignorées sur PC).
