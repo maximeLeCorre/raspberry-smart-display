@@ -39,33 +39,30 @@ fenêtre, agent sur `localhost`) tant que l'écran physique n'est pas livré.
 - Pas de hot-reload → **relancer** après modif. TLS : `tools/gen_cert.py` + `tls=true` des 2 côtés.
 
 ### Relancer après un changement (**à me proposer par défaut**)
-Aucun hot-reload : après toute modif de code, **proposer** le redémarrage du composant touché
-(ne jamais l'exécuter sans accord).
-- **`pi_display/` modifié** → proposer de **redéployer** (`deploy/deploy_pi.py`, qui redémarre
-  le service `pi-display`) ; ou, si pas de redéploiement, `ssh … 'sudo systemctl restart pi-display'`.
-  En test local sur le PC : relancer `.\.venv\Scripts\python pi_display\main.py --scale 2`.
-- **`pc_agent/` modifié** → proposer de relancer l'agent :
-  `powershell -ExecutionPolicy Bypass -File deploy\restart_pc_agent.ps1` (ou relancer `pc_agent\main.py`).
+Aucun hot-reload : après toute modif, **proposer** le redémarrage du composant touché (jamais sans accord).
+- **`pi_display/`** → **redéployer** (`deploy/deploy_pi.py`, redémarre le service `pi-display`) ou
+  `ssh … 'sudo systemctl restart pi-display'` ; en test local PC : `…python pi_display\main.py --scale 2`.
+- **`pc_agent/`** → relancer l'agent : `deploy\restart_pc_agent.ps1` (ou `pc_agent\main.py`).
 
 ### Autostart de l'agent PC (Windows)
-Tâche planifiée `RaspberryPiDisplayAgent` lancée **à l'ouverture de session**, fenêtre **cachée**
-(`deploy/pc_agent_launch_hidden.vbs` → `pc_agent_launch.bat`, `PYTHONUNBUFFERED=1`), journal dans
-`logs/pc_agent.log` (gitignoré). ⚠️ Le `.vbs` lance l'agent **détaché** (la tâche finit tout de
-suite, code 0) ; le relancer = `deploy\restart_pc_agent.ps1` (tue l'instance + `Start-ScheduledTask`),
-**pas** `Restart-ScheduledTask` (inexistant en PS 5.1). ⚠️ `.venv\Scripts\python.exe` ouvre 2 process
-(redirecteur venv + interpréteur). Installer (**admin/UAC**, auto-élévation) :
-`powershell -ExecutionPolicy Bypass -File deploy\install_pc_agent_autostart.ps1` ; désinstaller :
-`…\uninstall_pc_agent_autostart.ps1`. Relancer l'installeur après avoir déplacé le dépôt.
+Tâche planifiée `RaspberryPiDisplayAgent` à l'**ouverture de session**, fenêtre **cachée**
+(`deploy/pc_agent_launch_hidden.vbs` → `pc_agent_launch.bat`, `PYTHONUNBUFFERED`+`PYTHONUTF8`=1 —
+log UTF-8 sinon un caractère hors cp1252 plante un `print`), journal `logs/pc_agent.log` (gitignoré).
+⚠️ Le `.vbs` lance l'agent **détaché** (tâche finie aussitôt, code 0) ; le relancer =
+`deploy\restart_pc_agent.ps1` (tue l'instance + `Start-ScheduledTask`), **pas** `Restart-ScheduledTask`
+(absent en PS 5.1). ⚠️ `.venv\Scripts\python.exe` ouvre 2 process (redirecteur venv + interpréteur).
+Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps1` ; désinstaller :
+`…\uninstall_pc_agent_autostart.ps1` (relancer l'installeur après déplacement du dépôt).
 
 ## Protocole réseau
 - **Sécurité** (2 couches activables) : TLS `wss://` (cert auto-signé du Pi épinglé par
   l'agent, `check_hostname=False`) et/ou **jeton** `DISPLAY_AUTH_TOKEN` (.env racine, 1er
   message `auth` de l'agent). `tls=false`/jeton vide = clair/ouvert (test local).
 - **Pi → agent** : `hello{modules}`, `request_lcu_sync{since}`, `request_lcu_detail{gameId}`,
-  `lcu_action{action}` (ex. accepter un ready-check).
+  `lcu_action{action…}` (accepter un ready-check ; ou `play{queueId,invite}` = bouton « Jouer », § Bouton Jouer).
 - **agent → Pi** : `auth{token}`, `set_screen{screen}`, `data{screen,payload}`
-  (queue/champselect/lol ; chaque joueur porte un `riotId`=Nom#TAG), `store_matches{games,done}`
-  (parties à stocker), `lcu_detail{gameId,payload}`.
+  (queue/champselect/lol ; joueur = `riotId` Nom#TAG ; `default`/`playStatus` = étape du bouton
+  Jouer), `store_matches{games,done}` (parties à stocker), `lcu_detail{gameId,payload}`.
 - Interne (serveur Pi) : `_connected`/`_disconnected`. Déconnexion → écran `default`
   (l'historique reste consultable : il est en base locale).
 - NB : dossiers/icônes/splash ne sont **pas** des messages réseau — le Pi les fait lui-même
@@ -74,7 +71,7 @@ suite, code 0) ; le relancer = `deploy\restart_pc_agent.ps1` (tue l'instance + `
 ## Écrans (`pi_display/`)
 - `screen.py` : base `Screen` (attr `cycle`), fond PNG chargé 1×, redessin par **dirty rects**.
 - **system/** : `default` (horloge/date, 3 actus RSS, onglet « France Info », bouton
-  « Dernières parties », bandeau « Rejoindre » LoL conditionnel), `news` (code-drawn),
+  « Dernières parties », bandeau LoL : « Rejoindre » sinon « Jouer une ARAM Chaos »), `news` (code-drawn),
   `rss_feed` (flux récupéré par le Pi, stdlib urllib/xml ; marche agent déconnecté).
 - **league/** : `queue` (file + ready-check avec **gros bouton Accepter** → `lcu_action`),
   `champselect` (équipe/timer/bans, clic → dossier + splash), `lol`, `postgame`, `history`.
@@ -95,14 +92,11 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
 - **Toutes les parties viennent de la LCU** (via agent), stockées avec résumé **+ bilan 10
   joueurs** (stats consultables PC éteint).
 - **Synchro** (`App.sync_lcu` → `request_lcu_sync{since}` → agent `iter_lcu_sync` → lots
-  `store_matches`) déclenchée à l'**ouverture de l'historique**, à la **connexion de
-  l'agent**, en **fin de partie** (immédiate + re-synchros différées 8/20 s), et par un
-  **scan périodique** (`_maybe_sync` dans `run()`, `[lol] sync_minutes`, défaut 3 min ;
-  filet insensible au délai d'indexation LCU). Bilan « dernière partie » : affiché quand
-  une partie **plus récente que `_postgame_baseline`** arrive ; sinon **« détail non
-  disponible »** (repli `_postgame_unavailable_later`). ⚠️ La LCU **ne pagine pas**
-  (`begIndex/endIndex` ignorés) → seulement les **20 récentes** exposées ; l'historique
-  **s'accumule au fil des parties jouées**.
+  `store_matches`) : à l'**ouverture de l'historique**, à la **connexion de l'agent**, en **fin
+  de partie** (immédiate + re-synchros 8/20 s) et par **scan périodique** (`_maybe_sync`,
+  `[lol] sync_minutes`, défaut 3 min). Bilan « dernière partie » affiché si **plus récent que
+  `_postgame_baseline`**, sinon **« détail non disponible »** (`_postgame_unavailable_later`).
+  ⚠️ La LCU **ne pagine pas** → seulement les **20 récentes** ; l'historique s'accumule au fil du jeu.
 
 ## API Riot & pièges
 - **LCU** (`pc_agent/lcu.py`, agent, client ouvert) : phase, sélection, historique, **actions**
@@ -123,25 +117,33 @@ lots), `request_lcu_detail`, `lcu_action`. `summarize_full` (partie) porte `game
 `objectives`/`riotId`. **Agent sans clé ni `RiotWeb`.** Simu (`simulator.py`) = données locales
 fictives ; l'enrichissement/historique dépendent du Pi (clé/compte réels).
 
+### Bouton « Jouer une ARAM Chaos » (défaut) → action `play`
+`LeagueSource._play` (thread) : lance le client si fermé, crée le lobby (`[lol] lobby_queue`,
+2400=KIWI) si pas déjà le bon, invite `[lol] lobby_invite` s'il est en ligne — **toute étape déjà
+faite est sautée** ; pousse `playStatus` au Pi (bandeau, clic neutralisé pendant). ⚠️ **Lancer
+League** : `--launch-product` peu fiable → **API Riot Client** (`riot_client.py`, POST
+`product-launcher`, auth lockfile), **réessais** (1er POST souvent ignoré) jusqu'au process League ;
+lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ Jamais `taskkill /F` League
+(fâche **Vanguard** → reboot) ; le bouton ne tue rien.
+
 ## Config & secrets
 - `pi_display/config.toml` : réseau, FPS, GPIO, `[rss]`, `[modules]`, **`[riot] platform/regional`**,
-  **`[lol] summoner`/`friends`**.
-- `pc_agent/config.toml` : IP/port du Pi, `update_interval`, process LoL. **Pas de clé.**
+  **`[lol] summoner`/`friends`/`lobby_queue`/`lobby_invite`** (bouton Jouer).
+- `pc_agent/config.toml` : IP/port du Pi, `update_interval`, process LoL, `[lol] launch_exe`/
+  `launch_args` (Riot Client, pour le bouton Jouer). **Pas de clé.**
 - **`.env`** (racine, **ignoré**) : `RIOT_API_KEY` (permanente) + `DISPLAY_AUTH_TOKEN`. Modèle
   `.env.example`. ⚠️ Le `.env` **du Pi** doit avoir la clé (le Pi est autonome) + le jeton ;
   `deploy_pi.py` les copie.
 
 ## Fonds · Tests · Git · Déploiement
 - **Fonds** : 1 PNG 800×480/écran dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres
-  **dans le PNG** (le code positionne le contenu au pixel). Code-drawn (sans PNG) : `news`,
-  `postgame`, `history`. `default.png` dérivé de `default_base.png` par `tools/gen_default_bg.py`.
+  **dans le PNG** (code au pixel). Code-drawn : `news`, `postgame`, `history`. `default.png` dérivé
+  de `default_base.png` par `tools/gen_default_bg.py`.
 - **Tests** : pas de framework ; headless `SDL_VIDEODRIVER=dummy` (instancier `App`, piloter
-  `_on_network`/`do_action`/`draw`, `pygame.image.save` pour capture). Scripts jetables préfixe `_`.
-- **Git** : repo privé `maximeLeCorre/raspberry-smart-display`, branche `main`. Commits **en
-  français** co-signés `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. **Ne pas
-  committer/pousser sans demande explicite.**
-- **Déploiement** : `deploy/deploy_pi.py` (SSH paramiko ; creds dans `.env` : `PI_HOST/PI_USER/
-  PI_PASS`). Archive `pi_display/` (hors `_*`/`__pycache__`) + `certs/` + `.env` (jeton + clé Riot) ;
-  installe deps + service **systemd** `pi-display` (autostart, `kmsdrm`, plein écran). ⚠️ service lié
-  à **tty1** (DRM master, sinon EGL échoue) ; libs EGL/GLES Mesa requises ; ne jamais exclure les
-  `__init__.py`. Logs : `journalctl -u pi-display -f`. 1er boot écran noir → rebooter.
+  `_on_network`/`do_action`/`draw`, `pygame.image.save`). Scripts jetables préfixe `_`.
+- **Git** : repo privé `maximeLeCorre/raspberry-smart-display`, branche `main`. Commits **en français**
+  co-signés `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. **Pas de commit/push sans demande.**
+- **Déploiement** : `deploy/deploy_pi.py` (SSH paramiko ; `.env` : `PI_HOST/PI_USER/PI_PASS`). Archive
+  `pi_display/` (hors `_*`/`__pycache__`) + `certs/` + `.env` ; installe deps + service **systemd**
+  `pi-display` (autostart, `kmsdrm`, plein écran). ⚠️ lié à **tty1** (DRM master) ; libs EGL/GLES Mesa ;
+  jamais exclure les `__init__.py`. Logs `journalctl -u pi-display -f`. 1er boot écran noir → rebooter.
