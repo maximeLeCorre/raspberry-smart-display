@@ -28,3 +28,6 @@ certs/
 # --- Système ---
 .DS_Store
 Thumbs.db
+
+# --- Base locale des parties (Pi) ---
+*.db

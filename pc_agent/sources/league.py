@@ -9,12 +9,20 @@ répond à aucune requête d'enrichissement (le Pi s'en charge directement).
 
 from __future__ import annotations
 
+import threading
+
 from champ_select import build_champ_select_payload
 from lcu import LcuClient
-from phases import build_lcu_detail, build_lcu_history, build_queue_payload
+from phases import build_lcu_detail, build_queue_payload, iter_lcu_sync
 from riot_api import get_all_game_data, summarize_full
-from sender import msg_lcu_detail, msg_lcu_history
+from sender import msg_lcu_detail, msg_store_matches
 from sources.base import Source
+
+# Actions LCU autorisées (commandes envoyées au client).
+LCU_ACTIONS = {
+    "accept": "/lol-matchmaking/v1/ready-check/accept",
+    "decline": "/lol-matchmaking/v1/ready-check/decline",
+}
 
 
 class LeagueSource(Source):
@@ -23,6 +31,7 @@ class LeagueSource(Source):
     def __init__(self, config: dict):
         super().__init__(config)
         self.lcu = LcuClient()
+        self._syncing = False   # une synchro d'historique à la fois
 
         # (prédicat sur la phase, écran, constructeur du payload)
         self._rules = [
@@ -55,16 +64,37 @@ class LeagueSource(Source):
         return None  # menu / lobby -> rien de spécial (défaut géré par l'agent)
 
     def handle_request(self, message: dict, sender) -> bool:
-        """Le Pi réclame l'historique/bilan des parties spéciales (ARAM chaos)
-        que seule la LCU expose."""
+        """Requêtes du Pi : synchro de l'historique (LCU) et actions (accepter…)."""
         msg_type = message.get("type")
-        if msg_type == "request_lcu_history":
-            games = build_lcu_history(self.lcu, int(message.get("start") or 0),
-                                      int(message.get("count") or 10))
-            sender.send_safe(msg_lcu_history(games))
+        if msg_type == "request_lcu_sync":
+            # Synchro en arrière-plan : récupère les bilans (1 appel/partie) sans
+            # bloquer le récepteur (accepter/clic restent réactifs).
+            if not self._syncing:
+                threading.Thread(target=self._do_sync, daemon=True,
+                                 args=(sender, message.get("since"))).start()
             return True
         if msg_type == "request_lcu_detail":
-            payload = build_lcu_detail(self.lcu, message.get("gameId"))
-            sender.send_safe(msg_lcu_detail(payload))
+            gid = message.get("gameId")
+            sender.send_safe(msg_lcu_detail(gid, build_lcu_detail(self.lcu, gid)))
+            return True
+        if msg_type == "lcu_action":
+            path = LCU_ACTIONS.get(message.get("action"))
+            if path:
+                ok = self.lcu.post(path)
+                print(f"[league] Action LCU '{message.get('action')}' -> "
+                      f"{'OK' if ok else 'échec'}")
             return True
         return False
+
+    def _do_sync(self, sender, since) -> None:
+        """Envoie au Pi, par lots, les nouvelles parties (résumé + bilan)."""
+        self._syncing = True
+        try:
+            n = 0
+            for batch in iter_lcu_sync(self.lcu, since):
+                sender.send_safe(msg_store_matches(batch, False))
+                n += len(batch)
+            sender.send_safe(msg_store_matches([], True))   # fin de synchro
+            print(f"[league] Sync LCU terminée : {n} nouvelle(s) partie(s).")
+        finally:
+            self._syncing = False

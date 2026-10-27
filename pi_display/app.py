@@ -28,8 +28,9 @@ import pygame
 from inputs import ACTION_BACK, ACTION_NEXT, InputManager
 from modules import MODULES
 from network import NetworkServer
-from riot_web import (Champions, RiotWeb, build_match_detail, build_match_history,
-                      build_player_info, icon_bytes, normalize_riot_id, splash_bytes)
+from riot_web import (Champions, RiotWeb, build_player_info, icon_bytes,
+                      normalize_riot_id, splash_bytes)
+from store import Store
 
 DEFAULT_SCREEN = "default"
 
@@ -61,6 +62,10 @@ class App:
         # Exécution asynchrone des appels réseau (HTTP) hors de la boucle de
         # rendu : un worker produit un résultat, livré au thread principal.
         self._io_results: "queue.Queue[tuple]" = queue.Queue()
+        # Base locale des parties (historique consultable PC éteint).
+        self.store = Store()
+        # Bilan en mode « dernière partie » (fin de game) vs « revue » (clic).
+        self._postgame_latest = False
 
         pygame.init()
         pygame.display.set_caption("Pi Display (simulateur écran 5\")")
@@ -255,25 +260,33 @@ class App:
                 target.set_champion_splash(cid, b64)
         self.async_call(fetch, deliver)
 
-    def request_match_history(self, start: int = 0, count: int = 10,
-                              queue=None, match_type=None, exclude_queue=None) -> None:
-        """Historique (API Web), en tâche de fond — paginé/filtré par l'écran."""
-        def deliver(games):
-            hist = self.screens.get("history")
-            if hist is not None:
-                hist.update_data({"games": games or []})
-        self.async_call(
-            lambda: build_match_history(self.riot, self._my_puuid(), start, count,
-                                        queue, match_type, exclude_queue), deliver)
+    def sync_lcu(self) -> None:
+        """Demande à l'agent les **nouvelles** parties (les 20 récentes de la LCU,
+        jusqu'à la dernière déjà stockée). Sans effet si le PC n'est pas connecté."""
+        if not self.agent_connected:
+            return
+        self.server.send({"type": "request_lcu_sync", "since": self.store.newest_id()})
 
-    def request_lcu_history(self, start: int = 0, count: int = 10) -> None:
-        """Historique des parties spéciales (ARAM chaos…) : demandé à l'AGENT
-        (seule la LCU les expose). Réponse async via le message `lcu_history`."""
-        self.server.send({"type": "request_lcu_history", "start": start, "count": count})
+    def _sync_postgame_later(self, delay: float) -> None:
+        """Re-synchro différée après une fin de partie : la LCU met parfois
+        quelques secondes à indexer la partie qui vient de finir."""
+        def wait():
+            time.sleep(delay)
+
+        def go(_):
+            # Seulement si on est toujours sur le bilan de fin (pas parti ailleurs).
+            if (self.current is not None and self.current.name == "postgame"
+                    and self._postgame_latest):
+                self.sync_lcu()
+        self.async_call(wait, go)
+
+    def lcu_action(self, action: str) -> None:
+        """Envoie une commande au client via l'agent (ex. accepter un ready-check)."""
+        self.server.send({"type": "lcu_action", "action": action})
 
     def _mark_friends(self, payload: dict) -> dict:
-        """Colore les amis (rose) sur un bilan venu de l'agent (qui n'a pas la
-        liste d'amis) via le `riotId` de chaque joueur."""
+        """Colore les amis (rose) sur un bilan via le `riotId` de chaque joueur
+        (appliqué à la lecture : un ami ajouté plus tard est pris en compte)."""
         for p in (payload or {}).get("players", []):
             rid = p.get("riotId") or ""
             if not p.get("isSelf") and "#" in rid:
@@ -282,7 +295,8 @@ class App:
         return payload
 
     def open_history(self) -> None:
-        """Ouvre la liste des dernières parties (verrou manuel) et la charge."""
+        """Ouvre la liste des parties (verrou manuel). Lit le store local et
+        déclenche une synchro si le PC est connecté."""
         hist = self.screens.get("history")
         if hist is None:
             return
@@ -290,46 +304,40 @@ class App:
         self.set_screen("history")
         hist.start_fresh()
 
-    def _load_postgame(self, game_id, retries: int = 0) -> None:
-        """Charge le bilan d'une partie (donnée ou la dernière si None) et le
-        pousse à l'écran `postgame`. `retries` : réessais (délai d'indexation
-        de l'API après une partie qui vient de finir)."""
-        my = self._my_puuid
-        riot, champs, friends = self.riot, self.champions, self.friends
-
-        def fetch():
-            payload = None
-            for _ in range(retries + 1):
-                payload = build_match_detail(riot, my(), game_id, friends)
-                if payload and payload.get("players"):
-                    return payload
-                if retries:
-                    time.sleep(3)
-            return payload
-
-        def deliver(payload):
-            pg = self.screens.get("postgame")
-            if pg is not None:
-                pg.update_data(payload or {})
-        self.async_call(fetch, deliver)
+    def _show_postgame(self, detail) -> None:
+        pg = self.screens.get("postgame")
+        if pg is not None:
+            pg.update_data(self._mark_friends(detail or {}))
 
     def open_postgame_review(self, game_id) -> None:
-        """Ouvre le bilan d'une partie choisie dans l'historique, en mode
-        « revue » : RETOUR y ramène à l'historique, et l'écran reste verrouillé
-        tant que l'agent ne pousse pas une vraie partie.
-
-        Le détail vient de l'API Web (matchId = chaîne) ou de l'agent/LCU pour
-        les parties spéciales (gameId = entier)."""
+        """Ouvre le bilan d'une partie choisie en mode « revue » (RETOUR →
+        historique). Bilan depuis le store si en cache, sinon demandé à l'agent."""
         if "postgame" not in self.screens:
             return
-        self.screens["postgame"].update_data({})      # vide -> « en attente »
+        self._postgame_latest = False
         self.postgame_return = "history"
         self.manual_screen = "postgame"
         self.set_screen("postgame")
-        if isinstance(game_id, int):
-            self.server.send({"type": "request_lcu_detail", "gameId": game_id})
+        self._load_detail(game_id)
+
+    def _load_detail(self, game_id) -> None:
+        """Affiche le bilan : depuis le store (consultable PC éteint) si connu,
+        sinon le demande à l'agent/LCU, qui le renverra et on le met en cache."""
+        detail = self.store.detail(game_id) if game_id else None
+        if detail:
+            self._show_postgame(detail)
         else:
-            self._load_postgame(game_id)
+            self._show_postgame({})      # « en attente du bilan… »
+            if self.agent_connected and game_id:
+                self.server.send({"type": "request_lcu_detail", "gameId": game_id})
+
+    def _on_sync_done(self) -> None:
+        """Fin d'une synchro : rafraîchit l'écran courant si besoin."""
+        name = self.current.name if self.current else None
+        if name == "history":
+            self.screens["history"].reload()
+        elif name == "postgame" and self._postgame_latest:
+            self._load_detail(self.store.newest_id())
 
     def joinable_screen(self) -> str | None:
         """Écran non-défaut proposé par l'agent, qu'on peut rejoindre depuis le
@@ -426,30 +434,45 @@ class App:
                 self.manual_screen = None
             if self.manual_screen is None:
                 self.set_screen(screen)
-                # Bilan de fin de partie : le Pi récupère LUI-MÊME la dernière
-                # partie via l'API Web (réessais le temps de l'indexation).
+                # Fin de partie : on synchronise (la partie qui vient de finir
+                # arrive dans le store) puis on affiche son bilan. Re-synchros
+                # différées car la LCU peut mettre quelques secondes à l'indexer.
                 if screen == "postgame":
-                    self._load_postgame(None, retries=4)
+                    self._postgame_latest = True
+                    self._show_postgame({})      # « en attente du bilan… »
+                    self.sync_lcu()
+                    self._sync_postgame_later(8)
+                    self._sync_postgame_later(20)
 
         elif msg_type == "data":
             # L'agent ne pousse que les écrans « locaux » (queue/champselect/lol).
-            # L'enrichissement (dossiers/icônes/splash/historique/bilan) est fait
-            # par le Pi lui-même (voir request_* / _load_postgame).
+            # L'enrichissement (dossiers/icônes/splash) est fait par le Pi ;
+            # l'historique/bilan viennent du store (alimenté par la synchro LCU).
             screen = msg.get("screen")
             payload = msg.get("payload", {})
             if screen in self.screens:
                 self.screens[screen].update_data(payload)
 
-        elif msg_type == "lcu_history":
-            # Parties spéciales (ARAM chaos) lues par l'agent via la LCU.
-            hist = self.screens.get("history")
-            if hist is not None:
-                hist.update_data({"games": msg.get("games", [])})
+        elif msg_type == "store_matches":
+            # Lot de parties (résumé + bilan) à stocker localement.
+            games = msg.get("games", [])
+            if games:
+                self.store.upsert_matches(games)
+                # Remplissage progressif : on rafraîchit la liste à chaque lot.
+                if self.current is not None and self.current.name == "history":
+                    self.screens["history"].reload()
+            if msg.get("done"):
+                self._on_sync_done()
 
         elif msg_type == "lcu_detail":
-            pg = self.screens.get("postgame")
-            if pg is not None:
-                pg.update_data(self._mark_friends(msg.get("payload") or {}))
+            # Bilan complet (10 joueurs) demandé au clic : on le met en cache
+            # et on l'affiche si on est bien sur l'écran postgame.
+            gid = msg.get("gameId")
+            detail = msg.get("payload")
+            if gid and detail:
+                self.store.set_detail(gid, detail)
+            if self.current is not None and self.current.name == "postgame":
+                self._show_postgame(detail or {})
 
     def _draw_debug(self, dirty):
         rect = pygame.Rect(0, 0, 360, 58)

@@ -29,9 +29,6 @@ GAME_MODE_LABELS = {
     "ULTBOOK": "Grimoire ultime", "ONEFORALL": "Un pour tous",
 }
 
-# Modes « ARAM Chaos » (customs/spéciaux absents de l'API Web) servis via la LCU.
-CHAOS_MODES = {"KIWI"}
-
 
 def build_queue_payload(lcu: LcuClient, phase: str) -> dict:
     """Résumé de la file d'attente ou du ready-check (écran 'queue')."""
@@ -86,55 +83,9 @@ def _lcu_my_pid(lcu: LcuClient, game: dict):
     return None, None
 
 
-def build_lcu_history(lcu: LcuClient, start: int = 0, count: int = 10) -> list[dict]:
-    """Liste des parties **ARAM Chaos** vues par le client (mode(s) `CHAOS_MODES`,
-    ex. `KIWI`) : ces modes spéciaux sont absents de l'API Web. Paginé via
-    begIndex/endIndex.
-    """
-    end = max(start, start + count - 1)
-    mh = lcu.get_json(
-        f"/lol-match-history/v1/products/lol/current-summoner/matches?begIndex={start}&endIndex={end}")
-    games = (mh or {}).get("games", {}).get("games", [])
-    out = []
-    modes = {}
-    for game in games:
-        mode = game.get("gameMode") or "?"
-        modes[mode] = modes.get(mode, 0) + 1
-        if mode not in CHAOS_MODES:
-            continue
-        my_pid, _ident = _lcu_my_pid(lcu, game)
-        parts = game.get("participants", [])
-        mine = next((p for p in parts if p.get("participantId") == my_pid),
-                    parts[0] if parts else None)
-        if mine is None:
-            continue
-        st = mine.get("stats", {})
-        cid = mine.get("championId", 0) or 0
-        out.append({
-            "gameId": game.get("gameId"),
-            "championId": cid,
-            "championName": lcu.champion_name(cid),
-            "win": bool(st.get("win")),
-            "kda": [st.get("kills", 0), st.get("deaths", 0), st.get("assists", 0)],
-            "cs": _cs(st),
-            "queue": _queue_label(game),
-            "duration": _dur_seconds(game.get("gameDuration", 0)),
-            "when": _when(game.get("gameCreation", 0)),
-        })
-    print(f"[league] LCU historique ARAM : {len(out)} partie(s) "
-          f"(modes vus sur la page : {modes})")
-    return out
-
-
-def build_lcu_detail(lcu: LcuClient, game_id) -> dict | None:
-    """Bilan détaillé (10 joueurs) d'une partie LCU choisie. Le Pi colore
-    ensuite les amis via le `riotId` de chaque joueur."""
-    if not game_id:
-        return None
-    game = lcu.get_json(f"/lol-match-history/v1/games/{game_id}")
-    if not game:
-        return None
-
+def _lcu_detail_from_game(lcu: LcuClient, game: dict) -> dict | None:
+    """Bilan détaillé (10 joueurs) à partir d'un objet partie LCU (le endpoint
+    liste renvoie déjà les participants + stats). `isFriend` marqué côté Pi."""
     my_pid, _ident = _lcu_my_pid(lcu, game)
     ident_by_pid = {i.get("participantId"): (i.get("player", {}) or {})
                     for i in game.get("participantIdentities", [])}
@@ -189,3 +140,68 @@ def build_lcu_detail(lcu: LcuClient, game_id) -> dict | None:
         },
         "players": players,
     }
+
+
+def build_lcu_detail(lcu: LcuClient, game_id) -> dict | None:
+    """Bilan complet (10 joueurs) d'une partie, via le endpoint détail LCU."""
+    if not game_id:
+        return None
+    game = lcu.get_json(f"/lol-match-history/v1/games/{game_id}")
+    if not game:
+        return None
+    return _lcu_detail_from_game(lcu, game)
+
+
+def _lcu_full_record(lcu: LcuClient, game_id) -> dict | None:
+    """Enregistrement COMPLET (résumé + bilan 10 joueurs) pour le store Pi.
+
+    ⚠️ Le endpoint liste ne donne qu'1 joueur : on récupère le détail par partie
+    (`/games/{id}`) pour avoir les 10 joueurs et pouvoir consulter PC éteint.
+    """
+    game = lcu.get_json(f"/lol-match-history/v1/games/{game_id}")
+    if not game:
+        return None
+    detail = _lcu_detail_from_game(lcu, game)
+    if detail is None:
+        return None
+    me = detail["me"]
+    return {
+        "gameId": str(game_id),
+        "gameCreation": game.get("gameCreation", 0) or 0,
+        "gameMode": game.get("gameMode") or "",
+        "queueId": game.get("queueId", 0) or 0,
+        "queue": _queue_label(game),
+        "duration": _dur_seconds(game.get("gameDuration", 0)),
+        "win": detail["win"],
+        "championId": me["championId"],
+        "championName": me["championName"],
+        "kda": me["kda"],
+        "cs": me["cs"],
+        "detail": detail,
+    }
+
+
+def iter_lcu_sync(lcu: LcuClient, since=None, chunk: int = 15):
+    """Génère des **lots** d'enregistrements complets (résumé + bilan) pour la
+    synchro **progressive** du store.
+
+    ⚠️ La LCU **ne pagine pas** (`begIndex`/`endIndex` ignorés) : elle n'expose
+    que les **20 parties les plus récentes**. On lit donc cette page et on
+    s'arrête à `since` (dernière partie déjà stockée ⇒ on ne prend que les
+    nouvelles). Le reste de l'historique s'accumule au fil des parties jouées."""
+    since = str(since) if since else None
+    mh = lcu.get_json(
+        "/lol-match-history/v1/products/lol/current-summoner/matches?begIndex=0&endIndex=19")
+    games = (mh or {}).get("games", {}).get("games", [])
+    batch = []
+    for game in games:
+        if since and str(game.get("gameId")) == since:
+            break                   # reprise : on a rejoint le store
+        rec = _lcu_full_record(lcu, game.get("gameId"))
+        if rec:
+            batch.append(rec)
+            if len(batch) >= chunk:
+                yield batch
+                batch = []
+    if batch:
+        yield batch

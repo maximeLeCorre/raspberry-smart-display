@@ -1,15 +1,13 @@
-"""Liste des dernières parties (ouverte depuis l'accueil).
+"""Liste des parties, lue depuis le **store local** du Pi (SQLite).
 
-En haut : des **filtres par type de partie** (Tout / Classé / Normal / ARAM) à
-gauche du bouton RETOUR. En bas : des **flèches de pagination** (◀ plus récentes
-/ ▶ plus anciennes) pour remonter dans le temps. La plus récente est en haut.
+Toutes les parties viennent de la LCU (via l'agent) et sont stockées sur le Pi ;
+cet écran lit la base → **consultable PC éteint**, instantané. À l'ouverture, si
+le PC est connecté, on déclenche une **synchro** (reprise : récupère ce qui
+manque depuis la dernière partie stockée). Filtres par type (requêtes SQL),
+pagination locale, le plus récent en haut.
 
-Les données sont récupérées **par le Pi** via l'API Web Riot (`match-v5`), page
-par page, avec le filtre courant — voir `App.request_match_history`. Un clic sur
-une partie ouvre son bilan (`App.open_postgame_review`).
-
-Données reçues (payload) : {"games": [ {gameId, championId, championName, win,
-kda, cs, queue, duration, when}, ... ]} (la page courante, déjà triée récent→ancien).
+En haut : filtres à gauche de RETOUR (« ARAM Chaos » par défaut). En bas :
+flèches ◀/▶.
 """
 
 from __future__ import annotations
@@ -22,15 +20,12 @@ import pygame
 from inputs import ACTION_BACK
 from screen import Screen
 
-# Filtres : (libellé, paramètres API, source). source "web" = API Riot (le Pi),
-# "lcu" = l'agent/client PC (parties spéciales que l'API Web n'indexe pas).
-# « ARAM Chaos » en tête = filtre par défaut à l'ouverture (mode joué le plus).
+# Filtres : (libellé, clause WHERE SQL sur le store, params).
 FILTERS = [
-    ("ARAM Chaos", {}, "lcu"),
-    ("Classé", {"match_type": "ranked"}, "web"),
-    # ⚠️ Riot range l'ARAM dans `type=normal` : on l'exclut pour « Normale ».
-    ("Normale", {"match_type": "normal", "exclude_queue": 450}, "web"),
-    ("ARAM", {"queue": 450}, "web"),
+    ("ARAM Chaos", "game_mode = ?", ("KIWI",)),
+    ("Classé", "queue_id IN (420, 440)", ()),
+    ("Normale", "queue_id IN (400, 430, 490)", ()),
+    ("ARAM", "queue_id = ?", (450,)),
 ]
 PER_PAGE = 10
 
@@ -40,7 +35,6 @@ BTN_TOP, BTN_H = 8, 38
 ROW_TOP, ROW_H = 58, 36
 ICON = 30
 
-# Pagination (bas).
 PREV_RECT = pygame.Rect(300, 430, 52, 36)
 NEXT_RECT = pygame.Rect(448, 430, 52, 36)
 
@@ -84,54 +78,44 @@ class MatchHistoryScreen(Screen):
         self.games: list = []
         self.filter_idx = 0
         self.page = 0
-        self.loading = False
+        self.syncing = False
         self.has_more = False
         self._icon_cache: dict[int, pygame.Surface] = {}
         self._requested: set[int] = set()
         self._rows: list[tuple[pygame.Rect, object]] = []
         self._last_signature = None
 
-        # Rects des boutons de filtre (gauche → droite), calculés une fois.
         self._filter_rects: list[pygame.Rect] = []
         x = 8
-        for label, _params, _src in FILTERS:
+        for label, _w, _p in FILTERS:
             w = self.font_btn.size(label)[0] + 22
             self._filter_rects.append(pygame.Rect(x, BTN_TOP, w, BTN_H))
             x += w + 6
 
     # --------------------------------------------------------------- données
     def start_fresh(self) -> None:
-        """Ouverture depuis l'accueil : filtre « Tout », page 0, chargement."""
+        """Ouverture : filtre par défaut, page 0, lecture store + synchro."""
         self.filter_idx = 0
         self.page = 0
-        self.games = []
-        self._request()
+        self.syncing = self.app.agent_connected
+        self._reload_page()
+        self.app.sync_lcu()          # reprise (sans effet si PC déconnecté)
 
-    def _request(self) -> None:
-        self.loading = True
+    def reload(self) -> None:
+        """Re-lecture du store (après une synchro)."""
+        self.syncing = False
+        self._reload_page()
+
+    def _reload_page(self) -> None:
+        where, params = FILTERS[self.filter_idx][1], FILTERS[self.filter_idx][2]
+        rows = self.app.store.query(where, params, PER_PAGE + 1, self.page * PER_PAGE)
+        self.has_more = len(rows) > PER_PAGE
+        self.games = rows[:PER_PAGE]
         self._last_signature = None
-        _label, params, source = FILTERS[self.filter_idx]
-        if source == "lcu":
-            # Parties spéciales : via l'agent/client PC (la LCU seule les a).
-            if not self.app.agent_connected:
-                self.loading = False
-                self.games = []
-                return
-            self.app.request_lcu_history(start=self.page * PER_PAGE, count=PER_PAGE)
-        else:
-            self.app.request_match_history(start=self.page * PER_PAGE,
-                                           count=PER_PAGE, **params)
 
     def enter(self) -> None:
-        # On garde games/filtre/page (retour depuis un bilan) ; juste re-render.
         self._last_signature = None
         self._requested.clear()
-
-    def update_data(self, payload: dict) -> None:
-        self.games = (payload or {}).get("games", []) or []
-        self.loading = False
-        self.has_more = len(self.games) >= PER_PAGE
-        self._last_signature = None
 
     def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:
         surface = self._decode_icon(icon_b64)
@@ -148,15 +132,15 @@ class MatchHistoryScreen(Screen):
                 if i != self.filter_idx:
                     self.filter_idx = i
                     self.page = 0
-                    self._request()
+                    self._reload_page()
                 return None
-        if PREV_RECT.collidepoint(pos) and self.page > 0 and not self.loading:
+        if PREV_RECT.collidepoint(pos) and self.page > 0:
             self.page -= 1
-            self._request()
+            self._reload_page()
             return None
-        if NEXT_RECT.collidepoint(pos) and self.has_more and not self.loading:
+        if NEXT_RECT.collidepoint(pos) and self.has_more:
             self.page += 1
-            self._request()
+            self._reload_page()
             return None
         for rect, game_id in self._rows:
             if rect.collidepoint(pos):
@@ -167,8 +151,7 @@ class MatchHistoryScreen(Screen):
     # ---------------------------------------------------------------- rendu
     def draw(self, surface: pygame.Surface) -> list[pygame.Rect]:
         signature = (
-            self.filter_idx, self.page, self.loading, self.has_more,
-            self.app.agent_connected,
+            self.filter_idx, self.page, self.syncing, self.has_more,
             tuple((g.get("gameId"), g.get("championId"), g.get("win")) for g in self.games),
             tuple(sorted(self._icon_cache.keys())),
         )
@@ -183,18 +166,15 @@ class MatchHistoryScreen(Screen):
         surface.blit(hint, hint.get_rect(center=RETOUR_RECT.center))
 
         self._rows = []
-        source = FILTERS[self.filter_idx][2]
-        if self.loading and not self.games:
-            self._center_msg(surface, "Chargement…")
-        elif not self.games:
-            if source == "lcu" and not self.app.agent_connected:
-                msg = "Ouvre le client League sur le PC pour les ARAM Chaos."
+        if not self.games:
+            if self.syncing:
+                msg = "Synchronisation…"
+            elif self.app.store.total() == 0:
+                msg = "Aucune partie stockée — connecte le PC pour synchroniser."
             elif self.page > 0:
                 msg = "Fin de l'historique."
-            elif source == "lcu":
-                msg = "Aucune ARAM spéciale trouvée (client ouvert ?)."
             else:
-                msg = "Aucune partie (vérifie le Riot ID / la clé API)."
+                msg = "Aucune partie pour ce filtre."
             self._center_msg(surface, msg)
         else:
             for i, g in enumerate(self.games[:PER_PAGE]):
@@ -247,17 +227,14 @@ class MatchHistoryScreen(Screen):
         surface.blit(when, (self.width - 14 - when.get_width(), cy - when.get_height() // 2))
 
     def _draw_pagination(self, surface: pygame.Surface) -> None:
-        prev_on = self.page > 0 and not self.loading
-        next_on = self.has_more and not self.loading
+        prev_on = self.page > 0
+        next_on = self.has_more
         for rect, left, on in ((PREV_RECT, True, prev_on), (NEXT_RECT, False, next_on)):
             pygame.draw.rect(surface, PANEL if on else PANEL_OFF, rect, border_radius=8)
-            # Triangle dessiné (la police par défaut n'a pas les glyphes ◀/▶).
             cx, cy = rect.center
             color = WHITE if on else DIM
-            if left:
-                pts = [(cx + 7, cy - 9), (cx + 7, cy + 9), (cx - 8, cy)]
-            else:
-                pts = [(cx - 7, cy - 9), (cx - 7, cy + 9), (cx + 8, cy)]
+            pts = ([(cx + 7, cy - 9), (cx + 7, cy + 9), (cx - 8, cy)] if left
+                   else [(cx - 7, cy - 9), (cx - 7, cy + 9), (cx + 8, cy)])
             pygame.draw.polygon(surface, color, pts)
         page_txt = self.font_meta.render(f"Page {self.page + 1}", True, GREY)
         surface.blit(page_txt, page_txt.get_rect(center=(self.width // 2, PREV_RECT.centery)))

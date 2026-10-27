@@ -119,6 +119,18 @@ class LcuClient:
             return None
         return resp.content
 
+    def post(self, path: str, payload=None, timeout: float = 3.0) -> bool:
+        """Envoie une COMMANDE au client (ex. accepter un ready-check).
+        Renvoie True si le client a répondu 2xx."""
+        if not self.connected and not self.connect():
+            return False
+        try:
+            resp = self.session.post(self._url(path), json=payload, timeout=timeout)
+        except requests.RequestException:
+            self.port = None  # client fermé : reconnexion au prochain appel
+            return False
+        return 200 <= resp.status_code < 300
+
     # ----------------------------------------------------------- endpoints
     def gameflow_phase(self) -> str | None:
         """Phase courante : 'None', 'Lobby', 'Matchmaking', 'ReadyCheck',
