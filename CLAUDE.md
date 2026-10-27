@@ -38,6 +38,25 @@ fenêtre, agent sur `localhost`) tant que l'écran physique n'est pas livré.
 - ⚠️ En `--simulate`, l'agent vise **`127.0.0.1`** par défaut (pas l'IP Pi de la config) ; `--host` pour changer.
 - Pas de hot-reload → **relancer** après modif. TLS : `tools/gen_cert.py` + `tls=true` des 2 côtés.
 
+### Relancer après un changement (**à me proposer par défaut**)
+Aucun hot-reload : après toute modif de code, **proposer** le redémarrage du composant touché
+(ne jamais l'exécuter sans accord).
+- **`pi_display/` modifié** → proposer de **redéployer** (`deploy/deploy_pi.py`, qui redémarre
+  le service `pi-display`) ; ou, si pas de redéploiement, `ssh … 'sudo systemctl restart pi-display'`.
+  En test local sur le PC : relancer `.\.venv\Scripts\python pi_display\main.py --scale 2`.
+- **`pc_agent/` modifié** → proposer de relancer l'agent :
+  `powershell -ExecutionPolicy Bypass -File deploy\restart_pc_agent.ps1` (ou relancer `pc_agent\main.py`).
+
+### Autostart de l'agent PC (Windows)
+Tâche planifiée `RaspberryPiDisplayAgent` lancée **à l'ouverture de session**, fenêtre **cachée**
+(`deploy/pc_agent_launch_hidden.vbs` → `pc_agent_launch.bat`, `PYTHONUNBUFFERED=1`), journal dans
+`logs/pc_agent.log` (gitignoré). ⚠️ Le `.vbs` lance l'agent **détaché** (la tâche finit tout de
+suite, code 0) ; le relancer = `deploy\restart_pc_agent.ps1` (tue l'instance + `Start-ScheduledTask`),
+**pas** `Restart-ScheduledTask` (inexistant en PS 5.1). ⚠️ `.venv\Scripts\python.exe` ouvre 2 process
+(redirecteur venv + interpréteur). Installer (**admin/UAC**, auto-élévation) :
+`powershell -ExecutionPolicy Bypass -File deploy\install_pc_agent_autostart.ps1` ; désinstaller :
+`…\uninstall_pc_agent_autostart.ps1`. Relancer l'installeur après avoir déplacé le dépôt.
+
 ## Protocole réseau
 - **Sécurité** (2 couches activables) : TLS `wss://` (cert auto-signé du Pi épinglé par
   l'agent, `check_hostname=False`) et/ou **jeton** `DISPLAY_AUTH_TOKEN` (.env racine, 1er
