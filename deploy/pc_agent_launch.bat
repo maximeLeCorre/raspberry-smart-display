@@ -6,5 +6,7 @@ set "ROOT=%~dp0.."
 cd /d "%ROOT%"
 if not exist "logs" mkdir "logs"
 rem PYTHONUNBUFFERED : sortie non bufferisee -> logs ecrits en temps reel.
+rem PYTHONUTF8 : log en UTF-8 (sinon un caractere hors cp1252 plante un print).
 set "PYTHONUNBUFFERED=1"
+set "PYTHONUTF8=1"
 ".venv\Scripts\python.exe" "pc_agent\main.py" %* >> "logs\pc_agent.log" 2>&1

@@ -52,6 +52,13 @@ friends = ["Matte mwa#EUW"]
 # nouvelles parties à ce rythme (en plus de l'ouverture de l'historique et de
 # la connexion). Insensible au délai d'indexation LCU. 0 = scan périodique off.
 sync_minutes = 3
+# Bouton unique « Jouer une ARAM Chaos » (écran par défaut, agent connecté) :
+# lance le client au besoin, crée le lobby puis invite. File créée : 2400 =
+# ARAM du chaos. `lobby_invite` = un ami (Riot ID "Nom#TAG" ou juste "Nom")
+# invité s'il est en ligne ; vide = aucune invitation. La LCU ne cherche plus
+# par nom -> l'invité doit être dans tes amis.
+lobby_queue = 2400
+lobby_invite = "Matte mwa"
 
 [gpio]
 # Broches BCM des boutons physiques (uniquement sur le Pi, ignorées sur PC).

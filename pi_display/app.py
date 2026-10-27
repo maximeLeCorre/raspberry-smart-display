@@ -53,6 +53,10 @@ class App:
         self.riot = RiotWeb(riot_key, riot_cfg.get("platform", "euw1"),
                             riot_cfg.get("regional", "europe"))
         self.summoner_rid = (lol_cfg.get("summoner") or "").strip()
+        # Bouton « créer un lobby » du défaut : file toujours ARAM Chaos (2400),
+        # et ami invité s'il est en ligne (vide = pas d'invitation).
+        self.lobby_queue = int(lol_cfg.get("lobby_queue", 2400) or 2400)
+        self.lobby_invite = (lol_cfg.get("lobby_invite") or "").strip()
         self.friends = {
             normalize_riot_id(*rid.split("#", 1))
             for rid in lol_cfg.get("friends", [])
@@ -318,6 +322,16 @@ class App:
     def lcu_action(self, action: str) -> None:
         """Envoie une commande au client via l'agent (ex. accepter un ready-check)."""
         self.server.send({"type": "lcu_action", "action": action})
+
+    def play(self) -> None:
+        """Bouton unique : demande à l'agent de lancer le client s'il est fermé,
+        créer le lobby ARAM Chaos s'il n'est pas déjà le bon, puis inviter l'ami
+        configuré (`lobby_invite`) — chaque étape déjà faite étant sautée côté
+        agent. Sans effet si l'agent est déconnecté."""
+        if not self.agent_connected:
+            return
+        self.server.send({"type": "lcu_action", "action": "play",
+                          "queueId": self.lobby_queue, "invite": self.lobby_invite})
 
     def _mark_friends(self, payload: dict) -> dict:
         """Colore les amis (rose) sur un bilan via le `riotId` de chaque joueur

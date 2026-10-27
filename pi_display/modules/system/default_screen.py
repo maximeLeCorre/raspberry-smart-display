@@ -47,6 +47,11 @@ BANNER_LABELS = {
     "queue": "LoL · file d'attente",
     "postgame": "LoL · voir la dernière performance",
 }
+# Bouton unique « jouer » : lance le client au besoin, crée le lobby ARAM Chaos
+# et invite l'ami configuré (l'agent saute toute étape déjà faite). Pendant le
+# flux, l'agent pousse un message d'étape (`playStatus`) affiché à la place du
+# libellé — confirmation de la prise en compte + avancement.
+PLAY_LABEL = "Jouer une ARAM Chaos"
 
 GOLD = (210, 175, 95)
 WHITE = (238, 240, 245)
@@ -94,7 +99,9 @@ class DefaultScreen(Screen):
         self.feed = get_feed(app)
         self._last_time: str | None = None
         self._last_date: str | None = None
-        self._last_joinable: str | None = None
+        self._banner_key: tuple | None = None   # état actuellement dessiné
+        self._banner_mode: str | None = None    # "join" / "play" / None (pour le clic)
+        self._play_status = ""                   # message d'étape du flux « jouer »
         self._chrome_drawn = False
         self._news_key: tuple[str, ...] | None = None
         self._news_rows: list[tuple[pygame.Rect, object]] = []
@@ -112,10 +119,16 @@ class DefaultScreen(Screen):
     def enter(self) -> None:
         self._last_time = None
         self._last_date = None
-        self._last_joinable = None
+        self._banner_key = None
         self._chrome_drawn = False
         self._news_key = None
         self._news_rows = []
+        self._play_status = ""
+
+    def update_data(self, payload: dict) -> None:
+        """L'agent pousse un message d'étape du flux « jouer » (vide = terminé)."""
+        if "playStatus" in payload:
+            self._play_status = str(payload.get("playStatus") or "")
 
     def draw(self, surface: pygame.Surface) -> list[pygame.Rect]:
         dirty: list[pygame.Rect] = []
@@ -134,11 +147,13 @@ class DefaultScreen(Screen):
                 self._news_key = key
                 dirty.append(self._draw_news(surface, articles))
 
-        # Bandeau LoL (conditionnel).
+        # Bandeau LoL (conditionnel) : « Rejoindre » un écran proposé par l'agent,
+        # sinon le bouton unique « Jouer une ARAM Chaos » si l'agent est connecté.
         joinable = self.app.joinable_screen()
-        if joinable != self._last_joinable:
+        key = (joinable, self.app.agent_connected, self._play_status)
+        if key != self._banner_key:
             dirty.append(self._draw_banner(surface, joinable))
-            self._last_joinable = joinable
+            self._banner_key = key
 
         # Horloge et date.
         time_str = time.strftime("%H:%M:%S", now)
@@ -195,13 +210,29 @@ class DefaultScreen(Screen):
 
     def _draw_banner(self, surface: pygame.Surface, joinable: str | None) -> pygame.Rect:
         self.clear_region(surface, BANNER_RECT)
+        # Priorité à « Rejoindre » (partie/sélection/file en cours) ; à défaut,
+        # « Créer un lobby » si le client LoL est simplement ouvert au menu.
+        border = GOLD
         if joinable:
-            pygame.draw.rect(surface, (34, 48, 78), BANNER_RECT, border_radius=9)
-            pygame.draw.rect(surface, GOLD, BANNER_RECT, width=2, border_radius=9)
+            self._banner_mode = "join"
             label = BANNER_LABELS.get(joinable, "LoL") + "   »"
-            label = fit_text(label, self.font_banner, BANNER_RECT.w - 24)
-            surf = self.font_banner.render(label, True, (235, 235, 240))
-            surface.blit(surf, surf.get_rect(center=BANNER_RECT.center))
+        elif self._play_status:
+            # Flux « jouer » en cours : on affiche l'étape (bordure verte), clic
+            # neutralisé (voir handle_touch).
+            self._banner_mode = "play"
+            label = self._play_status
+            border = (120, 200, 120)
+        elif self.app.agent_connected:
+            self._banner_mode = "play"
+            label = PLAY_LABEL + "   »"
+        else:
+            self._banner_mode = None
+            return BANNER_RECT
+        pygame.draw.rect(surface, (34, 48, 78), BANNER_RECT, border_radius=9)
+        pygame.draw.rect(surface, border, BANNER_RECT, width=2, border_radius=9)
+        label = fit_text(label, self.font_banner, BANNER_RECT.w - 24)
+        surf = self.font_banner.render(label, True, (235, 235, 240))
+        surface.blit(surf, surf.get_rect(center=BANNER_RECT.center))
         return BANNER_RECT
 
     # ---------------------------------------------------------------- entrées
@@ -216,8 +247,11 @@ class DefaultScreen(Screen):
             if rect.collidepoint(pos):
                 self._open_news(art)
                 return None
-        if self._last_joinable and BANNER_RECT.collidepoint(pos):
-            self.app.join_screen()
+        if BANNER_RECT.collidepoint(pos):
+            if self._banner_mode == "join":
+                self.app.join_screen()
+            elif self._banner_mode == "play" and not self._play_status:
+                self.app.play()   # ignoré si un flux est déjà en cours
         return None
 
     def _open_news(self, article) -> None:
