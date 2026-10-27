@@ -20,6 +20,12 @@ update_interval = 1.0
 client_process = "LeagueClientUx.exe"
 game_process = "League of Legends.exe"
 
+# Lancement du client si fermé (bouton unique « Jouer » du Pi). On passe par le
+# Riot Client : il sait où League est installé (même sur un autre disque). Chaîne
+# TOML littérale (guillemets simples) pour garder les antislash Windows.
+launch_exe = 'C:\Riot Games\Riot Client\RiotClientServices.exe'
+launch_args = ["--launch-product=league_of_legends", "--launch-patchline=live"]
+
 # NB : l'enrichissement Web (dossiers joueurs, historique, bilan de fin) et la
 # clé RIOT_API_KEY vivent désormais **sur le Pi** (pi_display/config.toml [riot]
 # + [lol], et le .env du Pi). L'agent ne fait plus que du local (LCU + Live

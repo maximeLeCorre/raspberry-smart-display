@@ -9,20 +9,40 @@ répond à aucune requête d'enrichissement (le Pi s'en charge directement).
 
 from __future__ import annotations
 
+import os
+import subprocess
 import threading
+import time
+
+import psutil
 
 from champ_select import build_champ_select_payload
 from lcu import LcuClient
+from riot_client import RiotClient
 from phases import build_lcu_detail, build_queue_payload, iter_lcu_sync
 from riot_api import get_all_game_data, summarize_full
-from sender import msg_lcu_detail, msg_store_matches
+from sender import msg_data, msg_lcu_detail, msg_store_matches
 from sources.base import Source
 
-# Actions LCU autorisées (commandes envoyées au client).
+# Actions LCU « simples » (un POST sans corps).
 LCU_ACTIONS = {
     "accept": "/lol-matchmaking/v1/ready-check/accept",
     "decline": "/lol-matchmaking/v1/ready-check/decline",
 }
+
+# Démarrage à froid du client (Riot Client -> maj -> League -> login -> menu) :
+# lent, surtout au 1er lancement de la journée. On attend jusqu'à 5 min.
+READY_TIMEOUT = 300.0
+
+# Processus League (bootstrapper + client) : présence = League démarre/est ouverte.
+LEAGUE_PROCESSES = ("leagueclient.exe", "leagueclientux.exe")
+
+
+def league_process_running() -> bool:
+    for proc in psutil.process_iter(["name"]):
+        if (proc.info["name"] or "").lower() in LEAGUE_PROCESSES:
+            return True
+    return False
 
 
 class LeagueSource(Source):
@@ -31,7 +51,12 @@ class LeagueSource(Source):
     def __init__(self, config: dict):
         super().__init__(config)
         self.lcu = LcuClient()
-        self._syncing = False   # une synchro d'historique à la fois
+        self.riot = RiotClient()    # API du Riot Client (lancement de League)
+        self._syncing = False       # une synchro d'historique à la fois
+        self._playing = False       # un enchaînement « jouer » à la fois
+        lol_cfg = config.get("lol", {})
+        self._launch_exe = (lol_cfg.get("launch_exe") or "").strip()
+        self._launch_args = list(lol_cfg.get("launch_args", []))
 
         # (prédicat sur la phase, écran, constructeur du payload)
         self._rules = [
@@ -78,13 +103,177 @@ class LeagueSource(Source):
             sender.send_safe(msg_lcu_detail(gid, build_lcu_detail(self.lcu, gid)))
             return True
         if msg_type == "lcu_action":
-            path = LCU_ACTIONS.get(message.get("action"))
+            action = message.get("action")
+            if action == "play":
+                # Enchaînement potentiellement long (démarrage du client) : en
+                # thread, pour ne pas bloquer le récepteur.
+                if not self._playing:
+                    threading.Thread(target=self._play, daemon=True,
+                                     args=(sender, message.get("queueId"),
+                                           message.get("invite"))).start()
+                return True
+            path = LCU_ACTIONS.get(action)
             if path:
                 ok = self.lcu.post(path)
-                print(f"[league] Action LCU '{message.get('action')}' -> "
-                      f"{'OK' if ok else 'échec'}")
+                print(f"[league] Action LCU '{action}' -> {'OK' if ok else 'échec'}")
             return True
         return False
+
+    # -------------------------------------------------------------- jouer (1 clic)
+    def _play(self, sender, queue_id, invite) -> None:
+        """Bouton unique : lance le client s'il est fermé, crée le lobby `queue_id`
+        s'il n'est pas déjà le bon, puis invite l'ami `invite` s'il n'est pas déjà
+        présent/invité. Chaque étape déjà faite est sautée (idempotent). Pousse un
+        message d'étape au Pi (`playStatus`) : confirmation + avancement."""
+        self._playing = True
+
+        def status(text: str) -> None:
+            print(f"[league] {text}")
+            sender.send_safe(msg_data("default", {"playStatus": text}))
+
+        status("Instruction reçue…")
+        final = "Lobby ARAM Chaos prêt"
+        try:
+            if self.lcu.gameflow_phase() is None:          # client fermé -> lancer
+                status("Lancement de League…")
+                if not self._launch_client():
+                    final = "Lancement impossible (voir config)"
+                    return
+                status("Connexion au client… (1-2 min)")
+                if not self._wait_ready(READY_TIMEOUT):
+                    final = "Client non prêt (abandon)"
+                    return
+            status("Création du lobby ARAM Chaos…")
+            if not self._ensure_lobby(queue_id):
+                final = "Échec de création du lobby"
+                return
+            name = (invite or "").strip()
+            if name:
+                status(f"Invitation de {name}…")
+                final = self._invite_if_needed(name)
+        finally:
+            status(final)
+            time.sleep(4)          # laisse le message final lisible sur le Pi
+            sender.send_safe(msg_data("default", {"playStatus": ""}))
+            self._playing = False
+
+    def _ensure_lobby(self, queue_id) -> bool:
+        """Crée le lobby si ce n'est pas déjà le bon. Plusieurs essais : juste
+        après la connexion, le client peut encore refuser (en cours de
+        stabilisation). True dès que le lobby `queue_id` est en place."""
+        for attempt in range(6):
+            if self._current_queue() == queue_id:
+                if attempt == 0:
+                    print(f"[league] Lobby queueId={queue_id} déjà ouvert : rien à créer.")
+                return True
+            if self.lcu.post("/lol-lobby/v2/lobby", {"queueId": queue_id}):
+                print(f"[league] Lobby ARAM Chaos (queueId={queue_id}) créé.")
+                return True
+            time.sleep(3)
+        print(f"[league] Lobby ARAM Chaos (queueId={queue_id}) -> échec (plusieurs essais).")
+        return False
+
+    def _launch_client(self) -> bool:
+        """Démarre League. Si le Riot Client est fermé, l'ouvre d'abord (il
+        s'auto-connecte si « rester connecté »). Puis (re)commande le lancement de
+        League jusqu'à ce que le jeu démarre vraiment : juste après l'ouverture du
+        Riot Client, le 1er ordre est souvent ignoré (pas encore prêt)."""
+        # « Réellement connecté » (appel API), pas juste le lockfile : il peut
+        # rester sur le disque après fermeture (port mort).
+        if not self.riot.is_logged_in():
+            if not self._spawn_riot_client():
+                return False
+            if not self._wait_riot_logged_in(180):
+                print("[league] Riot Client non connecté (connexion manuelle ?).")
+        for attempt in range(1, 6):
+            if league_process_running():
+                return True
+            if self.riot.launch_league():
+                print(f"[league] Lancement de League demandé (essai {attempt}).")
+            else:
+                print("[league] Le Riot Client n'a pas accepté le lancement.")
+            for _ in range(15):               # ~30 s d'attente de démarrage
+                if league_process_running():
+                    return True
+                time.sleep(2)
+        print("[league] League ne démarre pas (Riot Client pas prêt ?).")
+        return False
+
+    def _spawn_riot_client(self) -> bool:
+        """Ouvre le Riot Client (exécutable configuré)."""
+        if not self._launch_exe or not os.path.exists(self._launch_exe):
+            print(f"[league] Lancement impossible : exécutable introuvable "
+                  f"({self._launch_exe or 'non configuré'}).")
+            return False
+        try:
+            subprocess.Popen([self._launch_exe, *self._launch_args],
+                             cwd=os.path.dirname(self._launch_exe))
+            print("[league] Riot Client lancé, attente de la connexion…")
+            return True
+        except OSError as exc:
+            print(f"[league] Échec du lancement du Riot Client : {exc}")
+            return False
+
+    def _wait_riot_logged_in(self, timeout: float) -> bool:
+        """Attend que le Riot Client soit lancé ET un compte authentifié."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.riot.is_logged_in():
+                return True
+            time.sleep(2)
+        return False
+
+    def _wait_ready(self, timeout: float) -> bool:
+        """Attend que la LCU réponde et que le compte soit connecté (menu)."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            summ = self.lcu.current_summoner()
+            if summ and summ.get("summonerId"):
+                return True
+            time.sleep(2)
+        return False
+
+    def _current_queue(self):
+        """queueId du lobby courant, ou None s'il n'y a pas de lobby."""
+        lobby = self.lcu.get_json("/lol-lobby/v2/lobby") or {}
+        return (lobby.get("gameConfig") or {}).get("queueId")
+
+    def _invite_if_needed(self, name: str) -> str:
+        """Invite l'ami s'il faut. Renvoie le message d'état final (affiché sur le Pi)."""
+        summoner_id = self._online_friend_id(name)
+        if summoner_id is None:
+            print(f"[league] Invitation : « {name} » introuvable ou hors ligne.")
+            return f"Lobby prêt - {name} hors ligne"
+        if self._in_lobby(summoner_id):
+            print(f"[league] « {name} » est déjà dans le lobby / invité.")
+            return f"Lobby prêt - {name} déjà présent"
+        ok = self.lcu.post("/lol-lobby/v2/lobby/invitations",
+                           [{"toSummonerId": summoner_id}])
+        print(f"[league] Invitation de « {name} » -> {'OK' if ok else 'échec'}")
+        return f"{name} invité !" if ok else "Lobby prêt - invitation échouée"
+
+    def _in_lobby(self, summoner_id) -> bool:
+        """L'ami est-il déjà membre du lobby ou déjà invité (en attente/accepté) ?"""
+        lobby = self.lcu.get_json("/lol-lobby/v2/lobby") or {}
+        if any(m.get("summonerId") == summoner_id
+               for m in (lobby.get("members") or [])):
+            return True
+        return any(i.get("toSummonerId") == summoner_id
+                   and i.get("state") in ("Pending", "Requested", "Accepted")
+                   for i in (lobby.get("invitations") or []))
+
+    def _online_friend_id(self, name: str):
+        """summonerId d'un ami EN LIGNE, par Riot ID « Nom#TAG » ou juste « Nom »
+        (insensible à la casse). None si absent, non-ami, ou hors ligne."""
+        want = name.lower()
+        for f in (self.lcu.get_json("/lol-chat/v1/friends") or []):
+            gn = (f.get("gameName") or "").lower()
+            rid = f"{gn}#{(f.get('gameTag') or '').lower()}"
+            if want in (gn, rid):
+                if (f.get("availability") or "").lower() == "offline":
+                    return None
+                return f.get("summonerId")
+        return None
 
     def _do_sync(self, sender, since) -> None:
         """Envoie au Pi, par lots, les nouvelles parties (résumé + bilan)."""
