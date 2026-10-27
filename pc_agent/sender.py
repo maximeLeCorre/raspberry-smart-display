@@ -21,6 +21,9 @@ class Sender:
         self.ssl_context = ssl_context
         self._ws = None
         self._receiver_started = False
+        # Les envois viennent de 2 threads (boucle principale + récepteur, qui
+        # répond aux requêtes du Pi) : on sérialise pour ne pas entrelacer.
+        self._send_lock = threading.Lock()
 
     @property
     def connected(self) -> bool:
@@ -49,7 +52,8 @@ class Sender:
         """Envoie un objet (sérialisé en JSON)."""
         if self._ws is None:
             raise ConnectionError("non connecté")
-        self._ws.send(json.dumps(obj))
+        with self._send_lock:
+            self._ws.send(json.dumps(obj))
 
     def send_safe(self, obj: dict) -> bool:
         """Envoie en (re)connectant si besoin. Renvoie True si succès."""
@@ -109,11 +113,12 @@ def msg_data(screen: str, payload: dict) -> dict:
     return {"type": "data", "screen": screen, "payload": payload}
 
 
-# Historique « local » (LCU) : pour les matchs spéciaux (ARAM chaos, customs)
-# que l'API Web Riot n'indexe pas. Le Pi les demande, l'agent répond.
-def msg_lcu_history(games: list) -> dict:
-    return {"type": "lcu_history", "games": games}
+# Synchro de l'historique : l'agent envoie les parties (LCU) à stocker sur le Pi,
+# par lots (`done` = dernier lot). Sert à la reprise et au push de fin de partie.
+def msg_store_matches(games: list, done: bool = True) -> dict:
+    return {"type": "store_matches", "games": games, "done": done}
 
 
-def msg_lcu_detail(payload: dict | None) -> dict:
-    return {"type": "lcu_detail", "payload": payload}
+def msg_lcu_detail(game_id, payload: dict | None) -> dict:
+    """Bilan complet (10 joueurs) d'une partie, récupéré à la demande."""
+    return {"type": "lcu_detail", "gameId": game_id, "payload": payload}

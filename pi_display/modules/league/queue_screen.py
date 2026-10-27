@@ -13,6 +13,8 @@ from inputs import ACTION_BACK
 from screen import Screen
 
 RETOUR_RECT = pygame.Rect(700, 8, 92, 40)
+# Gros bouton « Accepter » du ready-check (action envoyée au client via la LCU).
+ACCEPT_RECT = pygame.Rect(240, 372, 320, 92)
 
 
 def _mmss(seconds: int) -> str:
@@ -30,6 +32,7 @@ class QueueScreen(Screen):
         self.font_title = pygame.font.Font(None, 46)
         self.font_big = pygame.font.Font(None, 132)
         self.font_sub = pygame.font.Font(None, 34)
+        self.font_accept = pygame.font.Font(None, 58)
         self.font_hint = pygame.font.Font(None, 24)
         self.data: dict = {}
         self._last_signature = None
@@ -43,6 +46,11 @@ class QueueScreen(Screen):
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         if RETOUR_RECT.collidepoint(pos):
             return ACTION_BACK
+        # Pendant le ready-check (pas encore accepté) : accepter au tap.
+        if (self.data.get("state") == "readycheck"
+                and self.data.get("response") != "Accepted"
+                and ACCEPT_RECT.collidepoint(pos)):
+            self.app.lcu_action("accept")
         return None
 
     def draw(self, surface: pygame.Surface) -> list[pygame.Rect]:
@@ -84,8 +92,14 @@ class QueueScreen(Screen):
 
         remaining = self.data.get("remaining", 0)
         big = self.font_big.render(str(remaining), True, color)
-        surface.blit(big, big.get_rect(center=(self.width // 2, 250)))
+        surface.blit(big, big.get_rect(center=(self.width // 2, 240)))
 
-        msg = "Accepté ✓" if accepted else "Accepte dans le client"
-        sub = self.font_sub.render(msg, True, (200, 215, 230))
-        surface.blit(sub, sub.get_rect(center=(self.width // 2, 360)))
+        if accepted:
+            sub = self.font_sub.render("Accepté", True, (120, 220, 130))
+            surface.blit(sub, sub.get_rect(center=(self.width // 2, 418)))
+        else:
+            # Un seul gros bouton tactile : accepter depuis l'écran du Pi.
+            pygame.draw.rect(surface, (30, 78, 46), ACCEPT_RECT, border_radius=18)
+            pygame.draw.rect(surface, (120, 220, 130), ACCEPT_RECT, width=3, border_radius=18)
+            a = self.font_accept.render("ACCEPTER", True, (230, 255, 235))
+            surface.blit(a, a.get_rect(center=ACCEPT_RECT.center))
