@@ -35,58 +35,6 @@ def get_all_game_data(timeout: float = 1.0) -> dict | None:
         return None
 
 
-def summarize(data: dict) -> dict:
-    """Extrait un résumé compact à envoyer au Pi.
-
-    Renvoie : game_time, kda [k,d,a], gold, cs, level, score {order, chaos}.
-    Tolérant aux champs manquants (structure de l'API susceptible de varier).
-    """
-    game_data = data.get("gameData", {})
-    active = data.get("activePlayer", {})
-    all_players = data.get("allPlayers", []) or []
-
-    # On retrouve le joueur local pour lire son KDA / CS / niveau.
-    my_name = active.get("summonerName") or active.get("riotIdGameName")
-    me = None
-    for player in all_players:
-        if player.get("summonerName") == my_name:
-            me = player
-            break
-        riot_id = player.get("riotId", "")
-        if riot_id and riot_id.split("#")[0] == active.get("riotIdGameName"):
-            me = player
-            break
-
-    scores = (me or {}).get("scores", {})
-    kda = [
-        scores.get("kills", 0),
-        scores.get("deaths", 0),
-        scores.get("assists", 0),
-    ]
-    cs = scores.get("creepScore", 0)
-    level = (me or {}).get("level") or active.get("level", 0)
-    gold = active.get("currentGold", 0)
-
-    # Score des équipes = somme des kills par camp (ORDER = bleu, CHAOS = rouge).
-    order = sum(
-        p.get("scores", {}).get("kills", 0)
-        for p in all_players if p.get("team") == "ORDER"
-    )
-    chaos = sum(
-        p.get("scores", {}).get("kills", 0)
-        for p in all_players if p.get("team") == "CHAOS"
-    )
-
-    return {
-        "game_time": int(game_data.get("gameTime", 0)),
-        "kda": kda,
-        "gold": int(gold or 0),
-        "cs": int(cs or 0),
-        "level": int(level or 0),
-        "score": {"order": order, "chaos": chaos},
-    }
-
-
 def _format_event(e: dict) -> str | None:
     """Transforme un événement de la Live Client API en texte français court.
 

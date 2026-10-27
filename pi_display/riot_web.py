@@ -152,17 +152,9 @@ class RiotWeb:
         return self._get(self._platform_host(),
                          f"/lol/champion-mastery/v4/champion-masteries/by-puuid/{puuid}/by-champion/{champion_id}")
 
-    def recent_match_ids(self, puuid: str, start: int = 0, count: int = 10,
-                         queue: int | None = None, match_type: str | None = None):
-        """IDs de matchs, avec pagination (`start`) et filtre optionnel par file
-        (`queue`, ex. 450=ARAM) ou catégorie (`match_type`: ranked/normal/...)."""
-        q = f"?start={max(0, int(start))}&count={max(1, min(int(count), 100))}"
-        if queue:
-            q += f"&queue={int(queue)}"
-        if match_type:
-            q += f"&type={match_type}"
+    def recent_match_ids(self, puuid: str, count: int = 8):
         return self._get(self._regional_host(),
-                         f"/lol/match/v5/matches/by-puuid/{puuid}/ids{q}")
+                         f"/lol/match/v5/matches/by-puuid/{puuid}/ids?count={count}")
 
     def match(self, match_id: str):
         if match_id in self._match_cache:
@@ -173,7 +165,7 @@ class RiotWeb:
         return data
 
     def recent_winrate(self, puuid: str, count: int = 8):
-        ids = self.recent_match_ids(puuid, start=0, count=count)
+        ids = self.recent_match_ids(puuid, count)
         if not ids:
             return None
         wins = played = 0
@@ -263,129 +255,6 @@ def build_player_info(riot: RiotWeb, champions: Champions, riot_id: str,
     return info
 
 
-# ----------------------------------------------------- historique / bilan
-QUEUE_NAMES = {
-    420: "Classé Solo/Duo", 440: "Classé Flex", 400: "Normale Draft",
-    430: "Normale Aveugle", 450: "ARAM", 490: "Normale (Swiftplay)",
-    700: "Clash", 830: "Co-op vs IA", 1700: "Arena", 1900: "URF",
-}
-
-
-def _p_cs(p: dict) -> int:
-    return (p.get("totalMinionsKilled", 0) or 0) + (p.get("neutralMinionsKilled", 0) or 0)
-
-
-def _dur_seconds(info: dict) -> int:
-    d = info.get("gameDuration", 0) or 0
-    return d // 1000 if d > 10000 else d
-
-
-def _when(game_creation_ms) -> str:
-    import time
-    try:
-        return time.strftime("%d/%m %H:%M", time.localtime((game_creation_ms or 0) / 1000))
-    except (TypeError, ValueError, OSError):
-        return ""
-
-
-def _summarize_match(match: dict, my_puuid: str, friends: set[str] | None) -> dict | None:
-    """Bilan détaillé (10 joueurs + perso) depuis un match-v5."""
-    friends = friends or set()
-    info = match.get("info", {})
-    parts = info.get("participants", [])
-    if not parts:
-        return None
-    players, mine = [], None
-    for p in parts:
-        is_self = bool(my_puuid) and p.get("puuid") == my_puuid
-        name = p.get("riotIdGameName") or p.get("summonerName") or ""
-        tag = p.get("riotIdTagline") or ""
-        players.append({
-            "name": name,
-            "championId": p.get("championId", 0) or 0,
-            "championName": p.get("championName", "") or "",
-            "team": p.get("teamId", 0) or 0,
-            "isSelf": is_self,
-            "isFriend": (not is_self) and normalize_riot_id(name, tag) in friends,
-            "kda": [p.get("kills", 0), p.get("deaths", 0), p.get("assists", 0)],
-            "metrics": {
-                "dmg": p.get("totalDamageDealtToChampions", 0) or 0,
-                "taken": p.get("totalDamageTaken", 0) or 0,
-                "gold": p.get("goldEarned", 0) or 0,
-                "cs": _p_cs(p),
-                "vision": p.get("visionScore", 0) or 0,
-                "heal": p.get("totalHeal", 0) or 0,
-            },
-        })
-        if is_self:
-            mine = p
-    mine = mine or parts[0]
-    return {
-        "win": bool(mine.get("win")),
-        "queue": QUEUE_NAMES.get(info.get("queueId", 0), "Partie"),
-        "duration": _dur_seconds(info),
-        "me": {
-            "championId": mine.get("championId", 0) or 0,
-            "championName": mine.get("championName", "") or "",
-            "kda": [mine.get("kills", 0), mine.get("deaths", 0), mine.get("assists", 0)],
-            "cs": _p_cs(mine),
-            "gold": mine.get("goldEarned", 0) or 0,
-            "damage": mine.get("totalDamageDealtToChampions", 0) or 0,
-            "level": mine.get("champLevel", 0) or 0,
-        },
-        "players": players,
-    }
-
-
-def build_match_history(riot: RiotWeb, my_puuid: str, start: int = 0, count: int = 10,
-                        queue: int | None = None, match_type: str | None = None,
-                        exclude_queue: int | None = None) -> list[dict]:
-    """Liste résumée de parties (pagination `start`/`count`, filtre optionnel).
-
-    ⚠️ Le `type=normal` de Riot **inclut l'ARAM** ; `exclude_queue` permet de
-    retirer une file côté client (ex. exclure l'ARAM de la catégorie « Normale »).
-    """
-    if not (riot and my_puuid):
-        return []
-    ids = riot.recent_match_ids(my_puuid, start, count, queue, match_type) or []
-    out = []
-    for mid in ids:
-        match = riot.match(mid)
-        if not match:
-            continue
-        info = match.get("info", {})
-        if exclude_queue and (info.get("queueId", 0) or 0) == exclude_queue:
-            continue
-        parts = info.get("participants", [])
-        mine = next((p for p in parts if p.get("puuid") == my_puuid),
-                    parts[0] if parts else None)
-        if mine is None:
-            continue
-        out.append({
-            "gameId": match.get("metadata", {}).get("matchId"),
-            "championId": mine.get("championId", 0) or 0,
-            "championName": mine.get("championName", "") or "",
-            "win": bool(mine.get("win")),
-            "kda": [mine.get("kills", 0), mine.get("deaths", 0), mine.get("assists", 0)],
-            "cs": _p_cs(mine),
-            "queue": QUEUE_NAMES.get(info.get("queueId", 0), "Partie"),
-            "duration": _dur_seconds(info),
-            "when": _when(info.get("gameCreation", 0)),
-        })
-    return out
-
-
-def build_match_detail(riot: RiotWeb, my_puuid: str, match_id,
-                       friends: set[str] | None = None) -> dict | None:
-    """Bilan d'une partie : `match_id` donné, ou la **dernière** si None."""
-    if not (riot and my_puuid):
-        return None
-    if not match_id:
-        ids = riot.recent_match_ids(my_puuid, 1)
-        match_id = ids[0] if ids else None
-    if not match_id:
-        return None
-    match = riot.match(match_id)
-    if not match:
-        return None
-    return _summarize_match(match, my_puuid, friends)
+# NB : l'historique/bilan ne passe plus par l'API Web (match-v5 n'a pas les
+# customs) mais par la LCU → stocké sur le Pi (`store.py`). Ce module ne sert
+# plus qu'aux dossiers joueurs (rang/winrate/mains) et aux CDN icônes/splash.

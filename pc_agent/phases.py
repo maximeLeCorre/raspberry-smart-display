@@ -1,10 +1,9 @@
 """Données produites par l'agent à partir de la **LCU** (client ouvert, sans clé).
 
 - `build_queue_payload` : file d'attente / ready-check.
-- `build_lcu_history` / `build_lcu_detail` : historique et bilan des parties
-  **spéciales/customs** (ARAM chaos…) que l'API Web Riot (`match-v5`) n'indexe
-  pas. La LCU, elle, est un client RSO : elle y a accès (uniquement pour soi).
-  Le Pi réclame ces données à l'agent ; les parties standard restent côté Pi.
+- `iter_lcu_sync` / `build_lcu_detail` : historique (résumé + bilan) que le Pi
+  stocke en local. La LCU est un client RSO : elle a accès aux customs/ARAM chaos
+  que l'API Web (`match-v5`) n'indexe pas — mais n'expose que les 20 récentes.
 """
 
 from __future__ import annotations
@@ -84,8 +83,8 @@ def _lcu_my_pid(lcu: LcuClient, game: dict):
 
 
 def _lcu_detail_from_game(lcu: LcuClient, game: dict) -> dict | None:
-    """Bilan détaillé (10 joueurs) à partir d'un objet partie LCU (le endpoint
-    liste renvoie déjà les participants + stats). `isFriend` marqué côté Pi."""
+    """Bilan (10 joueurs) depuis un objet partie du endpoint **détail** LCU
+    (`/games/{id}` ; la liste, elle, ne renvoie qu'1 joueur). `isFriend` : Pi."""
     my_pid, _ident = _lcu_my_pid(lcu, game)
     ident_by_pid = {i.get("participantId"): (i.get("player", {}) or {})
                     for i in game.get("participantIdentities", [])}
