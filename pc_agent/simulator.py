@@ -34,7 +34,7 @@ ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 FAKE_TEAM = [
     {"cellId": 0, "summonerId": 101, "puuid": "puuid-top",
      "championId": 86, "championName": "Garen", "position": "Top",
-     "gameName": "BronzeWall", "tagLine": "EUW", "isSelf": False, "iconB64": None},
+     "gameName": "Matte Mwa", "tagLine": "EUW", "isSelf": False, "iconB64": None},
     {"cellId": 1, "summonerId": 102, "puuid": "puuid-jgl",
      "championId": 64, "championName": "Lee Sin", "position": "Jungle",
      "gameName": "GankMaster", "tagLine": "EUW", "isSelf": False, "iconB64": None},

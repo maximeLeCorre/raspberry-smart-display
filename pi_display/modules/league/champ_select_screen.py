@@ -21,6 +21,7 @@ import io
 import pygame
 
 from inputs import ACTION_BACK
+from modules.league.names import display_name
 from screen import Screen
 
 RETOUR_RECT = pygame.Rect(690, 0, 110, 58)
@@ -173,15 +174,21 @@ class ChampSelectScreen(Screen):
 
             tx = icon_rect.right + 12
             name = player.get("championName") or "—"
-            pseudo = player.get("gameName") or "(pseudo masqué)"
+            pseudo, pseudo_color = display_name(player.get("gameName"))
+            if not pseudo:
+                pseudo = "(pseudo masqué)"
             if is_self:
                 pseudo += "  (moi)"
             position = player.get("position") or ""
 
             name_surf = self.font_name.render(name, True, (240, 240, 245))
             surface.blit(name_surf, (tx, row.y + 8))
-            info_surf = self.font_small.render(f"{pseudo}   {position}", True, (160, 180, 210))
-            surface.blit(info_surf, (tx, row.y + 40))
+            # Pseudo (couleur spéciale éventuelle) puis position en couleur normale.
+            pseudo_surf = self.font_small.render(pseudo, True, pseudo_color or (160, 180, 210))
+            surface.blit(pseudo_surf, (tx, row.y + 40))
+            if position:
+                pos_surf = self.font_small.render(f"   {position}", True, (160, 180, 210))
+                surface.blit(pos_surf, (tx + pseudo_surf.get_width(), row.y + 40))
 
             self._rows.append((row, player))
 

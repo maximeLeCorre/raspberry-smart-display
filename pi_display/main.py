@@ -51,6 +51,11 @@ def main():
     if on_pi and fullscreen:
         os.environ.setdefault("SDL_VIDEODRIVER", "kmsdrm")
 
+    # Tactile : sous SDL2/kmsdrm l'écran envoie des événements FINGER (gérés par
+    # l'app). On DÉSACTIVE la synthèse toucher -> souris pour éviter un double
+    # déclenchement (un tap compterait sinon deux fois).
+    os.environ.setdefault("SDL_TOUCH_MOUSEEVENTS", "0")
+
     host = args.host if args.host is not None else config["network"]["host"]
     port = args.port if args.port is not None else config["network"]["port"]
 

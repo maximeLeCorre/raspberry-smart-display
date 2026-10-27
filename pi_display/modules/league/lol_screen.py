@@ -32,6 +32,7 @@ import time
 import pygame
 
 from inputs import ACTION_BACK
+from modules.league.names import display_name
 from screen import Screen
 
 # Zones alignées sur les cadres du fond (lol.png) : bandeau haut (0-48),
@@ -245,8 +246,8 @@ class LolScreen(Screen):
             surface.blit(shade, icon_rect)
 
         tx = icon_rect.right + 10
-        name = (player.get("name") or "")[:11]
-        surface.blit(self.font_name.render(name, True, WHITE), (tx, row.y + 5))
+        text, color = display_name(player.get("name"))
+        surface.blit(self.font_name.render(text[:11], True, color or WHITE), (tx, row.y + 5))
         lvl = self.font_stat.render(f"Niv {player.get('level', 0)}", True, GREY)
         surface.blit(lvl, lvl.get_rect(topright=(row.right - 8, row.y + 6)))
 
