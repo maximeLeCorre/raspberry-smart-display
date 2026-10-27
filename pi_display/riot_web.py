@@ -152,9 +152,17 @@ class RiotWeb:
         return self._get(self._platform_host(),
                          f"/lol/champion-mastery/v4/champion-masteries/by-puuid/{puuid}/by-champion/{champion_id}")
 
-    def recent_match_ids(self, puuid: str, count: int = 10):
+    def recent_match_ids(self, puuid: str, start: int = 0, count: int = 10,
+                         queue: int | None = None, match_type: str | None = None):
+        """IDs de matchs, avec pagination (`start`) et filtre optionnel par file
+        (`queue`, ex. 450=ARAM) ou catégorie (`match_type`: ranked/normal/...)."""
+        q = f"?start={max(0, int(start))}&count={max(1, min(int(count), 100))}"
+        if queue:
+            q += f"&queue={int(queue)}"
+        if match_type:
+            q += f"&type={match_type}"
         return self._get(self._regional_host(),
-                         f"/lol/match/v5/matches/by-puuid/{puuid}/ids?count={count}")
+                         f"/lol/match/v5/matches/by-puuid/{puuid}/ids{q}")
 
     def match(self, match_id: str):
         if match_id in self._match_cache:
@@ -165,7 +173,7 @@ class RiotWeb:
         return data
 
     def recent_winrate(self, puuid: str, count: int = 8):
-        ids = self.recent_match_ids(puuid, count)
+        ids = self.recent_match_ids(puuid, start=0, count=count)
         if not ids:
             return None
         wins = played = 0
@@ -329,17 +337,25 @@ def _summarize_match(match: dict, my_puuid: str, friends: set[str] | None) -> di
     }
 
 
-def build_match_history(riot: RiotWeb, my_puuid: str, count: int = 10) -> list[dict]:
-    """Liste résumée des N dernières parties (pour l'accueil)."""
+def build_match_history(riot: RiotWeb, my_puuid: str, start: int = 0, count: int = 10,
+                        queue: int | None = None, match_type: str | None = None,
+                        exclude_queue: int | None = None) -> list[dict]:
+    """Liste résumée de parties (pagination `start`/`count`, filtre optionnel).
+
+    ⚠️ Le `type=normal` de Riot **inclut l'ARAM** ; `exclude_queue` permet de
+    retirer une file côté client (ex. exclure l'ARAM de la catégorie « Normale »).
+    """
     if not (riot and my_puuid):
         return []
-    ids = riot.recent_match_ids(my_puuid, max(1, min(int(count or 10), 20))) or []
+    ids = riot.recent_match_ids(my_puuid, start, count, queue, match_type) or []
     out = []
     for mid in ids:
         match = riot.match(mid)
         if not match:
             continue
         info = match.get("info", {})
+        if exclude_queue and (info.get("queueId", 0) or 0) == exclude_queue:
+            continue
         parts = info.get("participants", [])
         mine = next((p for p in parts if p.get("puuid") == my_puuid),
                     parts[0] if parts else None)

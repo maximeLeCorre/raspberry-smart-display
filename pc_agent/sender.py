@@ -107,3 +107,13 @@ def msg_set_screen(screen: str) -> dict:
 
 def msg_data(screen: str, payload: dict) -> dict:
     return {"type": "data", "screen": screen, "payload": payload}
+
+
+# Historique « local » (LCU) : pour les matchs spéciaux (ARAM chaos, customs)
+# que l'API Web Riot n'indexe pas. Le Pi les demande, l'agent répond.
+def msg_lcu_history(games: list) -> dict:
+    return {"type": "lcu_history", "games": games}
+
+
+def msg_lcu_detail(payload: dict | None) -> dict:
+    return {"type": "lcu_detail", "payload": payload}

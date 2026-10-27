@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from champ_select import build_champ_select_payload
 from lcu import LcuClient
-from phases import build_queue_payload
+from phases import build_lcu_detail, build_lcu_history, build_queue_payload
 from riot_api import get_all_game_data, summarize_full
+from sender import msg_lcu_detail, msg_lcu_history
 from sources.base import Source
 
 
@@ -52,3 +53,18 @@ class LeagueSource(Source):
             if matches(phase):
                 return (screen, build(phase))
         return None  # menu / lobby -> rien de spécial (défaut géré par l'agent)
+
+    def handle_request(self, message: dict, sender) -> bool:
+        """Le Pi réclame l'historique/bilan des parties spéciales (ARAM chaos)
+        que seule la LCU expose."""
+        msg_type = message.get("type")
+        if msg_type == "request_lcu_history":
+            games = build_lcu_history(self.lcu, int(message.get("start") or 0),
+                                      int(message.get("count") or 10))
+            sender.send_safe(msg_lcu_history(games))
+            return True
+        if msg_type == "request_lcu_detail":
+            payload = build_lcu_detail(self.lcu, message.get("gameId"))
+            sender.send_safe(msg_lcu_detail(payload))
+            return True
+        return False
