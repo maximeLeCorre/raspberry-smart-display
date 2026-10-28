@@ -138,8 +138,8 @@ def run_real(url: str, config: dict, auth_token: str = "", ssl_context=None) -> 
             # Heartbeat : ré-affirme périodiquement l'écran courant même à l'idle
             # (menu, aucun changement d'écran). Sans ça, `send_safe` ne serait
             # jamais appelé au repos et la reconnexion après une veille ne se
-            # déclencherait pas. Idempotent côté Pi (set_screen = no-op si déjà
-            # dessus / écran forcé manuellement).
+            # déclencherait pas. Idempotent côté Pi (un set_screen identique au
+            # précédent est ignoré, cf. App._on_network).
             now = time.monotonic()
             if now - last_beat >= HEARTBEAT_SECONDS:
                 sender.send_safe(msg_set_screen(last_screen or DEFAULT_SCREEN))

@@ -481,6 +481,11 @@ class App:
 
         elif msg_type == "set_screen":
             screen = msg.get("screen", DEFAULT_SCREEN)
+            # L'agent ré-affirme son écran à intervalles (heartbeat) : seul un
+            # CHANGEMENT compte, sinon on rabattrait au défaut un écran ouvert à
+            # la main (serveur, actus…) et on relancerait le bilan en boucle.
+            if screen == self.network_screen:
+                return
             self.network_screen = screen
             # Un écran poussé par l'agent (vraie partie) sort du mode « revue ».
             self.postgame_return = None
