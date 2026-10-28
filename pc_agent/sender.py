@@ -34,8 +34,16 @@ class Sender:
 
         Si un jeton est configuré, on envoie immédiatement le handshake d'auth
         (premier message attendu par le Pi). Fait à chaque (re)connexion.
+
+        Keepalive (ping_interval/ping_timeout) : indispensable pour détecter un
+        lien mort après une **veille du PC**. Sans lui, les `send()` partent dans
+        un socket à moitié ouvert « avec succès » (bufferisés par l'OS) sans lever
+        d'exception, et la reconnexion ne se déclenche jamais. Avec, la lib ferme
+        la connexion faute de pong (~ping_timeout) → les `send()` suivants lèvent
+        → `send_safe` reconnecte (cf. le heartbeat de la boucle de l'agent).
         """
-        self._ws = connect(self.url, open_timeout=3, ssl=self.ssl_context)
+        self._ws = connect(self.url, open_timeout=3, close_timeout=3,
+                           ping_interval=20, ping_timeout=20, ssl=self.ssl_context)
         if self.auth_token:
             self._ws.send(json.dumps({"type": "auth", "token": self.auth_token}))
         print(f"[envoi] Connecté à {self.url}")
