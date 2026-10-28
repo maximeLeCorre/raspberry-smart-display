@@ -1,11 +1,13 @@
-"""Écran par défaut (module système) : horloge, date, 3 dernières actus.
+"""Écran par défaut (module système) : horloge, une actu, dock de tuiles.
 
 Disposition (cadres dans le fond default.png, cf. tools/gen_default_bg.py) :
-  - panneau horloge/date (haut droite) ;
-  - panneau actualité : les 3 derniers titres (clic → détail sur l'écran
-    France Info) ;
-  - onglet « France Info » (haut gauche) : ouvre la liste complète ;
-  - bandeau LoL (haut, conditionnel) : « Rejoindre » l'écran proposé par l'agent.
+  - panneau horloge/date (haut droite) + ligne d'état du PC ;
+  - bandeau d'actualité : UN titre qui tourne (clic → détail France Info) ;
+  - dock (bas) : grosses tuiles tactiles « vivantes », selon les modules actifs :
+      Jouer (LoL : « Jouer une ARAM Chaos », devient « Rejoindre » quand une
+      activité est en cours, ou affiche l'étape du flux « jouer »),
+      Historique (nombre de parties), Serveur (état du service + CPU),
+      Actus (liste France Info).
 
 ⚠️ Les constantes de géométrie ci-dessous doivent rester alignées avec
 tools/gen_default_bg.py (qui dessine les cadres correspondants).
@@ -21,43 +23,42 @@ from screen import Screen
 
 from .rss_feed import get_feed
 
-# Axe des panneaux horloge/actu (décalé à droite : illustration à gauche).
-CENTER_X = 521
-CLOCK_Y = 135
-DATE_Y = 212
+# Panneau horloge (axe central) — CLOCK_PANEL de gen_default_bg.py.
+CENTER_X = 516
+CLOCK_Y = 112
+DATE_Y = 192
+STATUS_Y = 248
 
-# Panneau actualité (3 lignes). Doit suivre NEWS_PANEL de gen_default_bg.py.
-NEWS_HEADER_POS = (330, 299)
-NEWS_ROWS_AREA = pygame.Rect(325, 324, 452, 152)   # zone effaçable des 3 lignes
-NEWS_ROW_TOP = (326, 375, 424)
-NEWS_ROW_H = 49
-NEWS_BULLET_X = 338
-NEWS_TITLE_X = 354
-NEWS_TITLE_MAX = 774 - NEWS_TITLE_X
+# Bandeau d'actualité — NEWS_STRIP de gen_default_bg.py.
+NEWS_STRIP = pygame.Rect(240, 292, 552, 58)
+NEWS_INNER = NEWS_STRIP.inflate(-28, -8)
+NEWS_ROTATE_SECONDS = 8      # un titre toutes les N s
+NEWS_ROTATE_COUNT = 5        # parmi les N plus récents
 
-# Bouton « Dernières parties » (droite de l'en-tête ACTU ; LoL uniquement).
-HISTORY_BTN = pygame.Rect(584, 291, 193, 28)
+# Dock des tuiles — DOCK de gen_default_bg.py.
+DOCK = pygame.Rect(240, 360, 552, 112)
+TILE_GAP = 8
+TILE_PAD = 8                 # marge intérieure du dock
+PRIMARY_WEIGHT = 1.3         # la tuile Jouer est plus large
 
-# Onglet « France Info » (haut gauche) et bandeau LoL (haut, conditionnel).
-TAB_RECT = pygame.Rect(18, 12, 186, 40)
-# Onglet « Serveur » (sous France Info ; seulement si le module server est actif).
-SERVER_TAB = pygame.Rect(18, 62, 186, 42)
-BANNER_RECT = pygame.Rect(372, 10, 416, 34)
-BANNER_LABELS = {
-    "lol": "LoL · partie en cours",
-    "champselect": "LoL · sélection en cours",
-    "queue": "LoL · file d'attente",
-    "postgame": "LoL · voir la dernière performance",
+# Libellés de la tuile Jouer quand l'agent propose un écran à rejoindre.
+JOIN_LABELS = {
+    "lol": "Partie en cours",
+    "champselect": "Sélection en cours",
+    "queue": "File d'attente",
+    "postgame": "Dernière performance",
 }
-# Bouton unique « jouer » : lance le client au besoin, crée le lobby ARAM Chaos
-# et invite l'ami configuré (l'agent saute toute étape déjà faite). Pendant le
-# flux, l'agent pousse un message d'étape (`playStatus`) affiché à la place du
-# libellé — confirmation de la prise en compte + avancement.
-PLAY_LABEL = "Jouer une ARAM Chaos"
 
+BG_TILE = (22, 30, 50)
+BG_PRIMARY = (40, 34, 20)
+BORDER = (44, 58, 90)
 GOLD = (210, 175, 95)
+GREEN = (110, 210, 130)
+ORANGE = (230, 170, 70)
+RED = (228, 86, 86)
 WHITE = (238, 240, 245)
 DIM = (150, 165, 195)
+FAINT = (92, 106, 134)
 
 # Noms français pour la date (localtime renvoie des indices)
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -90,183 +91,235 @@ class DefaultScreen(Screen):
 
     def __init__(self, app):
         super().__init__(app)
-        self.font_time = pygame.font.Font(None, 124)
-        self.font_date = pygame.font.Font(None, 44)
-        self.font_header = pygame.font.Font(None, 22)
-        self.font_title = pygame.font.Font(None, 26)
-        self.font_meta = pygame.font.Font(None, 20)
-        self.font_tab = pygame.font.Font(None, 26)
-        self.font_banner = pygame.font.Font(None, 22)
+        self.font_time = pygame.font.Font(None, 150)
+        self.font_date = pygame.font.Font(None, 42)
+        self.font_status = pygame.font.Font(None, 24)
+        self.font_news_tag = pygame.font.Font(None, 20)
+        self.font_news = pygame.font.Font(None, 26)
+        self.font_tile = pygame.font.Font(None, 30)
+        self.font_tile_sub = pygame.font.Font(None, 22)
 
         self.feed = get_feed(app)
+        self._play_status = ""          # message d'étape du flux « jouer »
+        # Tuiles calculées à l'entrée : les écrans des autres modules ne sont
+        # pas encore tous construits quand celui-ci l'est.
+        self._tiles: list[tuple[str, pygame.Rect]] = []
+        self._news_article = None       # article affiché dans le bandeau
+        self._history_count = 0
+        self._history_ts = 0.0
+        self._reset_keys()
+
+    def _reset_keys(self) -> None:
         self._last_time: str | None = None
         self._last_date: str | None = None
-        self._banner_key: tuple | None = None   # état actuellement dessiné
-        self._banner_mode: str | None = None    # "join" / "play" / None (pour le clic)
-        self._play_status = ""                   # message d'étape du flux « jouer »
-        self._chrome_drawn = False
-        self._news_key: tuple[str, ...] | None = None
-        self._news_rows: list[tuple[pygame.Rect, object]] = []
+        self._status_key = None
+        self._news_key = None
+        self._tile_keys: dict[str, tuple] = {}
 
-    def _line(self, surface, text, font, color, y):
-        """Ligne centrée sur CENTER_X, après effacement d'une bande pleine
-        largeur (restaure le fond, illustration comprise)."""
-        rendered = font.render(text, True, color)
-        rect = rendered.get_rect(center=(CENTER_X, y))
-        band = pygame.Rect(0, rect.top - 4, self.width, rect.height + 8)
-        self.clear_region(surface, band)
-        surface.blit(rendered, rect)
-        return band
+    def _layout_tiles(self) -> list[tuple[str, pygame.Rect]]:
+        """Tuiles présentes selon les modules actifs, réparties sur le dock."""
+        screens = self.app.screens
+        ids = []
+        if "history" in screens:          # module League
+            ids += ["play", "history"]
+        if "server" in screens:
+            ids.append("server")
+        if "news" in screens:
+            ids.append("news")
+        if not ids:
+            return []
+        weights = [PRIMARY_WEIGHT if t == "play" else 1.0 for t in ids]
+        inner = DOCK.inflate(-2 * TILE_PAD, -2 * TILE_PAD)
+        unit = (inner.w - TILE_GAP * (len(ids) - 1)) / sum(weights)
+        tiles, x = [], float(inner.x)
+        for tid, w in zip(ids, weights):
+            width = unit * w
+            tiles.append((tid, pygame.Rect(round(x), inner.y, round(width), inner.h)))
+            x += width + TILE_GAP
+        return tiles
 
     def enter(self) -> None:
-        self._last_time = None
-        self._last_date = None
-        self._banner_key = None
-        self._chrome_drawn = False
-        self._news_key = None
-        self._news_rows = []
+        self._tiles = self._layout_tiles()
+        self._reset_keys()
         self._play_status = ""
+        self._history_ts = 0.0
 
     def update_data(self, payload: dict) -> None:
         """L'agent pousse un message d'étape du flux « jouer » (vide = terminé)."""
         if "playStatus" in payload:
             self._play_status = str(payload.get("playStatus") or "")
 
+    # ------------------------------------------------------------------ rendu
     def draw(self, surface: pygame.Surface) -> list[pygame.Rect]:
         dirty: list[pygame.Rect] = []
         now = time.localtime()
 
-        # Éléments statiques (onglet + en-tête actu) : une fois par entrée.
-        if not self._chrome_drawn:
-            dirty.extend(self._draw_chrome(surface))
-            self._chrome_drawn = True
-
-        # 3 dernières actus : redessinées quand le flux change.
-        if self.feed is not None:
-            articles = self.feed.articles()[:3]
-            key = tuple(a.title for a in articles)
-            if key != self._news_key:
-                self._news_key = key
-                dirty.append(self._draw_news(surface, articles))
-
-        # Bandeau LoL (conditionnel) : « Rejoindre » un écran proposé par l'agent,
-        # sinon le bouton unique « Jouer une ARAM Chaos » si l'agent est connecté.
-        joinable = self.app.joinable_screen()
-        key = (joinable, self.app.agent_connected, self._play_status)
-        if key != self._banner_key:
-            dirty.append(self._draw_banner(surface, joinable))
-            self._banner_key = key
-
-        # Horloge et date.
-        time_str = time.strftime("%H:%M:%S", now)
+        time_str = time.strftime("%H:%M", now)
         if time_str != self._last_time:
-            dirty.append(self._line(surface, time_str, self.font_time, WHITE, y=CLOCK_Y))
+            dirty.append(self._line(surface, time_str, self.font_time, WHITE, CLOCK_Y))
             self._last_time = time_str
 
         date_str = date_francaise(now)
         if date_str != self._last_date:
-            dirty.append(self._line(surface, date_str, self.font_date, (150, 170, 205), y=DATE_Y))
+            dirty.append(self._line(surface, date_str, self.font_date, DIM, DATE_Y))
             self._last_date = date_str
 
+        connected = self.app.agent_connected
+        if connected != self._status_key:
+            dirty.append(self._draw_status(surface, connected))
+            self._status_key = connected
+
+        dirty.extend(self._draw_news_if_changed(surface))
+
+        for tid, rect in self._tiles:
+            state = self._tile_state(tid)
+            if state != self._tile_keys.get(tid):
+                self._draw_tile(surface, rect, *state)
+                self._tile_keys[tid] = state
+                dirty.append(rect)
         return dirty
 
-    # ---------------------------------------------------------------- chrome
-    def _draw_chrome(self, surface: pygame.Surface) -> list[pygame.Rect]:
-        tab = self.font_tab.render("France Info", True, GOLD)
-        surface.blit(tab, tab.get_rect(center=TAB_RECT.center))
-        # Onglet « Serveur » (opaque, par-dessus l'illustration) si module actif.
-        if "server" in self.app.screens:
-            pygame.draw.rect(surface, (11, 17, 32), SERVER_TAB, border_radius=12)
-            pygame.draw.rect(surface, (44, 58, 90), SERVER_TAB, width=2, border_radius=12)
-            srv = self.font_tab.render("Serveur", True, GOLD)
-            surface.blit(srv, srv.get_rect(center=SERVER_TAB.center))
-        header = self.font_header.render("ACTUALITÉS", True, GOLD)
-        surface.blit(header, NEWS_HEADER_POS)
-        dirty = [TAB_RECT, pygame.Rect(*NEWS_HEADER_POS, 200, 22)]
-        if "server" in self.app.screens:
-            dirty.append(SERVER_TAB)
-        # Bouton « Dernières parties » : seulement si le module League est actif.
-        if "history" in self.app.screens:
-            pygame.draw.rect(surface, GOLD, HISTORY_BTN, width=1, border_radius=7)
-            label = self.font_banner.render("Dernières parties  »", True, GOLD)
-            surface.blit(label, label.get_rect(center=HISTORY_BTN.center))
-            dirty.append(HISTORY_BTN)
-        return dirty
+    def _line(self, surface, text, font, color, y) -> pygame.Rect:
+        """Ligne centrée dans le panneau horloge (efface sa bande de panneau)."""
+        rendered = font.render(text, True, color)
+        rect = rendered.get_rect(center=(CENTER_X, y))
+        band = pygame.Rect(256, rect.top - 4, 520, rect.height + 8)
+        self.clear_region(surface, band)
+        surface.blit(rendered, rect)
+        return band
 
-    def _draw_news(self, surface: pygame.Surface, articles: list) -> pygame.Rect:
-        self.clear_region(surface, NEWS_ROWS_AREA)   # restaure fond + séparateurs
-        self._news_rows = []
+    def _draw_status(self, surface, connected: bool) -> pygame.Rect:
+        """Ligne d'état discrète : le PC (agent) est-il joignable ?"""
+        text, color = ("PC connecté", GREEN) if connected else ("PC hors ligne", FAINT)
+        surf = self.font_status.render(text, True, color)
+        w = surf.get_width() + 18
+        x = CENTER_X - w // 2
+        band = pygame.Rect(256, STATUS_Y - 12, 520, 24)
+        self.clear_region(surface, band)
+        pygame.draw.circle(surface, color, (x + 5, STATUS_Y), 5)
+        surface.blit(surf, (x + 18, STATUS_Y - surf.get_height() // 2))
+        return band
 
+    def _draw_news_if_changed(self, surface) -> list[pygame.Rect]:
         if self.feed is None:
-            return NEWS_ROWS_AREA
-        if not articles:
-            msg = self.font_title.render("Chargement des actualités…", True, DIM)
-            surface.blit(msg, (NEWS_TITLE_X, NEWS_ROW_TOP[0] + 12))
-            return NEWS_ROWS_AREA
-
-        for i, top in enumerate(NEWS_ROW_TOP):
-            if i >= len(articles):
-                break
-            art = articles[i]
-            pygame.draw.circle(surface, GOLD, (NEWS_BULLET_X, top + 16), 3)
-            title = fit_text(art.title, self.font_title, NEWS_TITLE_MAX)
-            surface.blit(self.font_title.render(title, True, WHITE), (NEWS_TITLE_X, top + 5))
-            if art.published:
-                surface.blit(self.font_meta.render(art.published, True, DIM),
-                             (NEWS_TITLE_X, top + 29))
-            self._news_rows.append(
-                (pygame.Rect(NEWS_ROWS_AREA.x, top, NEWS_ROWS_AREA.w, NEWS_ROW_H), art))
-        return NEWS_ROWS_AREA
-
-    def _draw_banner(self, surface: pygame.Surface, joinable: str | None) -> pygame.Rect:
-        self.clear_region(surface, BANNER_RECT)
-        # Priorité à « Rejoindre » (partie/sélection/file en cours) ; à défaut,
-        # « Créer un lobby » si le client LoL est simplement ouvert au menu.
-        border = GOLD
-        if joinable:
-            self._banner_mode = "join"
-            label = BANNER_LABELS.get(joinable, "LoL") + "   »"
-        elif self._play_status:
-            # Flux « jouer » en cours : on affiche l'étape (bordure verte), clic
-            # neutralisé (voir handle_touch).
-            self._banner_mode = "play"
-            label = self._play_status
-            border = (120, 200, 120)
-        elif self.app.agent_connected:
-            self._banner_mode = "play"
-            label = PLAY_LABEL + "   »"
+            return []
+        articles = self.feed.articles()[:NEWS_ROTATE_COUNT]
+        art = (articles[int(time.time() // NEWS_ROTATE_SECONDS) % len(articles)]
+               if articles else None)
+        key = (art.title, art.published) if art else None
+        if key == self._news_key and self._news_key is not None:
+            return []
+        self._news_key = key
+        self._news_article = art
+        self.clear_region(surface, NEWS_INNER)
+        tag = self.font_news_tag.render("FRANCE INFO", True, GOLD)
+        surface.blit(tag, (NEWS_INNER.x, NEWS_INNER.centery - tag.get_height() // 2))
+        x = NEWS_INNER.x + tag.get_width() + 14
+        if art is None:
+            text, color = "Chargement des actualités…", FAINT
         else:
-            self._banner_mode = None
-            return BANNER_RECT
-        pygame.draw.rect(surface, (34, 48, 78), BANNER_RECT, border_radius=9)
-        pygame.draw.rect(surface, border, BANNER_RECT, width=2, border_radius=9)
-        label = fit_text(label, self.font_banner, BANNER_RECT.w - 24)
-        surf = self.font_banner.render(label, True, (235, 235, 240))
-        surface.blit(surf, surf.get_rect(center=BANNER_RECT.center))
-        return BANNER_RECT
+            text, color = art.title, WHITE
+        meta = f"  {art.published}" if art and art.published else ""
+        meta_w = self.font_news_tag.size(meta)[0] if meta else 0
+        title = fit_text(text, self.font_news, NEWS_INNER.right - x - meta_w)
+        t = self.font_news.render(title, True, color)
+        surface.blit(t, (x, NEWS_INNER.centery - t.get_height() // 2))
+        if meta:
+            m = self.font_news_tag.render(meta, True, FAINT)
+            surface.blit(m, (x + t.get_width(), NEWS_INNER.centery - m.get_height() // 2 + 1))
+        return [NEWS_INNER]
+
+    # ------------------------------------------------------------------ tuiles
+    def _tile_state(self, tid: str) -> tuple:
+        """(titre, sous-titre, couleur du sous-titre, primaire, actif).
+        Le sous-titre peut tenir sur deux lignes (séparées par « \\n »)."""
+        if tid == "play":
+            joinable = self.app.joinable_screen()
+            if joinable:
+                return ("Rejoindre", JOIN_LABELS.get(joinable, "LoL"), GREEN, True, True)
+            if self._play_status:
+                return ("En cours…", self._play_status, GREEN, True, False)
+            if self.app.agent_connected:
+                return ("Jouer", "ARAM Chaos", GOLD, True, True)
+            return ("Jouer", "PC hors ligne", FAINT, True, False)
+        if tid == "history":
+            if time.monotonic() - self._history_ts > 5:
+                self._history_count = self.app.store.total()
+                self._history_ts = time.monotonic()
+            n = self._history_count
+            return ("Historique", f"{n} partie{'s' if n > 1 else ''}", DIM, False, True)
+        if tid == "server":
+            return self._server_tile_state()
+        if tid == "news":
+            n = len(self.feed.articles()) if self.feed else 0
+            return ("Actus", f"{n} articles" if n else "France Info", DIM, False, True)
+        return ("", "", DIM, False, False)
+
+    def _server_tile_state(self) -> tuple:
+        srv = self.app.screens.get("server")
+        link = getattr(srv, "link", None)
+        service = getattr(srv, "service", None)
+        if link is None:
+            return ("Serveur", "non configuré", FAINT, False, True)
+        snap = link.snapshot()
+        if not snap.get("online"):
+            return ("Serveur", "hors ligne", RED, False, True)
+        if service:
+            status = snap.get("services", {}).get(service["unit"], "")
+            color = GREEN if status == "active" else (RED if status in ("inactive", "failed")
+                                                      else ORANGE)
+            word = {"active": "actif", "inactive": "arrêté", "failed": "en échec"}.get(
+                status, status or "…")
+            # Libellé et état sur deux lignes : l'état est écrit, pas seulement coloré.
+            return ("Serveur", f"{service['label']}\n{word}", color, False, True)
+        cpu = snap.get("cpu_pct")
+        return ("Serveur", f"CPU {cpu:.0f} %" if cpu is not None else "en ligne",
+                GREEN, False, True)
+
+    def _draw_tile(self, surface, rect, title, sub, sub_color, primary, enabled) -> None:
+        self.clear_region(surface, rect)
+        fill = BG_PRIMARY if primary and enabled else BG_TILE
+        border = GOLD if primary and enabled else BORDER
+        pygame.draw.rect(surface, fill, rect, border_radius=14)
+        pygame.draw.rect(surface, border, rect, width=2, border_radius=14)
+        title_col = WHITE if enabled else FAINT
+        max_w = rect.w - 12
+        t = self.font_tile.render(fit_text(title, self.font_tile, max_w), True, title_col)
+        subs = [self.font_tile_sub.render(fit_text(line, self.font_tile_sub, max_w),
+                                          True, sub_color) for line in sub.split("\n")]
+        gap = 8 if len(subs) == 1 else 5
+        height = t.get_height() + gap + sum(x.get_height() for x in subs)
+        y = rect.centery - height // 2
+        surface.blit(t, t.get_rect(midtop=(rect.centerx, y)))
+        y += t.get_height() + gap
+        for line in subs:
+            surface.blit(line, line.get_rect(midtop=(rect.centerx, y)))
+            y += line.get_height()
 
     # ---------------------------------------------------------------- entrées
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
-        if TAB_RECT.collidepoint(pos):
-            self._open_news(None)
+        if NEWS_STRIP.collidepoint(pos):
+            self._open_news(self._news_article)
             return None
-        if "server" in self.app.screens and SERVER_TAB.collidepoint(pos):
+        for tid, rect in self._tiles:
+            if rect.collidepoint(pos):
+                self._activate(tid)
+                return None
+        return None
+
+    def _activate(self, tid: str) -> None:
+        if tid == "play":
+            if self.app.joinable_screen():
+                self.app.join_screen()
+            elif not self._play_status:
+                self.app.play()       # ignoré si l'agent est déconnecté
+        elif tid == "history":
+            self.app.open_history()
+        elif tid == "server":
             self.app.manual_screen = "server"
             self.app.set_screen("server")
-            return None
-        if "history" in self.app.screens and HISTORY_BTN.collidepoint(pos):
-            self.app.open_history()
-            return None
-        for rect, art in self._news_rows:
-            if rect.collidepoint(pos):
-                self._open_news(art)
-                return None
-        if BANNER_RECT.collidepoint(pos):
-            if self._banner_mode == "join":
-                self.app.join_screen()
-            elif self._banner_mode == "play" and not self._play_status:
-                self.app.play()   # ignoré si un flux est déjà en cours
-        return None
+        elif tid == "news":
+            self._open_news(None)
 
     def _open_news(self, article) -> None:
         news = self.app.screens.get("news")
