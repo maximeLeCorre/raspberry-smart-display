@@ -27,8 +27,8 @@ fenêtre, agent sur `localhost`) tant que l'écran physique n'est pas livré.
   **Source** agent (`sources/<nom>.py`).
 - Modules actifs = **le Pi** (`config.toml [modules]`), annoncés par `hello`. Système
   (horloge, écran `default`) toujours actif. `app.py`/`main.py` sont agnostiques du jeu.
-- Ajouter un jeu : écrans + `Module` (`modules/__init__.py`) ET `Source`
-  (`sources/__init__.py`) + activer en config.
+- Ajouter : écrans + `Module` (`modules/__init__.py`) [+ `Source` (`sources/__init__.py`) pour un
+  jeu ; un **domaine Pi-only** comme `server` n'a **pas de Source**] + activer en config.
 
 ## Commandes (Windows)
 - `python` = stub Store (échoue) → **`py -3.11`** ; venv racine **`.venv`**.
@@ -40,19 +40,13 @@ fenêtre, agent sur `localhost`) tant que l'écran physique n'est pas livré.
 
 ### Relancer après un changement (**à me proposer par défaut**)
 Aucun hot-reload : après toute modif, **proposer** le redémarrage du composant touché (jamais sans accord).
-- **`pi_display/`** → **redéployer** (`deploy/deploy_pi.py`, redémarre le service `pi-display`) ou
-  `ssh … 'sudo systemctl restart pi-display'` ; en test local PC : `…python pi_display\main.py --scale 2`.
+- **`pi_display/`** → **redéployer** (`deploy/deploy_pi.py`, redémarre `pi-display`) ou `ssh … 'sudo systemctl restart pi-display'` ; test local PC : `…python pi_display\main.py --scale 2`.
 - **`pc_agent/`** → relancer l'agent : `deploy\restart_pc_agent.ps1` (ou `pc_agent\main.py`).
 
 ### Autostart de l'agent PC (Windows)
-Tâche planifiée `RaspberryPiDisplayAgent` à l'**ouverture de session**, fenêtre **cachée**
-(`deploy/pc_agent_launch_hidden.vbs` → `pc_agent_launch.bat`, `PYTHONUNBUFFERED`+`PYTHONUTF8`=1 —
-log UTF-8 sinon un caractère hors cp1252 plante un `print`), journal `logs/pc_agent.log` (gitignoré).
-⚠️ Le `.vbs` lance l'agent **détaché** (tâche finie aussitôt, code 0) ; le relancer =
-`deploy\restart_pc_agent.ps1` (tue l'instance + `Start-ScheduledTask`), **pas** `Restart-ScheduledTask`
-(absent en PS 5.1). ⚠️ `.venv\Scripts\python.exe` ouvre 2 process (redirecteur venv + interpréteur).
-Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps1` ; désinstaller :
-`…\uninstall_pc_agent_autostart.ps1` (relancer l'installeur après déplacement du dépôt).
+Tâche planifiée `RaspberryPiDisplayAgent` à l'**ouverture de session**, fenêtre **cachée** (`deploy/pc_agent_launch_hidden.vbs` → `pc_agent_launch.bat`, `PYTHONUNBUFFERED`+`PYTHONUTF8`=1 — log UTF-8 sinon un caractère hors cp1252 plante un `print`), journal `logs/pc_agent.log` (gitignoré).
+⚠️ Le `.vbs` lance l'agent **détaché** (tâche finie aussitôt, code 0) ; le relancer = `deploy\restart_pc_agent.ps1` (tue l'instance + `Start-ScheduledTask`), **pas** `Restart-ScheduledTask` (absent en PS 5.1). ⚠️ `.venv\Scripts\python.exe` ouvre 2 process (redirecteur venv + interpréteur).
+Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps1` ; désinstaller : `…\uninstall_pc_agent_autostart.ps1` (relancer l'installeur après déplacement du dépôt).
 
 ## Protocole réseau
 - **Sécurité** (2 couches activables) : TLS `wss://` (cert auto-signé du Pi épinglé par
@@ -97,6 +91,12 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
   `[lol] sync_minutes`, défaut 3 min). Bilan « dernière partie » affiché si **plus récent que
   `_postgame_baseline`**, sinon **« détail non disponible »** (`_postgame_unavailable_later`).
   ⚠️ La LCU **ne pagine pas** → seulement les **20 récentes** ; l'historique s'accumule au fil du jeu.
+
+### Serveur (`server`, module **Pi-only** : pas de Source — SSH **depuis le Pi**, marche PC éteint)
+Écran code-drawn (jauges CPU/RAM/disque + Démarrer/Arrêter/Redémarrer d'un service systemd ; accès **onglet accueil + cycle**).
+`server_link.py` = paramiko persistant, poll d'**une** cmd SSH `clé=valeur` (`[server] poll_seconds`), **CPU% = delta `/proc/stat`** côté Pi.
+Contrôle = `sudo systemctl` → **NOPASSWD** requis côté serveur. Config `[server]` + `[[server.services]]`.
+Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` TOFU). ⚠️ paramiko ajouté à `requirements.txt` **et** au `pip` de `deploy_pi.py`.
 
 ## API Riot & pièges
 - **LCU** (`pc_agent/lcu.py`, agent, client ouvert) : phase, sélection, historique, **actions**

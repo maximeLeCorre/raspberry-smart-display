@@ -40,6 +40,8 @@ HISTORY_BTN = pygame.Rect(584, 291, 193, 28)
 
 # Onglet « France Info » (haut gauche) et bandeau LoL (haut, conditionnel).
 TAB_RECT = pygame.Rect(18, 12, 186, 40)
+# Onglet « Serveur » (sous France Info ; seulement si le module server est actif).
+SERVER_TAB = pygame.Rect(18, 62, 186, 42)
 BANNER_RECT = pygame.Rect(372, 10, 416, 34)
 BANNER_LABELS = {
     "lol": "LoL · partie en cours",
@@ -172,9 +174,17 @@ class DefaultScreen(Screen):
     def _draw_chrome(self, surface: pygame.Surface) -> list[pygame.Rect]:
         tab = self.font_tab.render("France Info", True, GOLD)
         surface.blit(tab, tab.get_rect(center=TAB_RECT.center))
+        # Onglet « Serveur » (opaque, par-dessus l'illustration) si module actif.
+        if "server" in self.app.screens:
+            pygame.draw.rect(surface, (11, 17, 32), SERVER_TAB, border_radius=12)
+            pygame.draw.rect(surface, (44, 58, 90), SERVER_TAB, width=2, border_radius=12)
+            srv = self.font_tab.render("Serveur", True, GOLD)
+            surface.blit(srv, srv.get_rect(center=SERVER_TAB.center))
         header = self.font_header.render("ACTUALITÉS", True, GOLD)
         surface.blit(header, NEWS_HEADER_POS)
         dirty = [TAB_RECT, pygame.Rect(*NEWS_HEADER_POS, 200, 22)]
+        if "server" in self.app.screens:
+            dirty.append(SERVER_TAB)
         # Bouton « Dernières parties » : seulement si le module League est actif.
         if "history" in self.app.screens:
             pygame.draw.rect(surface, GOLD, HISTORY_BTN, width=1, border_radius=7)
@@ -239,6 +249,10 @@ class DefaultScreen(Screen):
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         if TAB_RECT.collidepoint(pos):
             self._open_news(None)
+            return None
+        if "server" in self.app.screens and SERVER_TAB.collidepoint(pos):
+            self.app.manual_screen = "server"
+            self.app.set_screen("server")
             return None
         if "history" in self.app.screens and HISTORY_BTN.collidepoint(pos):
             self.app.open_history()

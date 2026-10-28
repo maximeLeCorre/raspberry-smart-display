@@ -33,6 +33,7 @@ max_items = 15           # nombre d'articles gardés (liste France Info)
 # Modules activés (source de vérité unique : le Pi l'annonce à l'agent).
 # Le module système (horloge/date) est toujours actif.
 league = true      # League of Legends (file, sélection, partie, après-partie)
+server = true      # supervision + contrôle d'un petit serveur (SSH) — cf. [server]
 # valorant = false  # (exemple futur)
 
 [riot]
@@ -59,6 +60,26 @@ sync_minutes = 3
 # par nom -> l'invité doit être dans tes amis.
 lobby_queue = 2400
 lobby_invite = "Matte mwa"
+
+[server]
+# Écran « Serveur » : le Pi se connecte LUI-MÊME en SSH (clé) pour relever les
+# métriques (CPU/RAM/disque) et piloter des services. Marche PC éteint.
+# host = "" (vide) => écran « non configuré ». Renseigne l'IP du serveur ici.
+host = ""                 # ex. "192.168.1.60" (vide = module affiché mais inactif)
+port = 22
+user = "mc"               # utilisateur SSH (celui autorisé par la clé publique)
+key_file = "certs/server_id_ed25519"       # clé PRIVÉE sur le Pi (gitignorée, copiée par deploy)
+known_hosts = "certs/server_known_hosts"   # empreinte du serveur, épinglée au 1er contact
+disk_path = "/"           # partition suivie pour la jauge disque
+poll_seconds = 5          # fréquence du relevé des métriques
+
+# Services pilotables (start/stop/restart). Un seul pour l'instant (Minecraft).
+# use_sudo=true => le serveur doit autoriser `sudo systemctl ...` sans mot de
+# passe pour l'utilisateur SSH (règle sudoers NOPASSWD limitée à systemctl).
+[[server.services]]
+label = "Minecraft"
+unit = "minecraft.service"
+use_sudo = true
 
 [gpio]
 # Broches BCM des boutons physiques (uniquement sur le Pi, ignorées sur PC).

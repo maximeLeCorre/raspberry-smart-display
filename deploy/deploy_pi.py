@@ -152,7 +152,7 @@ if [ "__INSTALL__" = "1" ]; then
   echo "[pi] Environnement Python (venv + dependances)..."
   [ -d "$VENV" ] || python3 -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip >/dev/null
-  "$VENV/bin/pip" install pygame websockets python-dotenv
+  "$VENV/bin/pip" install pygame websockets python-dotenv paramiko
   "$VENV/bin/pip" install gpiozero RPi.GPIO \\
       || echo "[pi] (GPIO: install echouee -- l'affichage marche sans, fallback clavier)"
 fi
