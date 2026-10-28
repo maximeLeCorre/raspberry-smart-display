@@ -66,6 +66,19 @@ def load_riot_key() -> str:
     return (os.getenv("RIOT_API_KEY") or "").strip()
 
 
+def load_server_host() -> str:
+    """Hôte SSH de l'écran « Serveur » (SERVER_HOST), lu dans le .env du Pi.
+
+    Garde l'IP du serveur hors de Git ; prioritaire sur ``[server] host``.
+    """
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(ENV_PATH)
+    except ImportError:
+        pass
+    return (os.getenv("SERVER_HOST") or "").strip()
+
+
 def build_server_ssl(config: dict) -> ssl.SSLContext | None:
     """Contexte TLS côté serveur (Pi), ou None si TLS désactivé.
 

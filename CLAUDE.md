@@ -93,9 +93,9 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
   ⚠️ La LCU **ne pagine pas** → seulement les **20 récentes** ; l'historique s'accumule au fil du jeu.
 
 ### Serveur (`server`, module **Pi-only** : pas de Source — SSH **depuis le Pi**, marche PC éteint)
-Écran code-drawn (jauges CPU/RAM/disque + Démarrer/Arrêter/Redémarrer d'un service systemd ; accès **onglet accueil + cycle**).
+Écran code-drawn (jauges CPU/RAM/disque + **courbes CPU/RAM** `history()` en mémoire, `[server] history_minutes` + Démarrer/Arrêter/Redémarrer d'un service systemd ; accès **onglet accueil + cycle**).
 `server_link.py` = paramiko persistant, poll d'**une** cmd SSH `clé=valeur` (`[server] poll_seconds`), **CPU% = delta `/proc/stat`** côté Pi.
-Contrôle = `sudo systemctl` → **NOPASSWD** requis côté serveur. Config `[server]` + `[[server.services]]`.
+Contrôle = `sudo systemctl` → **NOPASSWD** requis côté serveur. Config `[server]` + `[[server.services]]` ; IP = **`SERVER_HOST` du `.env`** (hors Git, prioritaire sur `host`).
 Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` TOFU). ⚠️ paramiko ajouté à `requirements.txt` **et** au `pip` de `deploy_pi.py`.
 
 ## API Riot & pièges

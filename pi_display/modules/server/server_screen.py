@@ -1,8 +1,9 @@
 """Écran de supervision/contrôle d'un petit serveur (code-drawn, pas de PNG).
 
 Haut : titre + badge connexion (en ligne/hors ligne) + RETOUR. Milieu : trois
-jauges (CPU, RAM, disque) + ligne uptime/température. Bas : état du service
-(badge actif/inactif) et boutons Démarrer / Arrêter / Redémarrer.
+jauges (CPU, RAM, disque) + ligne uptime/température, puis courbes CPU/RAM des
+dernières minutes (`ServerLink.history()`). Bas : état du service (badge
+actif/inactif) et boutons Démarrer / Arrêter / Redémarrer.
 
 Les données viennent de `ServerLink.snapshot()` (le Pi sonde le serveur en SSH,
 voir `server_link.py`). Les actions partent par `App.async_call` (hors boucle de
@@ -31,6 +32,10 @@ GREEN = (110, 210, 130)
 ORANGE = (230, 170, 70)
 RED = (228, 86, 86)
 BLUE = (96, 150, 235)
+# Courbes : paire Okabe-Ito (lisible par les daltoniens), contraste de
+# luminosité en plus de la teinte ; seule la courbe CPU a une aire remplie.
+CPU_COL = (240, 165, 30)       # orange
+RAM_COL = (110, 195, 245)      # bleu ciel
 TRACK = (30, 40, 62)
 PANEL = (24, 32, 52)
 
@@ -38,12 +43,16 @@ PANEL = (24, 32, 52)
 RETOUR_RECT = pygame.Rect(700, 8, 92, 38)
 BADGE_RECT = pygame.Rect(470, 10, 210, 34)      # badge connexion (en-tête)
 
-METRICS_AREA = pygame.Rect(0, 70, 800, 220)     # zone effaçable des jauges
+METRICS_AREA = pygame.Rect(0, 62, 800, 126)     # zone effaçable des jauges
 LABEL_X = 40
-BAR_X, BAR_W, BAR_H = 200, 360, 28
+BAR_X, BAR_W, BAR_H = 200, 360, 22
 VALUE_X = BAR_X + BAR_W + 20
-GAUGE_Y = (104, 158, 212)                        # centres des 3 jauges
-INFO_Y = 264
+GAUGE_Y = (80, 114, 148)                         # centres des 3 jauges
+INFO_Y = 168
+
+CHART_AREA = pygame.Rect(0, 186, 800, 112)       # zone effaçable des courbes
+CHART = pygame.Rect(40, 190, 720, 106)           # panneau des courbes
+PLOT = pygame.Rect(CHART.x + 40, CHART.y + 30, CHART.w - 92, CHART.h - 38)  # marge droite = étiquettes
 
 SVC_AREA = pygame.Rect(0, 300, 800, 180)         # zone effaçable service+boutons
 SVC_LABEL_Y = 328
@@ -84,6 +93,7 @@ class ServerScreen(Screen):
         self.font_value = pygame.font.Font(None, 28)
         self.font_btn = pygame.font.Font(None, 30)
         self.font_small = pygame.font.Font(None, 24)
+        self.font_tiny = pygame.font.Font(None, 20)
 
         self.link = get_link(app)
         self.service = self.link.services[0] if (self.link and self.link.services) else None
@@ -95,6 +105,7 @@ class ServerScreen(Screen):
         self._chrome_drawn = False
         self._badge_key = None
         self._metrics_key = None
+        self._chart_key = None
         self._svc_key = None
         self._action_key = None
 
@@ -102,6 +113,7 @@ class ServerScreen(Screen):
         self._chrome_drawn = False
         self._badge_key = None
         self._metrics_key = None
+        self._chart_key = None
         self._svc_key = None
         self._action_key = None
 
@@ -132,6 +144,13 @@ class ServerScreen(Screen):
         if mkey != self._metrics_key:
             dirty.append(self._draw_metrics(surface, snap, online))
             self._metrics_key = mkey
+
+        # Courbes CPU/RAM : redessinées à chaque nouveau point.
+        hist = self.link.history() if self.link else []
+        ckey = (len(hist), hist[-1][0] if hist else 0, online, self.link is not None)
+        if ckey != self._chart_key:
+            dirty.append(self._draw_chart(surface, hist, online))
+            self._chart_key = ckey
 
         # Service : badge d'état + boutons.
         status = self._status(snap)
@@ -184,9 +203,10 @@ class ServerScreen(Screen):
         cpu = snap.get("cpu_pct")
         cpu_frac = (cpu or 0) / 100.0
         cpu_val = f"{cpu:.0f} %" if cpu is not None else "—"
-        nproc = snap.get("nproc", 1)
+        if cpu is not None:
+            cpu_val += f"  ({snap.get('nproc', 1)} cœurs)"
         self._gauge(surface, GAUGE_Y[0], "CPU", cpu_frac, cpu_val,
-                    self._load_color(cpu_frac), extra=f"{nproc} cœurs")
+                    self._load_color(cpu_frac))
 
         mem_used, mem_total = snap.get("mem_used", 0), snap.get("mem_total", 0)
         mem_frac = mem_used / mem_total if mem_total else 0
@@ -205,10 +225,97 @@ class ServerScreen(Screen):
         if snap.get("temp_c") is not None:
             info += f"        temp {snap['temp_c']:.0f} °C"
         color = GREY if online else DIM
-        surface.blit(self.font_value.render(info, True, color), (LABEL_X, INFO_Y))
+        surface.blit(self.font_small.render(info, True, color), (LABEL_X, INFO_Y))
         return METRICS_AREA
 
-    def _gauge(self, surface, cy, label, frac, value_text, color, extra=""):
+    def _draw_chart(self, surface, hist: list, online: bool) -> pygame.Rect:
+        """Courbes CPU (orange, aire remplie) et RAM (bleu ciel, trait seul) en %."""
+        self.clear_region(surface, CHART_AREA)
+        if self.link is None:
+            return CHART_AREA
+        pygame.draw.rect(surface, PANEL, CHART, border_radius=8)
+
+        # Grille 0/50/100 % (seul 50 % est légendé : 0 et 100 vont de soi).
+        for pct in (0, 50, 100):
+            y = PLOT.bottom - round(PLOT.h * pct / 100)
+            pygame.draw.line(surface, TRACK, (PLOT.x, y), (PLOT.right, y))
+        lab = self.font_tiny.render("50%", True, DIM)
+        surface.blit(lab, (PLOT.x - lab.get_width() - 6, PLOT.centery - lab.get_height() // 2))
+
+        # Légende (dernières valeurs) + fenêtre.
+        last = hist[-1] if hist else (0, None, None)
+        x = CHART.x + 12
+        for name, val, color in (("CPU", last[1], CPU_COL), ("RAM", last[2], RAM_COL)):
+            text = f"{name} {val:.0f} %" if val is not None else f"{name} —"
+            surf = self.font_small.render(text, True, color if online else DIM)
+            pygame.draw.circle(surface, color, (x + 5, CHART.y + 13), 5)
+            surface.blit(surf, (x + 16, CHART.y + 13 - surf.get_height() // 2))
+            x += 16 + surf.get_width() + 24
+        span = self.link.history_seconds
+        win = self.font_tiny.render(f"{span // 60} dernières min", True, DIM)
+        surface.blit(win, (CHART.right - win.get_width() - 12, CHART.y + 6))
+
+        if len(hist) < 2:
+            msg = self.font_small.render(
+                "collecte en cours…" if online else "aucune donnée (hors ligne)", True, DIM)
+            surface.blit(msg, msg.get_rect(center=PLOT.center))
+            return CHART_AREA
+
+        # Abscisse = temps, ancrée sur le dernier point ; trou (hors ligne) si
+        # deux points sont trop espacés, ou valeur absente (1er relevé CPU).
+        t_end = hist[-1][0]
+        max_gap = 3 * self.link.poll_seconds
+        series = []
+        for idx, color, name in ((1, CPU_COL, "CPU"), (2, RAM_COL, "RAM")):
+            segments, cur, prev_t = [], [], None
+            for p in hist:
+                t, v = p[0], p[idx]
+                if v is None or t < t_end - span or (prev_t is not None and t - prev_t > max_gap):
+                    if cur:
+                        segments.append(cur)
+                    cur = []
+                if v is not None and t >= t_end - span:
+                    px = PLOT.right - (t_end - t) / span * PLOT.w
+                    py = PLOT.bottom - max(0.0, min(100.0, v)) / 100.0 * PLOT.h
+                    cur.append((px, py))
+                prev_t = t
+            if cur:
+                segments.append(cur)
+            series.append((segments, color, name))
+
+        # Aire translucide sous la courbe CPU seulement (repère non coloré).
+        overlay = pygame.Surface(PLOT.size, pygame.SRCALPHA)
+        for seg in series[0][0]:
+            if len(seg) >= 2:
+                pts = [(x - PLOT.x, y - PLOT.y) for x, y in seg]
+                poly = pts + [(pts[-1][0], PLOT.h), (pts[0][0], PLOT.h)]
+                pygame.draw.polygon(overlay, (*CPU_COL, 55), poly)
+        surface.blit(overlay, PLOT.topleft)
+
+        # Traits, puis nom de la courbe au bout du dernier segment.
+        ends = []
+        for segments, color, name in series:
+            if not online:
+                color = DIM
+            for seg in segments:
+                if len(seg) >= 2:
+                    pygame.draw.lines(surface, color, False, seg, 3)
+                else:
+                    pygame.draw.circle(surface, color, (round(seg[0][0]), round(seg[0][1])), 2)
+            if segments:
+                ends.append([segments[-1][-1][1], name, color])
+        # Écarte les deux étiquettes si les courbes finissent au même niveau.
+        if len(ends) == 2 and abs(ends[0][0] - ends[1][0]) < 16:
+            mid = (ends[0][0] + ends[1][0]) / 2
+            lo, hi = sorted(ends, key=lambda e: e[0])
+            lo[0], hi[0] = mid - 8, mid + 8
+        for y, name, color in ends:
+            lab = self.font_small.render(name, True, color)
+            y = max(PLOT.y, min(PLOT.bottom, y))
+            surface.blit(lab, (PLOT.right + 6, round(y) - lab.get_height() // 2))
+        return CHART_AREA
+
+    def _gauge(self, surface, cy, label, frac, value_text, color):
         frac = max(0.0, min(1.0, frac))
         surface.blit(self.font_label.render(label, True, GREY),
                      (LABEL_X, cy - self.font_label.get_height() // 2))
@@ -220,9 +327,6 @@ class ServerScreen(Screen):
         pygame.draw.rect(surface, PANEL, track, width=1, border_radius=6)
         surface.blit(self.font_value.render(value_text, True, WHITE),
                      (VALUE_X, cy - self.font_value.get_height() // 2))
-        if extra:
-            e = self.font_small.render(extra, True, DIM)
-            surface.blit(e, (track.right - e.get_width() - 8, cy + BAR_H // 2 + 2))
 
     @staticmethod
     def _load_color(frac: float):
