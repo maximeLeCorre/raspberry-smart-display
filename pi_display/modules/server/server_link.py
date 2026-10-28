@@ -8,6 +8,8 @@ Modèle calqué sur `rss_feed.py` : un thread de fond interroge le serveur toute
 les `poll_seconds` via **une seule commande** SSH qui imprime des lignes
 ``clé=valeur`` (CPU, RAM, disque, température, état des services). L'écran lit le
 dernier `snapshot()` (copie thread-safe) ; il ne fait jamais d'I/O lui-même.
+Un historique glissant CPU/RAM (`history()`, `[server] history_minutes`) est
+alimenté à chaque sondage pour les courbes de l'écran.
 
 Le contrôle d'un service (start/stop/restart) passe par `run_action`, exécuté
 hors boucle de rendu par `App.async_call`. systemd + `sudo` (règle NOPASSWD
@@ -23,6 +25,7 @@ from __future__ import annotations
 import shlex
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 try:
@@ -50,6 +53,9 @@ class ServerLink:
         self.known_hosts = _resolve(str(cfg.get("known_hosts", "certs/server_known_hosts")))
         self.disk_path = str(cfg.get("disk_path", "/")) or "/"
         self.poll_seconds = max(2, int(cfg.get("poll_seconds", 5) or 5))
+        # Fenêtre des courbes : un point (ts, cpu %, ram %) par sondage.
+        self.history_seconds = max(60, int(float(cfg.get("history_minutes", 10) or 10) * 60))
+        self._history: deque = deque(maxlen=self.history_seconds // self.poll_seconds + 1)
         self.services = [
             {"label": s.get("label") or s.get("unit", "service"),
              "unit": str(s.get("unit", "")).strip(),
@@ -73,6 +79,11 @@ class ServerLink:
             snap = dict(self._snapshot)
             snap["services"] = dict(snap.get("services", {}))
             return snap
+
+    def history(self) -> list[tuple[float, float | None, float | None]]:
+        """Copie de l'historique : [(ts, cpu %, ram %)], du plus ancien au plus récent."""
+        with self._snap_lock:
+            return list(self._history)
 
     # ------------------------------------------------------------ commande SSH
     def _build_metrics_cmd(self) -> str:
@@ -191,8 +202,10 @@ class ServerLink:
         temp = _to_int(raw.get("temp"))
         snap["temp_c"] = round(temp / 1000.0, 1) if temp else None
         snap["ts"] = time.time()
+        mem_pct = snap["mem_used"] / mem_total * 100.0 if mem_total else None
         with self._snap_lock:
             self._snapshot = snap
+            self._history.append((snap["ts"], cpu_pct, mem_pct))
 
     def _cpu_percent(self, cpu_line: str) -> float | None:
         """% CPU calculé par delta entre deux sondages (pas de sleep distant)."""
@@ -257,14 +270,17 @@ def _to_int(val) -> int:
 def get_link(app):
     """Instance unique du lien serveur pour l'app (None si non configuré).
 
-    Lit la section ``[server]`` ; renvoie None si aucun hôte n'est renseigné
-    (l'écran affiche alors « non configuré »).
+    Lit la section ``[server]`` (hôte : ``SERVER_HOST`` du .env, sinon
+    ``host``) ; renvoie None si aucun hôte n'est renseigné (l'écran affiche
+    alors « non configuré »).
     """
     if not hasattr(app, "_server_link"):
-        cfg = app.config.get("server", {})
-        host = str(cfg.get("host", "")).strip()
+        from config import load_server_host
+        cfg = dict(app.config.get("server", {}))
+        host = load_server_host() or str(cfg.get("host", "")).strip()
         link = None
         if host:
+            cfg["host"] = host
             link = ServerLink(cfg)
             link.start()
         app._server_link = link

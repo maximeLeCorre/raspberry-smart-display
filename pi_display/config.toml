@@ -64,14 +64,16 @@ lobby_invite = "Matte mwa"
 [server]
 # Écran « Serveur » : le Pi se connecte LUI-MÊME en SSH (clé) pour relever les
 # métriques (CPU/RAM/disque) et piloter des services. Marche PC éteint.
-# host = "" (vide) => écran « non configuré ». Renseigne l'IP du serveur ici.
-host = ""                 # ex. "192.168.1.60" (vide = module affiché mais inactif)
+# L'IP du serveur se met dans le .env (SERVER_HOST=…, hors Git, copié par deploy) ;
+# `host` ici ne sert que de repli. Aucun des deux => écran « non configuré ».
+host = ""
 port = 22
-user = "mc"               # utilisateur SSH (celui autorisé par la clé publique)
+user = "opc"               # utilisateur SSH (celui autorisé par la clé publique)
 key_file = "certs/server_id_ed25519"       # clé PRIVÉE sur le Pi (gitignorée, copiée par deploy)
 known_hosts = "certs/server_known_hosts"   # empreinte du serveur, épinglée au 1er contact
 disk_path = "/"           # partition suivie pour la jauge disque
 poll_seconds = 5          # fréquence du relevé des métriques
+history_minutes = 10      # fenêtre des courbes CPU/RAM (en mémoire, 1 point par relevé)
 
 # Services pilotables (start/stop/restart). Un seul pour l'instant (Minecraft).
 # use_sudo=true => le serveur doit autoriser `sudo systemctl ...` sans mot de

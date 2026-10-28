@@ -239,7 +239,8 @@ def main() -> None:
     # Le Pi a besoin du jeton d'auth ET de la clé Riot (il est autonome pour
     # l'enrichissement Web : historique, dossiers, rangs...).
     env_content = (f"DISPLAY_AUTH_TOKEN={read_env_value('DISPLAY_AUTH_TOKEN')}\n"
-                   f"RIOT_API_KEY={read_env_value('RIOT_API_KEY')}\n")
+                   f"RIOT_API_KEY={read_env_value('RIOT_API_KEY')}\n"
+                   f"SERVER_HOST={read_env_value('SERVER_HOST')}\n")
 
     tmp = Path(tempfile.mkdtemp(prefix="pi-deploy-"))
     tgz = tmp / "pi-display-deploy.tgz"
