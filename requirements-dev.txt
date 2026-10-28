@@ -1,0 +1,4 @@
+# Outils de développement (PC uniquement) : tests automatisés.
+#   .\.venv\Scripts\python -m pip install -r requirements-dev.txt
+#   .\.venv\Scripts\python -m pytest
+pytest>=8

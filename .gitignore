@@ -34,3 +34,6 @@ Thumbs.db
 
 # --- Journaux de l'agent PC (autostart) ---
 logs/
+
+# --- Empreinte SSH du Pi (deploy, TOFU) ---
+deploy/known_hosts
