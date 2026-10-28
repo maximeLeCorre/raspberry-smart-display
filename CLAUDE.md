@@ -57,15 +57,15 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
 - **agent → Pi** : `auth{token}`, `set_screen{screen}`, `data{screen,payload}`
   (queue/champselect/lol ; joueur = `riotId` Nom#TAG ; `default`/`playStatus` = étape du bouton
   Jouer), `store_matches{games,done}` (parties à stocker), `lcu_detail{gameId,payload}`.
-- Interne (serveur Pi) : `_connected`/`_disconnected`. Déconnexion → écran `default`
-  (l'historique reste consultable : il est en base locale).
+- Interne (serveur Pi) : `_connected`/`_disconnected` (**seulement si le client COURANT part** : après veille,
+  l'ancien lien tombe après la reconnexion). Déconnexion → `default`. Heartbeat agent (`set_screen` répété) = no-op.
 - NB : dossiers/icônes/splash ne sont **pas** des messages réseau — le Pi les fait lui-même
   (`App.request_player_info/request_icon/request_splash` → `riot_web`/CDN, en async).
 
 ## Écrans (`pi_display/`)
 - `screen.py` : base `Screen` (attr `cycle`), fond PNG chargé 1×, redessin par **dirty rects**.
-- **system/** : `default` (horloge/date, 3 actus RSS, onglet « France Info », bouton
-  « Dernières parties », bandeau LoL : « Rejoindre » sinon « Jouer une ARAM Chaos »), `news` (code-drawn),
+- **system/** : `default` (horloge HH:MM + état PC, 1 actu qui tourne, **dock de tuiles vivantes** selon modules :
+  Jouer/Rejoindre, Historique, Serveur (état écrit, pas que coloré : user daltonien), Actus), `news` (code-drawn),
   `rss_feed` (flux récupéré par le Pi, stdlib urllib/xml ; marche agent déconnecté).
 - **league/** : `queue` (file + ready-check avec **gros bouton Accepter** → `lcu_action`),
   `champselect` (équipe/timer/bans, clic → dossier + splash), `lol`, `postgame`, `history`.
@@ -139,11 +139,12 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
 - **Fonds** : 1 PNG 800×480/écran dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres
   **dans le PNG** (code au pixel). Code-drawn : `news`, `postgame`, `history`. `default.png` dérivé
   de `default_base.png` par `tools/gen_default_bg.py`.
-- **Tests** : pas de framework ; headless `SDL_VIDEODRIVER=dummy` (instancier `App`, piloter
-  `_on_network`/`do_action`/`draw`, `pygame.image.save`). Scripts jetables préfixe `_`.
+- **Tests** : **pytest** (`tests/`, `requirements-dev.txt`) → `.\.venv\Scripts\python -m pytest` **avant chaque déploiement**.
+  Headless (`conftest.py` : SDL dummy, store jetable, `SERVER_HOST` vide). Rendus visuels : scripts jetables `_`.
 - **Git** : repo privé `maximeLeCorre/raspberry-smart-display`, branche `main`. Commits **en français**
   co-signés `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. **Pas de commit/push sans demande.**
-- **Déploiement** : `deploy/deploy_pi.py` (SSH paramiko ; `.env` : `PI_HOST/PI_USER/PI_PASS`). Archive
+- **Déploiement** : `deploy/deploy_pi.py` (~10 s ; clé SSH `~/.ssh/id_ed25519`, repli `PI_PASS` ; empreinte Pi épinglée
+  `deploy/known_hosts`). Deps apt/pip réinstallées **seulement si leur liste change** (`--full` force). Archive
   `pi_display/` (hors `_*`/`__pycache__`) + `certs/` + `.env` ; installe deps + service **systemd**
   `pi-display` (autostart, `kmsdrm`, plein écran). ⚠️ lié à **tty1** (DRM master) ; libs EGL/GLES Mesa ;
   jamais exclure les `__init__.py`. Logs `journalctl -u pi-display -f`. 1er boot écran noir → rebooter.

@@ -1,11 +1,12 @@
 """Retouche le fond de l'écran d'accueil : bake les panneaux par-dessus l'art.
 
-Part de `assets/default_base.png` (l'illustration d'origine) et dessine les
-cadres de la mise en page actuelle de l'accueil :
+Part de `assets/default_base.png` (l'illustration d'origine, chat à gauche) et
+dessine les cadres de la mise en page de l'accueil :
   - panneau horloge/date (haut droite) ;
-  - panneau actualité à 3 lignes (sous l'horloge) avec séparateurs ;
-  - onglet « France Info » (haut gauche).
+  - bandeau d'actualité (une ligne, sous l'horloge) ;
+  - dock des tuiles (bas) — les tuiles elles-mêmes sont dessinées par le code.
 
+Les panneaux recouvrent les anciens cadres présents dans la base.
 Écrit `assets/default.png`. Idempotent (toujours régénéré depuis la base).
 Lancer : `.\.venv\Scripts\python pi_display\tools\gen_default_bg.py`
 
@@ -19,19 +20,13 @@ from PIL import Image, ImageDraw
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
-# Panneaux : (x0, y0, x1, y1). Doivent recouvrir les anciens panneaux du fond.
-CLOCK_PANEL = (250, 48, 792, 286)
-NEWS_PANEL = (312, 290, 792, 476)
-TAB = (18, 12, 204, 52)
-
-# Séparateurs internes du panneau actu (bornes des 3 lignes).
-NEWS_INNER_X = (330, 774)
-NEWS_HEADER_UNDERLINE_Y = 323
-NEWS_DIVIDER_Y = (375, 424)
+# Panneaux : (x0, y0, x1, y1).
+CLOCK_PANEL = (240, 12, 792, 282)
+NEWS_STRIP = (240, 292, 792, 350)
+DOCK = (240, 360, 792, 472)
 
 FILL = (11, 17, 32)
 BORDER = (44, 58, 90)
-LINE = (34, 46, 74)
 RADIUS = 18
 
 
@@ -42,15 +37,10 @@ def main() -> None:
     img = Image.open(base).convert("RGB")
     draw = ImageDraw.Draw(img)
 
-    for rect in (CLOCK_PANEL, NEWS_PANEL):
-        draw.rounded_rectangle(rect, radius=RADIUS, fill=FILL, outline=BORDER, width=2)
-    draw.rounded_rectangle(TAB, radius=12, fill=FILL, outline=BORDER, width=2)
-
-    # Séparateurs du panneau actu.
-    x0, x1 = NEWS_INNER_X
-    draw.line((x0, NEWS_HEADER_UNDERLINE_Y, x1, NEWS_HEADER_UNDERLINE_Y), fill=LINE, width=1)
-    for y in NEWS_DIVIDER_Y:
-        draw.line((x0, y, x1, y), fill=LINE, width=1)
+    draw.rounded_rectangle(CLOCK_PANEL, radius=RADIUS, fill=FILL, outline=BORDER, width=2)
+    draw.rounded_rectangle(NEWS_STRIP, radius=14, fill=FILL, outline=BORDER, width=2)
+    # Dock : fond plein sans bordure (les tuiles portent leur propre cadre).
+    draw.rounded_rectangle(DOCK, radius=RADIUS, fill=FILL)
 
     out = ASSETS / "default.png"
     img.save(out)
