@@ -18,6 +18,7 @@ import os
 import ssl
 import time
 import tomllib
+import traceback
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -115,13 +116,21 @@ def run_real(url: str, config: dict, auth_token: str = "", ssl_context=None) -> 
     print("[agent] Surveillance des modules... (Ctrl+C pour quitter)")
     try:
         while True:
-            result = None
-            for name, src in sources.items():
-                if not is_enabled(name):
-                    continue
-                result = src.poll()
-                if result is not None:
-                    break
+            # Une réponse LCU inattendue ne doit jamais tuer l'agent (lancé caché,
+            # rien ne le relancerait) : on journalise et on retente au tick suivant.
+            try:
+                result = None
+                for name, src in sources.items():
+                    if not is_enabled(name):
+                        continue
+                    result = src.poll()
+                    if result is not None:
+                        break
+            except Exception:
+                print("[agent] Erreur pendant la détection (ignorée) :")
+                traceback.print_exc()
+                time.sleep(interval)
+                continue
 
             if result is not None:
                 screen, payload = result

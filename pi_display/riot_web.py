@@ -16,8 +16,11 @@ depuis la config du Pi — voir `config.load_riot_key` et `app`.
 from __future__ import annotations
 
 import json
+import threading
+import time
 import urllib.error
 import urllib.request
+from collections import OrderedDict
 from urllib.parse import quote
 
 # Résumé des champions (id -> nom/alias) : CDN public, pas de clé.
@@ -37,6 +40,12 @@ LOADING_ART_URL = "https://ddragon.leagueoflegends.com/cdn/img/champion/loading/
 # force donc un User-Agent explicite sur TOUTES les requêtes.
 USER_AGENT = "pi-display/1.0 (raspberry-smart-display)"
 
+# Limite de débit (HTTP 429) : on attend `Retry-After` (borné) puis on réessaie.
+RATE_LIMIT_RETRIES = 2
+RATE_LIMIT_MAX_WAIT = 10.0
+# Parties match-v5 gardées en mémoire (~50-100 Ko chacune) : LRU borné.
+MATCH_CACHE_SIZE = 64
+
 
 def normalize_riot_id(game_name: str | None, tag_line: str | None) -> str:
     """Clé normalisée 'nom#tag' (minuscules) pour comparer à la liste d'amis."""
@@ -48,13 +57,26 @@ def _http_get(url: str, headers: dict | None = None, timeout: float = 6.0) -> by
     hdrs = {"User-Agent": USER_AGENT}
     hdrs.update(headers or {})
     req = urllib.request.Request(url, headers=hdrs)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            if resp.status != 200:
-                return None
-            return resp.read()
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError):
-        return None
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status != 200:
+                    return None
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            # Toujours appelé hors boucle de rendu (worker) : attendre est sans risque.
+            if exc.code == 429 and attempt < RATE_LIMIT_RETRIES:
+                try:
+                    wait = float(exc.headers.get("Retry-After") or 1)
+                except ValueError:
+                    wait = 1.0
+                print(f"[riot] Limite de débit (429) : nouvel essai dans {wait:.0f} s")
+                time.sleep(min(max(wait, 0.5), RATE_LIMIT_MAX_WAIT))
+                continue
+            return None
+        except (urllib.error.URLError, OSError, ValueError):
+            return None
+    return None
 
 
 class Champions:
@@ -97,8 +119,12 @@ class RiotWeb:
         self.api_key = (api_key or "").strip() or None
         self.platform = platform          # ex. "euw1"
         self.regional = regional          # ex. "europe"
-        self._puuid_cache: dict[tuple[str, str], str | None] = {}
-        self._match_cache: dict[str, dict] = {}
+        # Caches partagés entre workers (async_call) : protégés par un verrou.
+        # PUUID : seules les RÉUSSITES sont gardées (un échec réseau/429 ne doit
+        # pas rendre un joueur introuvable jusqu'au redémarrage).
+        self._lock = threading.Lock()
+        self._puuid_cache: dict[tuple[str, str], str] = {}
+        self._match_cache: OrderedDict[str, dict] = OrderedDict()
 
     @property
     def enabled(self) -> bool:
@@ -127,13 +153,16 @@ class RiotWeb:
         if not game_name or not tag_line:
             return None
         key = (game_name, tag_line)
-        if key in self._puuid_cache:
-            return self._puuid_cache[key]
+        with self._lock:
+            if key in self._puuid_cache:
+                return self._puuid_cache[key]
         account = self._get(
             self._regional_host(),
             f"/riot/account/v1/accounts/by-riot-id/{quote(game_name)}/{quote(tag_line)}")
         puuid = account.get("puuid") if account else None
-        self._puuid_cache[key] = puuid
+        if puuid:
+            with self._lock:
+                self._puuid_cache[key] = puuid
         return puuid
 
     def summoner_by_puuid(self, puuid: str):
@@ -157,11 +186,16 @@ class RiotWeb:
                          f"/lol/match/v5/matches/by-puuid/{puuid}/ids?count={count}")
 
     def match(self, match_id: str):
-        if match_id in self._match_cache:
-            return self._match_cache[match_id]
+        with self._lock:
+            if match_id in self._match_cache:
+                self._match_cache.move_to_end(match_id)
+                return self._match_cache[match_id]
         data = self._get(self._regional_host(), f"/lol/match/v5/matches/{match_id}")
         if data is not None:
-            self._match_cache[match_id] = data
+            with self._lock:
+                self._match_cache[match_id] = data
+                while len(self._match_cache) > MATCH_CACHE_SIZE:
+                    self._match_cache.popitem(last=False)
         return data
 
     def recent_winrate(self, puuid: str, count: int = 8):

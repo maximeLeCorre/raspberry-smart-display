@@ -42,8 +42,13 @@ class Sender:
         la connexion faute de pong (~ping_timeout) → les `send()` suivants lèvent
         → `send_safe` reconnecte (cf. le heartbeat de la boucle de l'agent).
         """
-        self._ws = connect(self.url, open_timeout=3, close_timeout=3,
-                           ping_interval=20, ping_timeout=20, ssl=self.ssl_context)
+        opts = dict(open_timeout=3, close_timeout=3,
+                    ping_interval=20, ping_timeout=20, ssl=self.ssl_context)
+        try:
+            # websockets ≥ 17.1 : connexion directe (hors `with`) = mode `legacy`.
+            self._ws = connect(self.url, legacy=True, **opts)
+        except TypeError:
+            self._ws = connect(self.url, **opts)
         if self.auth_token:
             self._ws.send(json.dumps({"type": "auth", "token": self.auth_token}))
         print(f"[envoi] Connecté à {self.url}")
