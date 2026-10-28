@@ -26,6 +26,7 @@ client fantôme : tant qu'il n'est pas authentifié, il n'écrase pas le vrai ag
 
 from __future__ import annotations
 
+import hmac
 import json
 import queue
 import threading
@@ -96,7 +97,8 @@ class NetworkServer:
             first = websocket.recv(timeout=self.AUTH_TIMEOUT)
             data = json.loads(first)
             ok = (isinstance(data, dict) and data.get("type") == "auth"
-                  and data.get("token") == self.auth_token)
+                  and isinstance(data.get("token"), str)
+                  and hmac.compare_digest(data["token"].encode(), self.auth_token.encode()))
         except Exception:
             ok = False
         if not ok:
@@ -127,8 +129,15 @@ class NetworkServer:
             # Déconnexion brutale, erreur de socket : on sort proprement.
             pass
         finally:
+            # Après une veille du PC, l'agent se reconnecte AVANT que l'ancien
+            # lien (à moitié ouvert) ne tombe par timeout de ping : seul le
+            # client COURANT qui part signifie « agent déconnecté ».
             with self._lock:
-                if self._client is websocket:
+                current = self._client is websocket
+                if current:
                     self._client = None
-            self.event_queue.put({"type": "_disconnected"})
-            print("[reseau] Client déconnecté")
+            if current:
+                self.event_queue.put({"type": "_disconnected"})
+                print("[reseau] Client déconnecté")
+            else:
+                print("[reseau] Ancienne connexion fermée (remplacée)")

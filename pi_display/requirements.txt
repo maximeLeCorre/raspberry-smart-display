@@ -1,6 +1,6 @@
 # Dépendances de l'appli d'affichage (Pi + test sur PC)
 pygame>=2.5
-websockets>=12.0
+websockets>=13.0,<18
 
 # Connexion SSH du module « serveur » (métriques + contrôle de services). Le Pi
 # se connecte lui-même. Tire cryptography (déjà présent). Sur le Pi, piwheels
