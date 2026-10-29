@@ -64,13 +64,13 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
 
 ## Écrans (`pi_display/`)
 - `screen.py` : base `Screen` (attr `cycle`), fond PNG chargé 1×, redessin par **dirty rects**.
-- **system/** : `default` (horloge HH:MM + état PC, 1 actu qui tourne, **dock de tuiles vivantes** selon modules :
-  Jouer/Rejoindre, Historique, Serveur (état écrit, pas que coloré : user daltonien), Actus), `news` (code-drawn),
-  `rss_feed` (flux récupéré par le Pi, stdlib urllib/xml ; marche agent déconnecté).
-- **league/** : `queue` (file + ready-check avec **gros bouton Accepter** → `lcu_action`),
-  `champselect` (équipe/timer/bans, clic → dossier + splash), `lol`, `postgame`, `history`.
-- `LolScreen` : complément au jeu → **timers d'objectifs** (Dragon/Baron/Héraut, Faille only)
-  + **dossier adverse au clic** (via `riotId`). Horloge/compteurs extrapolés (agent ~1/s).
+- **system/** : `default` (horloge, météo, pastille PC haut-gauche, alerte santé Pi, 1 actu qui tourne, **dock de tuiles
+  vivantes** selon modules : Jouer/Rejoindre, Historique, Serveur, Actus ; états écrits, pas que colorés : user daltonien),
+  `news` + `rss_feed` (flux lu par le Pi), `weather` (courbe du jour + pluie, ◀/▶ + menu des jours ; clic sur la météo).
+  `weather.py` = Open-Meteo sans clé (`[weather]`) → série **horaire** upsertée dans **`weather.db`** (base vide → rattrapage,
+  ~50 j réels) ; `pi_health.py` = /proc local, seuils `[pi_health]` (CPU soutenu). Tout marche PC éteint.
+- **league/** : `queue` (ready-check, **bouton Accepter** → `lcu_action`), `champselect` (clic → dossier + splash), `lol`, `postgame`, `history`.
+- `LolScreen` : **timers d'objectifs** (Faille only) + **dossier adverse au clic** (`riotId`) ; compteurs extrapolés (agent ~1/s).
 
 ### PostGame (`postgame`, code-drawn)
 Barres horizontales des 10 joueurs ; onglets = métrique (`dmg/taken/gold/cs/vision/heal`),
@@ -138,13 +138,13 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
 
 ## Fonds · Tests · Git · Déploiement
 - **Fonds** : PNG 800×480 dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres **dans le PNG** (code au pixel ;
-  `default.png` = `tools/gen_default_bg.py` sur `default_base.png`). Code-drawn : `news`, `postgame`, `history`, `stats`, `server`.
+  `default.png` = `tools/gen_default_bg.py` sur `default_base.png`). Code-drawn : `news`, `weather`, `postgame`, `history`, `stats`, `server`.
 - **Tests** : **pytest** (`tests/`, `requirements-dev.txt`) → `.\.venv\Scripts\python -m pytest` **avant chaque déploiement**.
   Headless (`conftest.py` : SDL dummy, store jetable, `SERVER_HOST` vide). Rendus visuels : scripts jetables `_`.
 - **Git** : repo privé `maximeLeCorre/raspberry-smart-display`, branche `main`. Commits **en français**
   co-signés `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. **Pas de commit/push sans demande.**
 - **Déploiement** : `deploy/deploy_pi.py` (~10 s ; clé SSH `~/.ssh/id_ed25519`, repli `PI_PASS` ; empreinte Pi épinglée
   `deploy/known_hosts`). Deps apt/pip réinstallées **seulement si leur liste change** (`--full` force). Archive
-  `pi_display/` (hors `_*`/`__pycache__`) + `certs/` + `.env` ; installe deps + service **systemd**
-  `pi-display` (autostart, `kmsdrm`, plein écran). ⚠️ lié à **tty1** (DRM master) ; libs EGL/GLES Mesa ;
-  jamais exclure les `__init__.py`. Logs `journalctl -u pi-display -f`. 1er boot écran noir → rebooter.
+  `pi_display/` (hors `_*`/`__pycache__`/**`*.db`**) + `certs/` + `.env` ; service **systemd** `pi-display` (autostart, `kmsdrm`,
+  plein écran, lié à **tty1** = DRM master ; libs EGL/GLES Mesa ; jamais exclure les `__init__.py`). Logs : **`journalctl -t
+  pi-display -f`** (`-u` = systemd seul : PAM/tty1 met le process en session de login). 1er boot écran noir → rebooter.

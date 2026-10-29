@@ -15,6 +15,7 @@ def app(tmp_path, free_port, monkeypatch):
     monkeypatch.setattr(app_module, "Store", lambda: Store(tmp_path / "t.db"))
     cfg = load_config(app_module.__file__.replace("app.py", "config.toml"))
     cfg.setdefault("server", {})["host"] = ""
+    cfg.setdefault("weather", {})["enabled"] = False
     a = app_module.App(cfg, fullscreen=False, scale=1, monitor=None, debug=False,
                        host="127.0.0.1", port=free_port)
     a.sync_lcu = lambda: None
