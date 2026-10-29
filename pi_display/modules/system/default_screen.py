@@ -21,7 +21,7 @@ import time
 
 import pygame
 
-from screen import Screen
+from screen import ASSETS_DIR, Screen
 
 from .news_screen import wrap_text
 from .rss_feed import get_feed
@@ -74,6 +74,10 @@ FAINT = (92, 106, 134)
 SUN = (245, 196, 80)
 CLOUD = (196, 206, 224)
 RAIN = (110, 170, 240)
+
+# Police de la date : la police par défaut de pygame (freesansbold) dessine le
+# « 9 » et le « 7 » 1 px plus bas que les autres chiffres ; DejaVu est alignée.
+DATE_FONT = ASSETS_DIR / "fonts" / "DejaVuSans-Bold.ttf"
 
 # Libellés des alertes de santé du Pi (cf. pi_health.py).
 PI_ALERT_FMT = {"cpu": "CPU {} %", "ram": "RAM {} %", "disk": "Disque {} %",
@@ -164,7 +168,8 @@ class DefaultScreen(Screen):
     def __init__(self, app):
         super().__init__(app)
         self.font_time = pygame.font.Font(None, 150)
-        self.font_date = pygame.font.Font(None, 42)
+        self.font_date = (pygame.font.Font(str(DATE_FONT), 28) if DATE_FONT.exists()
+                          else pygame.font.Font(None, 42))
         self.font_status = pygame.font.Font(None, 24)
         self.font_weather_temp = pygame.font.Font(None, 38)
         self.font_weather = pygame.font.Font(None, 28)
