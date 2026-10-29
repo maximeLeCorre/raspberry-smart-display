@@ -55,6 +55,7 @@ poll_seconds = 5
 # Le module système (horloge/date) est toujours actif.
 league = true      # League of Legends (file, sélection, partie, après-partie)
 server = true      # supervision + contrôle d'un petit serveur (SSH) — cf. [server]
+transit = true     # prochains trains d'une gare + info trafic (API PRIM IDFM) — cf. [transit]
 # valorant = false  # (exemple futur)
 
 [riot]
@@ -107,6 +108,29 @@ history_minutes = 10      # fenêtre des courbes CPU/RAM (en mémoire, 1 point p
 label = "Minecraft"
 unit = "minecraft.service"
 use_sudo = true
+
+[transit]
+# Écran « Trains » : le Pi interroge lui-même l'API PRIM d'Île-de-France Mobilités.
+# Clé gratuite (prim.iledefrance-mobilites.fr) dans le .env : IDFM_API_KEY=… (hors Git).
+# Identifiants : open data IDFM (jeux « zones-d-arrets » et « referentiel-des-lignes »).
+station = "Chaville Rive Droite"
+stop_area = "43241"          # zone d'arrêt (ZdA) ferrée de la gare
+# Destinations rangées dans la 1re colonne (« vers Paris »), insensible à la casse.
+# La L va à Saint-Lazare, la U à La Défense (même quai, voie 2).
+paris_destinations = ["saint-lazare", "la défense"]
+direction_labels = ["Vers Paris · La Défense", "Vers Versailles · La Verrière"]
+tile_labels = ["Paris", "Versailles"]   # libellés courts de la tuile d'accueil
+# À droite de l'horloge : temps avant l'ENTRÉE EN GARE du prochain train vers…
+home_destination = "saint-lazare"   # (sous-chaîne de la destination, insensible à la casse)
+home_label = "St-Lazare"
+home_line = "L"
+refresh_seconds = 60         # prochains passages
+messages_minutes = 5         # info trafic (une requête par ligne)
+
+[transit.lines]
+# Lignes de la gare : id IDFM = lettre affichée (info trafic suivie pour chacune).
+C01740 = "L"   # Paris Saint-Lazare <-> Versailles Rive Droite
+C01741 = "U"   # La Défense <-> La Verrière
 
 [gpio]
 # Broches BCM des boutons physiques (uniquement sur le Pi, ignorées sur PC).

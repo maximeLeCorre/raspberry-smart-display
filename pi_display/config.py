@@ -79,6 +79,19 @@ def load_server_host() -> str:
     return (os.getenv("SERVER_HOST") or "").strip()
 
 
+def load_idfm_key() -> str:
+    """Clé de l'API PRIM d'Île-de-France Mobilités (IDFM_API_KEY), .env du Pi.
+
+    Écran « Trains » ; vide = module non configuré.
+    """
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(ENV_PATH)
+    except ImportError:
+        pass
+    return (os.getenv("IDFM_API_KEY") or "").strip()
+
+
 def build_server_ssl(config: dict) -> ssl.SSLContext | None:
     """Contexte TLS côté serveur (Pi), ou None si TLS désactivé.
 

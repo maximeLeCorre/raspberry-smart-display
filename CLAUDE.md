@@ -5,16 +5,13 @@ sans doublon. Dès que tu découvres un fait non évident (comportement d'API, d
 design, piège), mets à jour la section concernée. **Jamais de secret ici.**
 
 ## But
-Écran d'info tactile (Raspberry Pi 3 + écran 5" 800×480) affichant des écrans selon
-l'activité League of Legends du PC Windows. Tout se teste **sur le PC** (affichage en
-fenêtre, agent sur `localhost`) tant que l'écran physique n'est pas livré.
+Écran d'info tactile (Raspberry Pi 3 B+ + écran 5" 800×480) : accueil (heure, météo, trains, actus) + écrans selon
+l'activité League of Legends du PC Windows. Tout se teste aussi **sur le PC** (fenêtre, agent sur `localhost`).
 
 ## Architecture (2 programmes ; WebSocket JSON synchrone `websockets.sync` ; Pi = serveur)
-- **`pi_display/`** (Pygame, sur le Pi) = affichage **+ cerveau internet**. Interroge
-  lui-même l'**API Web Riot** (rangs/winrate/mains, dossiers joueurs) et les **CDN**
-  (icônes Community Dragon, splash Data Dragon) → `riot_web.py`. `RIOT_API_KEY` vit dans
-  le **.env du Pi**. Appels réseau hors boucle de rendu via `App.async_call(fn, cb)`
-  (worker thread → résultat livré au thread principal par `_drain_io`).
+- **`pi_display/`** (Pygame, sur le Pi) = affichage **+ cerveau internet** : API Web Riot + CDN (`riot_web.py`), météo,
+  trains, RSS, SSH serveur — clés dans le **.env du Pi**. Appels réseau hors boucle de rendu : `App.async_call(fn, cb)`
+  (worker → résultat livré au thread principal par `_drain_io`) ou thread de fond + `snapshot()`.
 - **`pc_agent/`** (Windows) = **purement local, SANS clé**. Lit les API **locales** Riot
   (LCU = phase/sélection/historique ; Live Client Data = partie en cours) et pousse
   écran + données au Pi.
@@ -96,8 +93,12 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
 ### Serveur (`server`, module **Pi-only** : pas de Source — SSH **depuis le Pi**, marche PC éteint)
 Écran code-drawn (jauges CPU/RAM/disque + **courbes CPU/RAM** `history()` en mémoire, `[server] history_minutes` + Démarrer/Arrêter/Redémarrer d'un service systemd ; accès **onglet accueil + cycle**).
 `server_link.py` = paramiko persistant, poll d'**une** cmd SSH `clé=valeur` (`[server] poll_seconds`), **CPU% = delta `/proc/stat`** côté Pi.
-Contrôle = `sudo systemctl` → **NOPASSWD** requis côté serveur. Config `[server]` + `[[server.services]]` ; IP = **`SERVER_HOST` du `.env`** (hors Git, prioritaire sur `host`).
-Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` TOFU). ⚠️ paramiko ajouté à `requirements.txt` **et** au `pip` de `deploy_pi.py`.
+Contrôle = `sudo systemctl` (**NOPASSWD** côté serveur). Config `[server]` + `[[server.services]]` ; IP = **`SERVER_HOST`** (.env, prioritaire sur `host`).
+Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` TOFU). ⚠️ paramiko dans `requirements.txt` **et** le `pip` de `deploy_pi.py`.
+### Trains (`transit`, Pi-only) — API **PRIM** IDFM, clé `IDFM_API_KEY` (.env), en-tête `apikey`
+`transit_feed.py` : `stop-monitoring` (ZdA `[transit] stop_area`, Chaville RD = 43241) /60 s + `general-message` par ligne /5 min, SIRI Lite.
+⚠️ **2 lignes** : L (C01740) **et U** (C01741) → `[transit.lines]` ; 2 colonnes par direction (`paris_destinations`), états **écrits** ;
+tuile Trains **remplace Actus** (liste via le bandeau) ; à droite de l'horloge : **arrivée en gare** du prochain St-Lazare (`home_*`).
 
 ## API Riot & pièges
 - **LCU** (`pc_agent/lcu.py`, agent, client ouvert) : phase, sélection, historique, **actions**
@@ -132,13 +133,12 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
   **`[lol] summoner`/`friends`/`lobby_queue`/`lobby_invite`** (bouton Jouer).
 - `pc_agent/config.toml` : IP/port du Pi, `update_interval`, process LoL, `[lol] launch_exe`/
   `launch_args` (Riot Client, pour le bouton Jouer). **Pas de clé.**
-- **`.env`** (racine, **ignoré**) : `RIOT_API_KEY` (permanente) + `DISPLAY_AUTH_TOKEN`. Modèle
-  `.env.example`. ⚠️ Le `.env` **du Pi** doit avoir la clé (le Pi est autonome) + le jeton ;
-  `deploy_pi.py` les copie.
+- **`.env`** (racine, **ignoré**, modèle `.env.example`) : `RIOT_API_KEY`, `DISPLAY_AUTH_TOKEN`, `SERVER_HOST`, `IDFM_API_KEY` ;
+  ⚠️ c'est le `.env` **du Pi** qui compte (Pi autonome) : `deploy_pi.py` y copie ces 4 clés.
 
 ## Fonds · Tests · Git · Déploiement
 - **Fonds** : PNG 800×480 dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres **dans le PNG** (code au pixel ;
-  `default.png` = `tools/gen_default_bg.py` sur `default_base.png`). Code-drawn : `news`, `weather`, `postgame`, `history`, `stats`, `server`.
+  `default.png` = `tools/gen_default_bg.py` sur `default_base.png`). Code-drawn : `news`, `weather`, `transit`, `postgame`, `history`, `stats`, `server`.
 - **Tests** : **pytest** (`tests/`, `requirements-dev.txt`) → `.\.venv\Scripts\python -m pytest` **avant chaque déploiement**.
   Headless (`conftest.py` : SDL dummy, store jetable, `SERVER_HOST` vide). Rendus visuels : scripts jetables `_`.
 - **Git** : repo privé `maximeLeCorre/raspberry-smart-display`, branche `main`. Commits **en français**

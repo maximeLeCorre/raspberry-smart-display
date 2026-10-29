@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "pc_agent"))
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
 os.environ["SERVER_HOST"] = ""
+os.environ["IDFM_API_KEY"] = ""          # écran « Trains » sans appel réseau
 
 
 @pytest.fixture
