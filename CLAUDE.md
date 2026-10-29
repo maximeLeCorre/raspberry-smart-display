@@ -52,11 +52,11 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
 - **Sécurité** (2 couches activables) : TLS `wss://` (cert auto-signé du Pi épinglé par
   l'agent, `check_hostname=False`) et/ou **jeton** `DISPLAY_AUTH_TOKEN` (.env racine, 1er
   message `auth` de l'agent). `tls=false`/jeton vide = clair/ouvert (test local).
-- **Pi → agent** : `hello{modules}`, `request_lcu_sync{since}`, `request_lcu_detail{gameId}`,
+- **Pi → agent** : `hello{modules}`, `request_lcu_sync{since}`, `request_player_sync{riotId,known}`, `request_lcu_detail{gameId}`,
   `lcu_action{action…}` (accepter un ready-check ; ou `play{queueId,invite}` = bouton « Jouer », § Bouton Jouer).
 - **agent → Pi** : `auth{token}`, `set_screen{screen}`, `data{screen,payload}`
   (queue/champselect/lol ; joueur = `riotId` Nom#TAG ; `default`/`playStatus` = étape du bouton
-  Jouer), `store_matches{games,done}` (parties à stocker), `lcu_detail{gameId,payload}`.
+  Jouer), `store_matches{games,done}`, `store_player_games{riotId,games,done}` (ami), `lcu_detail{gameId,payload}`.
 - Interne (serveur Pi) : `_connected`/`_disconnected` (**seulement si le client COURANT part** : après veille,
   l'ancien lien tombe après la reconnexion). Déconnexion → `default`. Heartbeat agent (`set_screen` répété) = no-op.
 - NB : dossiers/icônes/splash ne sont **pas** des messages réseau — le Pi les fait lui-même
@@ -80,11 +80,12 @@ casse), marqués **à la lecture**. Détail lu du **store** (offline) sinon dema
 clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) alignées.
 
 ### History (`history`, code-drawn) + Store SQLite
-- Liste lue depuis **`store.py`** (SQLite `matches.db`, *.db gitignoré). Filtres SQL (gauche
-  de RETOUR) : **ARAM Chaos (défaut)** / Classé / Normale / ARAM ; pagination ◀/▶ (triangles).
-  Clic → `App.open_postgame_review(gameId)` (mode revue, RETOUR → liste).
-- **Toutes les parties viennent de la LCU** (via agent), stockées avec résumé **+ bilan 10
-  joueurs** (stats consultables PC éteint).
+- Liste lue depuis **`store.py`** (SQLite `matches.db`, *.db gitignoré). Filtres SQL : **ARAM Chaos (défaut)** /
+  Classé / Normale / ARAM ; ◀/▶. Clic → `App.open_postgame_review(gameId)` (revue, RETOUR → liste).
+- **Toutes les parties viennent de la LCU** (via agent) : résumé **+ bilan 10 joueurs** (PC éteint OK).
+- **STATS** (`stats`, bouton de l'historique) : toi seul / ami seul / **ensemble = même équipe** (`[lol] compare`).
+  Table `participations` (1 ligne/joueur/partie, rétro-remplie des bilans) ; parties de l'ami lues par
+  l'agent (`/products/lol/{puuid}/matches`, puuid via liste d'amis), **hors historique affiché**.
 - **Synchro** (`App.sync_lcu` → `request_lcu_sync{since}` → agent `iter_lcu_sync` → lots
   `store_matches`) : à l'**ouverture de l'historique**, à la **connexion de l'agent**, en **fin
   de partie** (immédiate + re-synchros 8/20 s) et par **scan périodique** (`_maybe_sync`,
@@ -136,9 +137,8 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
   `deploy_pi.py` les copie.
 
 ## Fonds · Tests · Git · Déploiement
-- **Fonds** : 1 PNG 800×480/écran dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres
-  **dans le PNG** (code au pixel). Code-drawn : `news`, `postgame`, `history`. `default.png` dérivé
-  de `default_base.png` par `tools/gen_default_bg.py`.
+- **Fonds** : PNG 800×480 dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres **dans le PNG** (code au pixel ;
+  `default.png` = `tools/gen_default_bg.py` sur `default_base.png`). Code-drawn : `news`, `postgame`, `history`, `stats`, `server`.
 - **Tests** : **pytest** (`tests/`, `requirements-dev.txt`) → `.\.venv\Scripts\python -m pytest` **avant chaque déploiement**.
   Headless (`conftest.py` : SDL dummy, store jetable, `SERVER_HOST` vide). Rendus visuels : scripts jetables `_`.
 - **Git** : repo privé `maximeLeCorre/raspberry-smart-display`, branche `main`. Commits **en français**

@@ -64,6 +64,31 @@ def test_bilan_de_fin_non_reinitialise_par_le_heartbeat(app):
     assert calls == []
 
 
+def test_parties_de_l_ami_stockees_et_stats_rafraichies(app):
+    net(app, type="_connected")
+    app.open_stats()
+    reloads = []
+    app.screens["stats"].reload = lambda: reloads.append(1)
+    game = {"gameId": 5, "gameMode": "KIWI", "queueId": 2400, "duration": 600,
+            "detail": {"players": [{"riotId": "Matte mwa#EUW", "team": 100, "win": True,
+                                    "kda": [1, 2, 3], "metrics": {}}]}}
+    net(app, type="store_player_games", riotId="Matte mwa#EUW", games=[game], done=False)
+    net(app, type="store_player_games", riotId="Matte mwa#EUW", games=[], done=True)
+    assert app.store.known_games("Matte mwa#EUW") == ["5"]
+    assert app.store.total() == 0 and reloads == [1]
+
+
+def test_synchro_demande_aussi_les_parties_de_l_ami(app):
+    sent = []
+    app.server.send = sent.append
+    del app.sync_lcu                     # vraie méthode (neutralisée par la fixture)
+    app.agent_connected = True
+    app.compare_rid = "Matte mwa#EUW"
+    app.sync_lcu()
+    assert [m["type"] for m in sent] == ["request_lcu_sync", "request_player_sync"]
+    assert sent[1]["riotId"] == "Matte mwa#EUW" and sent[1]["known"] == []
+
+
 def test_deconnexion_revient_au_defaut(app):
     net(app, type="_connected")
     net(app, type="set_screen", screen="lol")

@@ -49,6 +49,10 @@ summoner = "maxoulefou#EUW"   # compte dont on tire l'historique
 # Amis (premade) mis en évidence en ROSE sur l'écran de fin. "Nom#TAG"
 # (insensible à la casse). Ajoute d'autres potes réguliers ici.
 friends = ["Matte mwa#EUW"]
+# Ami comparé sur l'écran STATS (Historique → STATS) : toi seul / lui seul /
+# vous deux dans la même équipe. Riot ID "Nom#TAG" ; doit être dans tes amis LoL
+# (l'agent lit ses 20 dernières parties via la LCU). Vide = écran sans ami.
+compare = "Matte mwa#EUW"
 # Scan automatique de l'historique (minutes) : le Pi demande à l'agent les
 # nouvelles parties à ce rythme (en plus de l'ouverture de l'historique et de
 # la connexion). Insensible au délai d'indexation LCU. 0 = scan périodique off.

@@ -19,9 +19,10 @@ import psutil
 from champ_select import build_champ_select_payload
 from lcu import LcuClient, find_lcu_credentials
 from riot_client import RiotClient
-from phases import build_lcu_detail, build_queue_payload, iter_lcu_sync
+from phases import (build_lcu_detail, build_queue_payload, find_friend_puuid,
+                    iter_lcu_sync, iter_player_sync)
 from riot_api import get_all_game_data, summarize_full
-from sender import msg_data, msg_lcu_detail, msg_store_matches
+from sender import msg_data, msg_lcu_detail, msg_store_matches, msg_store_player_games
 from sources.base import Source
 
 # Actions LCU « simples » (un POST sans corps).
@@ -64,6 +65,7 @@ class LeagueSource(Source):
         self.lcu = LcuClient()
         self.riot = RiotClient()    # API du Riot Client (lancement de League)
         self._syncing = False       # une synchro d'historique à la fois
+        self._player_syncing = False  # idem pour l'historique de l'ami comparé
         self._playing = False       # un enchaînement « jouer » à la fois
         lol_cfg = config.get("lol", {})
         self._launch_exe = (lol_cfg.get("launch_exe") or "").strip()
@@ -108,6 +110,12 @@ class LeagueSource(Source):
             if not self._syncing:
                 threading.Thread(target=self._do_sync, daemon=True,
                                  args=(sender, message.get("since"))).start()
+            return True
+        if msg_type == "request_player_sync":
+            if not self._player_syncing:
+                threading.Thread(target=self._do_player_sync, daemon=True,
+                                 args=(sender, message.get("riotId"),
+                                       message.get("known") or [])).start()
             return True
         if msg_type == "request_lcu_detail":
             gid = message.get("gameId")
@@ -304,3 +312,20 @@ class LeagueSource(Source):
             print(f"[league] Sync LCU terminée : {n} nouvelle(s) partie(s).")
         finally:
             self._syncing = False
+
+    def _do_player_sync(self, sender, riot_id, known) -> None:
+        """Envoie au Pi les parties récentes d'un ami (stats comparées)."""
+        self._player_syncing = True
+        try:
+            puuid = find_friend_puuid(self.lcu, riot_id or "")
+            n = 0
+            if puuid:
+                for batch in iter_player_sync(self.lcu, puuid, known):
+                    sender.send_safe(msg_store_player_games(riot_id, batch, False))
+                    n += len(batch)
+            else:
+                print(f"[league] « {riot_id} » introuvable dans la liste d'amis.")
+            sender.send_safe(msg_store_player_games(riot_id, [], True))
+            print(f"[league] Sync de {riot_id} : {n} nouvelle(s) partie(s).")
+        finally:
+            self._player_syncing = False

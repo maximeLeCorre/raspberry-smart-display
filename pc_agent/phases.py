@@ -106,6 +106,7 @@ def _lcu_detail_from_game(lcu: LcuClient, game: dict) -> dict | None:
             "championId": cid,
             "championName": lcu.champion_name(cid),
             "team": p.get("teamId", 0) or 0,
+            "win": bool(st.get("win")),
             "isSelf": pid == my_pid,
             "isFriend": False,     # marqué côté Pi (il a la liste d'amis)
             "kda": [st.get("kills", 0), st.get("deaths", 0), st.get("assists", 0)],
@@ -197,6 +198,43 @@ def iter_lcu_sync(lcu: LcuClient, since=None, chunk: int = 15):
         if since and str(game.get("gameId")) == since:
             break                   # reprise : on a rejoint le store
         rec = _lcu_full_record(lcu, game.get("gameId"))
+        if rec:
+            batch.append(rec)
+            if len(batch) >= chunk:
+                yield batch
+                batch = []
+    if batch:
+        yield batch
+
+
+# ------------------------------------------- historique d'un AUTRE joueur (ami)
+def find_friend_puuid(lcu: LcuClient, riot_id: str) -> str | None:
+    """PUUID (LCU) d'un ami par Riot ID « Nom#TAG » (insensible à la casse).
+    Passe par la liste d'amis : la LCU ne cherche plus de joueur par nom."""
+    want = (riot_id or "").strip().lower()
+    for f in (lcu.get_json("/lol-chat/v1/friends") or []):
+        rid = f"{(f.get('gameName') or '').lower()}#{(f.get('gameTag') or '').lower()}"
+        if rid == want and f.get("puuid"):
+            return f["puuid"]
+    return None
+
+
+def iter_player_sync(lcu: LcuClient, puuid: str, known=(), chunk: int = 15):
+    """Lots de parties d'un autre joueur (ses 20 récentes, comme pour nous) au
+    format des enregistrements du store (résumé de partie + bilan 10 joueurs).
+
+    On SAUTE les parties déjà connues du Pi (`known`) au lieu de s'arrêter à la
+    première : une partie en duo arrivée par NOTRE synchro peut être plus
+    récente que des parties solo de l'ami encore jamais lues."""
+    known = {str(k) for k in known or ()}
+    mh = lcu.get_json(
+        f"/lol-match-history/v1/products/lol/{puuid}/matches?begIndex=0&endIndex=19")
+    batch = []
+    for game in (mh or {}).get("games", {}).get("games", []):
+        gid = str(game.get("gameId"))
+        if gid in known:
+            continue
+        rec = _lcu_full_record(lcu, gid)
         if rec:
             batch.append(rec)
             if len(batch) >= chunk:

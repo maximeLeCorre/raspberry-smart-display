@@ -53,6 +53,8 @@ class App:
         self.riot = RiotWeb(riot_key, riot_cfg.get("platform", "euw1"),
                             riot_cfg.get("regional", "europe"))
         self.summoner_rid = (lol_cfg.get("summoner") or "").strip()
+        # Ami comparé (écran Stats : moi seul / lui seul / ensemble), « Nom#TAG ».
+        self.compare_rid = (lol_cfg.get("compare") or "").strip()
         # Bouton « créer un lobby » du défaut : file toujours ARAM Chaos (2400),
         # et ami invité s'il est en ligne (vide = pas d'invitation).
         self.lobby_queue = int(lol_cfg.get("lobby_queue", 2400) or 2400)
@@ -280,6 +282,10 @@ class App:
             return
         self._last_sync = time.monotonic()
         self.server.send({"type": "request_lcu_sync", "since": self.store.newest_id()})
+        if "#" in self.compare_rid:
+            # Ses parties récentes ; `known` = ce qu'on a déjà (l'agent les saute).
+            self.server.send({"type": "request_player_sync", "riotId": self.compare_rid,
+                              "known": self.store.known_games(self.compare_rid)})
 
     def _maybe_sync(self) -> None:
         """Scan périodique (appelé chaque frame) : relance une synchro tous les
@@ -352,6 +358,15 @@ class App:
         self.manual_screen = "history"
         self.set_screen("history")
         hist.start_fresh()
+
+    def open_stats(self) -> None:
+        """Ouvre les stats comparées (verrou manuel ; RETOUR → historique)."""
+        stats = self.screens.get("stats")
+        if stats is None:
+            return
+        self.manual_screen = "stats"
+        self.set_screen("stats")
+        stats.reload()
 
     def _show_postgame(self, detail) -> None:
         pg = self.screens.get("postgame")
@@ -526,6 +541,14 @@ class App:
                     self.screens["history"].reload()
             if msg.get("done"):
                 self._on_sync_done()
+
+        elif msg_type == "store_player_games":
+            # Parties de l'ami comparé : participations seulement (pas l'historique).
+            games = msg.get("games", [])
+            if games:
+                self.store.upsert_player_games(games)
+            if msg.get("done") and self.current is not None and self.current.name == "stats":
+                self.screens["stats"].reload()
 
         elif msg_type == "lcu_detail":
             # Bilan complet (10 joueurs) demandé au clic : on le met en cache

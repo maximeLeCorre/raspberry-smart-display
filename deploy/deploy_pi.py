@@ -134,6 +134,10 @@ def _skip(tarinfo: tarfile.TarInfo):
         return None
     if base.startswith("_") and not base.startswith("__"):
         return None
+    # ⚠️ Jamais les bases SQLite : celle du PC (tests) écraserait l'historique
+    # accumulé sur le Pi (la LCU ne rend que les 20 dernières parties).
+    if base.endswith((".db", ".db-journal", ".db-wal", ".db-shm")):
+        return None
     return tarinfo
 
 
