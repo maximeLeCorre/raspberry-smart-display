@@ -23,6 +23,9 @@ import pygame
 
 from screen import ASSETS_DIR, Screen
 
+from modules.transit.transit_screen import (LINE_COLORS, arrival_label, minutes_label,
+                                            next_arrival)
+
 from .news_screen import wrap_text
 from .rss_feed import get_feed
 from .pi_health import get_pi_health
@@ -30,6 +33,10 @@ from .weather import get_weather
 
 # Panneau horloge (axe central) — CLOCK_PANEL de gen_default_bg.py.
 CENTER_X = 516
+# Avec le module Trains, l'horloge se décale à gauche pour laisser à sa droite le
+# prochain train pour Paris (« rentre en gare dans 5 min ») ; le groupe reste centré.
+CLOCK_X_WITH_TRAIN = 448
+TRAIN_BOX = pygame.Rect(604, 50, 168, 96)
 CLOCK_Y = 96
 DATE_Y = 170
 WEATHER_Y = 214
@@ -50,6 +57,7 @@ DOCK = pygame.Rect(240, 360, 552, 112)
 TILE_GAP = 8
 TILE_PAD = 8                 # marge intérieure du dock
 PRIMARY_WEIGHT = 1.3         # la tuile Jouer est plus large
+TILE_WEIGHTS = {"play": PRIMARY_WEIGHT, "trains": 1.2}   # Trains : « Versailles 12 min »
 TILE_SUB_LINES = 3           # lignes max du sous-titre d'une tuile
 
 # Libellés de la tuile Jouer quand l'agent propose un écran à rejoindre.
@@ -181,6 +189,14 @@ class DefaultScreen(Screen):
         self.feed = get_feed(app)
         self.weather = get_weather(app)
         self.health = get_pi_health(app)
+        # Prochain train pour Paris à côté de l'horloge (module Trains actif + clé).
+        tcfg = app.config.get("transit", {})
+        self._train_dest = str(tcfg.get("home_destination", "saint-lazare"))
+        self._train_label = str(tcfg.get("home_label", "St-Lazare"))
+        self._train_line = str(tcfg.get("home_line", "L"))
+        self._train_feed = None       # résolu à l'entrée (écran transit construit après)
+        self.font_train = (pygame.font.Font(str(DATE_FONT), 30) if DATE_FONT.exists()
+                           else pygame.font.Font(None, 44))
         self._play_status = ""          # message d'étape du flux « jouer »
         # Tuiles calculées à l'entrée : les écrans des autres modules ne sont
         # pas encore tous construits quand celui-ci l'est.
@@ -195,6 +211,7 @@ class DefaultScreen(Screen):
         self._last_date: str | None = None
         self._status_key = None
         self._alert_key = None
+        self._train_key = None
         self._weather_key = ()           # () = jamais dessiné (None = pas de relevé)
         self._news_key = None
         self._tile_keys: dict[str, tuple] = {}
@@ -207,11 +224,15 @@ class DefaultScreen(Screen):
             ids += ["play", "history"]
         if "server" in screens:
             ids.append("server")
-        if "news" in screens:
+        # Trains (s'il est actif) prend la place d'Actus : la liste des actus
+        # reste accessible via le bandeau France Info (détail → RETOUR → liste).
+        if "transit" in screens:
+            ids.append("trains")
+        elif "news" in screens:
             ids.append("news")
         if not ids:
             return []
-        weights = [PRIMARY_WEIGHT if t == "play" else 1.0 for t in ids]
+        weights = [TILE_WEIGHTS.get(t, 1.0) for t in ids]
         inner = DOCK.inflate(-2 * TILE_PAD, -2 * TILE_PAD)
         unit = (inner.w - TILE_GAP * (len(ids) - 1)) / sum(weights)
         tiles, x = [], float(inner.x)
@@ -223,6 +244,7 @@ class DefaultScreen(Screen):
 
     def enter(self) -> None:
         self._tiles = self._layout_tiles()
+        self._train_feed = getattr(self.app.screens.get("transit"), "feed", None)
         self._reset_keys()
         self._play_status = ""
         self._history_ts = 0.0
@@ -239,8 +261,17 @@ class DefaultScreen(Screen):
 
         time_str = time.strftime("%H:%M", now)
         if time_str != self._last_time:
-            dirty.append(self._line(surface, time_str, self.font_time, WHITE, CLOCK_Y))
+            if self._train_feed is not None:
+                dirty.append(self._line(surface, time_str, self.font_time, WHITE, CLOCK_Y,
+                                        cx=CLOCK_X_WITH_TRAIN, right=TRAIN_BOX.x - 6))
+            else:
+                dirty.append(self._line(surface, time_str, self.font_time, WHITE, CLOCK_Y))
             self._last_time = time_str
+        if self._train_feed is not None:
+            train = self._train_state()
+            if train != self._train_key:
+                dirty.append(self._draw_train(surface, train))
+                self._train_key = train
 
         date_str = date_francaise(now)
         if date_str != self._last_date:
@@ -272,14 +303,52 @@ class DefaultScreen(Screen):
                 dirty.append(rect)
         return dirty
 
-    def _line(self, surface, text, font, color, y) -> pygame.Rect:
-        """Ligne centrée dans le panneau horloge (efface sa bande de panneau)."""
+    def _line(self, surface, text, font, color, y, *, cx=CENTER_X, right=776) -> pygame.Rect:
+        """Ligne centrée sur ``cx`` dans le panneau horloge (efface sa bande, jusqu'à
+        ``right`` : le bloc train à droite de l'horloge n'est pas effacé)."""
         rendered = font.render(text, True, color)
-        rect = rendered.get_rect(center=(CENTER_X, y))
-        band = pygame.Rect(256, rect.top - 4, 520, rect.height + 8)
+        rect = rendered.get_rect(center=(cx, y))
+        band = pygame.Rect(256, rect.top - 4, right - 256, rect.height + 8)
         self.clear_region(surface, band)
         surface.blit(rendered, rect)
         return band
+
+    # --------------------------------------------------- prochain train (horloge)
+    def _train_state(self) -> tuple:
+        """(temps, détail, couleur du détail) du prochain train pour Paris."""
+        snap = self._train_feed.snapshot()
+        if not snap["updated"]:
+            return ("—", "indisponible" if snap["error"] else "chargement…", FAINT)
+        now = time.time()
+        dep = next_arrival(snap["departures"], self._train_dest, now)
+        if dep is None:
+            return ("—", "pas de train", FAINT)
+        if dep.delay_min > 0:
+            return (arrival_label(dep, now), f"retard +{dep.delay_min} min", ORANGE)
+        hour = time.strftime("%H:%M", time.localtime(dep.arrival or dep.when))
+        return (arrival_label(dep, now), f"arrivée {hour}", DIM)
+
+    def _draw_train(self, surface, state) -> pygame.Rect:
+        """Bloc à droite de l'horloge : ligne + destination, temps avant l'entrée en
+        gare, puis heure d'arrivée (ou retard, écrit)."""
+        mins, detail, detail_col = state
+        box = TRAIN_BOX
+        self.clear_region(surface, box)
+        pygame.draw.line(surface, BORDER, (box.x, box.y + 8), (box.x, box.bottom - 8), 2)
+        x = box.x + 14
+        bg, fg = LINE_COLORS.get(self._train_line, (BORDER, WHITE))
+        badge = pygame.Rect(x, box.y + 6, 20, 20)
+        pygame.draw.rect(surface, bg, badge, border_radius=4)
+        letter = self.font_tile_sub.render(self._train_line, True, fg)
+        surface.blit(letter, letter.get_rect(center=(badge.centerx, badge.centery + 1)))
+        dest = self.font_tile_sub.render(self._train_label, True, DIM)
+        surface.blit(dest, (badge.right + 7, badge.centery - dest.get_height() // 2 + 1))
+        color = GREEN if mins == "à quai" else (FAINT if mins == "—" else WHITE)
+        big = self.font_train.render(mins, True, color)
+        surface.blit(big, (x, box.y + 32))
+        small = self.font_tile_sub.render(detail, True, detail_col)
+        surface.blit(small, (x, box.y + 72))
+        return box
 
     def _draw_pc_status(self, surface, connected: bool) -> pygame.Rect:
         """Pastille d'état discrète, en haut à gauche (sur le ciel, au-dessus du
@@ -402,10 +471,34 @@ class DefaultScreen(Screen):
             return ("Historique", f"{n} partie{'s' if n > 1 else ''}", DIM, False, True)
         if tid == "server":
             return self._server_tile_state()
+        if tid == "trains":
+            return self._trains_tile_state()
         if tid == "news":
             n = len(self.feed.articles()) if self.feed else 0
             return ("Actus", f"{n} articles" if n else "France Info", DIM, False, True)
         return ("", "", DIM, False, False)
+
+    def _trains_tile_state(self) -> tuple:
+        """Prochain départ dans chaque sens (« Paris 4 min ») + perturbation écrite."""
+        scr = self.app.screens.get("transit")
+        feed = getattr(scr, "feed", None)
+        if feed is None:
+            return ("Trains", "non configuré", FAINT, False, True)
+        snap = feed.snapshot()
+        if not snap["updated"]:
+            return ("Trains", "indisponible" if snap["error"] else "chargement…",
+                    RED if snap["error"] else FAINT, False, True)
+        labels = list(self.app.config.get("transit", {}).get(
+            "tile_labels", ["Paris", "Autre sens"]))
+        now = time.time()
+        lines = []
+        for label, to_paris in ((labels[0], True), (labels[-1], False)):
+            dep = next((d for d in snap["departures"]
+                        if d.to_paris == to_paris and not d.cancelled), None)
+            lines.append(f"{label} {minutes_label(dep, now)}" if dep else f"{label} —")
+        if any(m.is_disruption for m in snap["messages"]):
+            return ("Trains", "\n".join(lines + ["perturbation"]), ORANGE, False, True)
+        return ("Trains", "\n".join(lines), DIM, False, True)
 
     def _server_tile_state(self) -> tuple:
         srv = self.app.screens.get("server")
@@ -480,6 +573,9 @@ class DefaultScreen(Screen):
         elif tid == "server":
             self.app.manual_screen = "server"
             self.app.set_screen("server")
+        elif tid == "trains":
+            self.app.manual_screen = "transit"
+            self.app.set_screen("transit")
         elif tid == "news":
             self._open_news(None)
 

@@ -10,6 +10,7 @@ Pour ajouter un module (un jeu/domaine) :
 from modules.league import LeagueModule
 from modules.server import ServerModule
 from modules.system import SystemModule
+from modules.transit import TransitModule
 
 # Ordre = ordre d'affichage / de priorité. 'system' (toujours actif) en premier.
-MODULES = [SystemModule, LeagueModule, ServerModule]
+MODULES = [SystemModule, LeagueModule, ServerModule, TransitModule]

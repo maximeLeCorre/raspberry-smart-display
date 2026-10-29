@@ -334,7 +334,8 @@ def main() -> None:
     # l'enrichissement Web : historique, dossiers, rangs...).
     env_content = (f"DISPLAY_AUTH_TOKEN={read_env_value('DISPLAY_AUTH_TOKEN')}\n"
                    f"RIOT_API_KEY={read_env_value('RIOT_API_KEY')}\n"
-                   f"SERVER_HOST={read_env_value('SERVER_HOST')}\n")
+                   f"SERVER_HOST={read_env_value('SERVER_HOST')}\n"
+                   f"IDFM_API_KEY={read_env_value('IDFM_API_KEY')}\n")
 
     tmp = Path(tempfile.mkdtemp(prefix="pi-deploy-"))
     tgz = tmp / "pi-display-deploy.tgz"
