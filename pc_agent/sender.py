@@ -132,6 +132,12 @@ def msg_store_matches(games: list, done: bool = True) -> dict:
     return {"type": "store_matches", "games": games, "done": done}
 
 
+def msg_store_player_games(riot_id: str, games: list, done: bool = True) -> dict:
+    """Parties d'un AUTRE joueur (ami comparé) : le Pi n'en garde que les
+    participations (stats solo/duo), pas l'historique affiché."""
+    return {"type": "store_player_games", "riotId": riot_id, "games": games, "done": done}
+
+
 def msg_lcu_detail(game_id, payload: dict | None) -> dict:
     """Bilan complet (10 joueurs) d'une partie, récupéré à la demande."""
     return {"type": "lcu_detail", "gameId": game_id, "payload": payload}

@@ -6,8 +6,8 @@ le PC est connecté, on déclenche une **synchro** (reprise : récupère ce qui
 manque depuis la dernière partie stockée). Filtres par type (requêtes SQL),
 pagination locale, le plus récent en haut.
 
-En haut : filtres à gauche de RETOUR (« ARAM Chaos » par défaut). En bas :
-flèches ◀/▶.
+En haut : filtres, bouton STATS (comparaison avec l'ami, `[lol] compare`) et
+RETOUR (« ARAM Chaos » par défaut). En bas : flèches ◀/▶.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ FILTERS = [
 PER_PAGE = 10
 
 RETOUR_RECT = pygame.Rect(700, 8, 92, 38)
+STATS_RECT = pygame.Rect(598, 8, 94, 38)
 BTN_TOP, BTN_H = 8, 38
 
 ROW_TOP, ROW_H = 58, 36
@@ -127,6 +128,9 @@ class MatchHistoryScreen(Screen):
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         if RETOUR_RECT.collidepoint(pos):
             return ACTION_BACK
+        if STATS_RECT.collidepoint(pos) and "stats" in self.app.screens:
+            self.app.open_stats()
+            return None
         for i, rect in enumerate(self._filter_rects):
             if rect.collidepoint(pos):
                 if i != self.filter_idx:
@@ -164,6 +168,11 @@ class MatchHistoryScreen(Screen):
         pygame.draw.rect(surface, PANEL, RETOUR_RECT, border_radius=8)
         hint = self.font_hint.render("RETOUR", True, GREY)
         surface.blit(hint, hint.get_rect(center=RETOUR_RECT.center))
+        if "stats" in self.app.screens:
+            pygame.draw.rect(surface, PANEL, STATS_RECT, border_radius=8)
+            pygame.draw.rect(surface, GOLD, STATS_RECT, width=1, border_radius=8)
+            label = self.font_hint.render("STATS", True, GOLD)
+            surface.blit(label, label.get_rect(center=STATS_RECT.center))
 
         self._rows = []
         if not self.games:

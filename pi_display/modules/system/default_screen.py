@@ -21,6 +21,7 @@ import pygame
 
 from screen import Screen
 
+from .news_screen import wrap_text
 from .rss_feed import get_feed
 
 # Panneau horloge (axe central) — CLOCK_PANEL de gen_default_bg.py.
@@ -40,6 +41,7 @@ DOCK = pygame.Rect(240, 360, 552, 112)
 TILE_GAP = 8
 TILE_PAD = 8                 # marge intérieure du dock
 PRIMARY_WEIGHT = 1.3         # la tuile Jouer est plus large
+TILE_SUB_LINES = 3           # lignes max du sous-titre d'une tuile
 
 # Libellés de la tuile Jouer quand l'agent propose un écran à rejoindre.
 JOIN_LABELS = {
@@ -285,8 +287,14 @@ class DefaultScreen(Screen):
         title_col = WHITE if enabled else FAINT
         max_w = rect.w - 12
         t = self.font_tile.render(fit_text(title, self.font_tile, max_w), True, title_col)
+        # Sous-titre renvoyé à la ligne (étapes du bouton Jouer, ex. « Connexion au
+        # client… (1-2 min) ») plutôt que tronqué ; « \n » force une coupure.
+        lines: list[str] = []
+        for part in sub.split("\n"):
+            if len(lines) < TILE_SUB_LINES:
+                lines +=wrap_text(part, self.font_tile_sub, max_w, TILE_SUB_LINES - len(lines))
         subs = [self.font_tile_sub.render(fit_text(line, self.font_tile_sub, max_w),
-                                          True, sub_color) for line in sub.split("\n")]
+                                          True, sub_color) for line in lines]
         gap = 8 if len(subs) == 1 else 5
         height = t.get_height() + gap + sum(x.get_height() for x in subs)
         y = rect.centery - height // 2
