@@ -241,6 +241,9 @@ Wants=network-online.target
 Type=simple
 User={PI_USER}
 WorkingDirectory={pi_dir}
+# Sans ça, les print() restent dans un tampon et journalctl ne montre rien.
+Environment=PYTHONUNBUFFERED=1
+SyslogIdentifier=pi-display
 {sdl}{vt}ExecStart={pi_dir}/.venv/bin/python {pi_dir}/pi_display/main.py{fs}
 Restart=always
 RestartSec=3
@@ -366,7 +369,7 @@ def main() -> None:
         ssh.close()
         log("Deploiement termine.")
         print()
-        log(f"Logs en direct :  ssh {PI_USER}@{PI_HOST} 'journalctl -u pi-display -f'")
+        log(f"Logs en direct :  ssh {PI_USER}@{PI_HOST} 'journalctl -t pi-display -f'")
         log(f"Agent (ce PC) : mets host = \"{PI_HOST}\" dans pc_agent/config.toml [pi], puis lance pc_agent/main.py.")
         if FULLSCREEN:
             log("Si l'ecran reste noir : les groupes video/render/input viennent "

@@ -29,6 +29,27 @@ url = "https://www.francetvinfo.fr/titres.rss"
 refresh_minutes = 15     # fréquence de rafraîchissement du flux
 max_items = 15           # nombre d'articles gardés (liste France Info)
 
+[weather]
+# Météo sous l'horloge de l'accueil. Le Pi interroge Open-Meteo lui-même
+# (gratuit, sans clé ; marche PC éteint). enabled = false pour masquer.
+enabled = true
+city = "Chaville"        # nom affiché
+latitude = 48.8086
+longitude = 2.1886
+refresh_minutes = 15
+
+[pi_health]
+# Alerte sur l'accueil (ligne d'état) quand le Pi LUI-MÊME dépasse un seuil.
+# Relevé local (/proc, /sys) ; rien ne s'affiche tant que tout va bien.
+enabled = true
+cpu_pct = 90       # CPU % (doit tenir cpu_sustain relevés de suite : pas d'alerte sur un pic)
+cpu_sustain = 3
+ram_pct = 90       # RAM utilisée %
+disk_pct = 90      # carte SD remplie % (disk_path)
+temp_c = 75        # °C (le Pi 3 bride vers 80 °C)
+disk_path = "/"
+poll_seconds = 5
+
 [modules]
 # Modules activés (source de vérité unique : le Pi l'annonce à l'agent).
 # Le module système (horloge/date) est toujours actif.

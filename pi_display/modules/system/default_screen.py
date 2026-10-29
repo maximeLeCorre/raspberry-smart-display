@@ -1,7 +1,9 @@
-"""Écran par défaut (module système) : horloge, une actu, dock de tuiles.
+"""Écran par défaut (module système) : horloge, météo, une actu, dock de tuiles.
 
 Disposition (cadres dans le fond default.png, cf. tools/gen_default_bg.py) :
-  - panneau horloge/date (haut droite) + ligne d'état du PC ;
+  - pastille d'état du PC (haut gauche, sur l'illustration) ;
+  - panneau horloge/date (haut droite) + météo locale (+ alerte si le Pi
+    dépasse un seuil CPU/RAM/disque/température) ;
   - bandeau d'actualité : UN titre qui tourne (clic → détail France Info) ;
   - dock (bas) : grosses tuiles tactiles « vivantes », selon les modules actifs :
       Jouer (LoL : « Jouer une ARAM Chaos », devient « Rejoindre » quand une
@@ -23,12 +25,19 @@ from screen import Screen
 
 from .news_screen import wrap_text
 from .rss_feed import get_feed
+from .pi_health import get_pi_health
+from .weather import get_weather
 
 # Panneau horloge (axe central) — CLOCK_PANEL de gen_default_bg.py.
 CENTER_X = 516
-CLOCK_Y = 112
-DATE_Y = 192
-STATUS_Y = 248
+CLOCK_Y = 96
+DATE_Y = 170
+WEATHER_Y = 214
+WEATHER_BAND = pygame.Rect(256, WEATHER_Y - 18, 520, 36)   # zone cliquable → écran Météo
+STATUS_Y = 256               # ligne d'alerte santé du Pi (vide si tout va bien)
+# Pastille « PC connecté » : en haut à gauche, sur l'illustration (hors panneaux).
+PC_STATUS_ZONE = pygame.Rect(6, 6, 200, 36)
+WEATHER_ICON = 30            # côté de l'icône météo (px)
 
 # Bandeau d'actualité — NEWS_STRIP de gen_default_bg.py.
 NEWS_STRIP = pygame.Rect(240, 292, 552, 58)
@@ -51,6 +60,7 @@ JOIN_LABELS = {
     "postgame": "Dernière performance",
 }
 
+PANEL_FILL = (11, 17, 32)    # = FILL de gen_default_bg.py
 BG_TILE = (22, 30, 50)
 BG_PRIMARY = (40, 34, 20)
 BORDER = (44, 58, 90)
@@ -61,6 +71,13 @@ RED = (228, 86, 86)
 WHITE = (238, 240, 245)
 DIM = (150, 165, 195)
 FAINT = (92, 106, 134)
+SUN = (245, 196, 80)
+CLOUD = (196, 206, 224)
+RAIN = (110, 170, 240)
+
+# Libellés des alertes de santé du Pi (cf. pi_health.py).
+PI_ALERT_FMT = {"cpu": "CPU {} %", "ram": "RAM {} %", "disk": "Disque {} %",
+                "temp": "{} °C"}
 
 # Noms français pour la date (localtime renvoie des indices)
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -85,6 +102,59 @@ def fit_text(text: str, font: pygame.font.Font, max_w: int) -> str:
     return text.rstrip() + ell
 
 
+def weather_icon(kind: str, is_day: bool, size: int) -> pygame.Surface:
+    """Petite icône météo dessinée au code (les polices n'ont pas d'emoji).
+    Le libellé écrit à côté porte l'info : l'icône n'est qu'un repère."""
+    s = pygame.Surface((size, size), pygame.SRCALPHA)
+    u = size / 30  # dessin pensé sur une grille 30×30
+
+    def p(x, y):
+        return round(x * u), round(y * u)
+
+    def r(v):
+        return max(1, round(v * u))
+
+    def sun(cx, cy, rad):
+        for i in range(8):
+            v = pygame.math.Vector2(1, 0).rotate(i * 45)
+            a, b = v * (rad + 2), v * (rad + 5)
+            pygame.draw.line(s, SUN, p(cx + a.x, cy + a.y), p(cx + b.x, cy + b.y), r(2))
+        pygame.draw.circle(s, SUN, p(cx, cy), r(rad))
+
+    def moon(cx, cy, rad):
+        pygame.draw.circle(s, CLOUD, p(cx, cy), r(rad))
+        pygame.draw.circle(s, (0, 0, 0, 0), p(cx + rad * 0.55, cy - rad * 0.35), r(rad * 0.8))
+
+    def cloud(dy=0.0, color=CLOUD):
+        pygame.draw.circle(s, color, p(11, 15 + dy), r(6))
+        pygame.draw.circle(s, color, p(18, 12 + dy), r(8))
+        pygame.draw.circle(s, color, p(24, 17 + dy), r(5))
+        pygame.draw.rect(s, color, (*p(6, 16 + dy), r(19), r(6)), border_radius=r(3))
+
+    if kind == "clear":
+        (sun if is_day else moon)(15, 15, 7 if is_day else 9)
+    elif kind == "partly":
+        (sun if is_day else moon)(10, 10, 5 if is_day else 6)
+        cloud(dy=4)
+    elif kind == "fog":
+        for y in (9, 15, 21):
+            pygame.draw.line(s, CLOUD, p(4, y), p(26, y), r(3))
+    elif kind in ("rain", "snow", "storm"):
+        cloud(dy=-4)
+        if kind == "rain":
+            for x in (10, 16, 22):
+                pygame.draw.line(s, RAIN, p(x, 21), p(x - 2, 28), r(2))
+        elif kind == "snow":
+            for x in (10, 16, 22):
+                pygame.draw.circle(s, WHITE, p(x, 24), r(2))
+        else:
+            pygame.draw.polygon(s, SUN, [p(17, 18), p(12, 25), p(16, 25), p(13, 30),
+                                         p(20, 22), p(16, 22), p(19, 18)])
+    else:  # cloudy
+        cloud()
+    return s
+
+
 class DefaultScreen(Screen):
     name = "default"
     background_name = "default.png"
@@ -96,12 +166,16 @@ class DefaultScreen(Screen):
         self.font_time = pygame.font.Font(None, 150)
         self.font_date = pygame.font.Font(None, 42)
         self.font_status = pygame.font.Font(None, 24)
+        self.font_weather_temp = pygame.font.Font(None, 38)
+        self.font_weather = pygame.font.Font(None, 28)
         self.font_news_tag = pygame.font.Font(None, 20)
         self.font_news = pygame.font.Font(None, 26)
         self.font_tile = pygame.font.Font(None, 30)
         self.font_tile_sub = pygame.font.Font(None, 22)
 
         self.feed = get_feed(app)
+        self.weather = get_weather(app)
+        self.health = get_pi_health(app)
         self._play_status = ""          # message d'étape du flux « jouer »
         # Tuiles calculées à l'entrée : les écrans des autres modules ne sont
         # pas encore tous construits quand celui-ci l'est.
@@ -115,6 +189,8 @@ class DefaultScreen(Screen):
         self._last_time: str | None = None
         self._last_date: str | None = None
         self._status_key = None
+        self._alert_key = None
+        self._weather_key = ()           # () = jamais dessiné (None = pas de relevé)
         self._news_key = None
         self._tile_keys: dict[str, tuple] = {}
 
@@ -166,10 +242,20 @@ class DefaultScreen(Screen):
             dirty.append(self._line(surface, date_str, self.font_date, DIM, DATE_Y))
             self._last_date = date_str
 
+        if self.weather is not None:
+            w = self.weather.current()
+            if w != self._weather_key:
+                dirty.append(self._draw_weather(surface, w))
+                self._weather_key = w
+
         connected = self.app.agent_connected
+        alerts = tuple((k, round(v)) for k, v in self.health.alerts()) if self.health else ()
         if connected != self._status_key:
-            dirty.append(self._draw_status(surface, connected))
+            dirty.append(self._draw_pc_status(surface, connected))
             self._status_key = connected
+        if alerts != self._alert_key:
+            dirty.append(self._draw_alert(surface, alerts))
+            self._alert_key = alerts
 
         dirty.extend(self._draw_news_if_changed(surface))
 
@@ -190,16 +276,75 @@ class DefaultScreen(Screen):
         surface.blit(rendered, rect)
         return band
 
-    def _draw_status(self, surface, connected: bool) -> pygame.Rect:
-        """Ligne d'état discrète : le PC (agent) est-il joignable ?"""
+    def _draw_pc_status(self, surface, connected: bool) -> pygame.Rect:
+        """Pastille d'état discrète, en haut à gauche (sur le ciel, au-dessus du
+        chat) : le PC (agent) est-il joignable ?"""
         text, color = ("PC connecté", GREEN) if connected else ("PC hors ligne", FAINT)
         surf = self.font_status.render(text, True, color)
-        w = surf.get_width() + 18
-        x = CENTER_X - w // 2
+        self.clear_region(surface, PC_STATUS_ZONE)
+        pill = pygame.Rect(PC_STATUS_ZONE.x + 4, PC_STATUS_ZONE.y + 4,
+                           surf.get_width() + 34, 28)
+        pygame.draw.rect(surface, PANEL_FILL, pill, border_radius=14)
+        pygame.draw.rect(surface, BORDER, pill, width=2, border_radius=14)
+        pygame.draw.circle(surface, color, (pill.x + 14, pill.centery), 5)
+        surface.blit(surf, (pill.x + 25, pill.centery - surf.get_height() // 2))
+        return PC_STATUS_ZONE
+
+    def _draw_alert(self, surface, alerts) -> pygame.Rect:
+        """Ligne d'alerte du panneau horloge, seulement si le Pi dépasse un seuil :
+        « ⚠ Pi : CPU 95 % · 78 °C » (écrite, pas que colorée)."""
         band = pygame.Rect(256, STATUS_Y - 12, 520, 24)
         self.clear_region(surface, band)
-        pygame.draw.circle(surface, color, (x + 5, STATUS_Y), 5)
-        surface.blit(surf, (x + 18, STATUS_Y - surf.get_height() // 2))
+        if not alerts:
+            return band
+        words = "  ·  ".join(PI_ALERT_FMT[k].format(v) for k, v in alerts)
+        alert = self.font_status.render(f"Pi : {words}", True, ORANGE)
+        ax = CENTER_X - (alert.get_width() + 18) // 2
+        pygame.draw.polygon(surface, ORANGE, [(ax, STATUS_Y + 6), (ax + 7, STATUS_Y - 7),
+                                              (ax + 14, STATUS_Y + 6)])
+        pygame.draw.line(surface, PANEL_FILL, (ax + 7, STATUS_Y - 2), (ax + 7, STATUS_Y + 1), 2)
+        pygame.draw.circle(surface, PANEL_FILL, (ax + 7, STATUS_Y + 4), 1)
+        surface.blit(alert, (ax + 18, STATUS_Y - alert.get_height() // 2))
+        return band
+
+    def _draw_weather(self, surface, w) -> pygame.Rect:
+        """Ligne météo : icône + température + libellé · min/max (· pluie)."""
+        band = WEATHER_BAND
+        self.clear_region(surface, band)
+        city = str(self.app.config.get("weather", {}).get("city", "")).strip()
+        if w is None:
+            surf = self.font_weather.render(f"Météo {city}…" if city else "Météo…", True, FAINT)
+            surface.blit(surf, surf.get_rect(center=(CENTER_X, WEATHER_Y)))
+            return band
+        # Segments (texte, police, couleur) ; les optionnels sautent si trop large.
+        temp = (f"{w.temp:.0f}°", self.font_weather_temp, WHITE)
+        label = (f"  {w.label}", self.font_weather, DIM)
+        extras = []
+        if w.t_min is not None and w.t_max is not None:
+            extras.append((f"  ·  {w.t_min:.0f}° / {w.t_max:.0f}°", self.font_weather, DIM))
+        if w.rain_pct is not None and w.rain_pct >= 20:
+            extras.append((f"  ·  pluie {w.rain_pct} %", self.font_weather, RAIN))
+        lead = [(f"{city}  ", self.font_weather, FAINT)] if city else []
+        gap = 10
+
+        def width(parts):
+            return WEATHER_ICON + gap + sum(f.size(t)[0] for t, f, _ in parts)
+
+        parts = lead + [temp, label] + extras
+        while width(parts) > band.w - 8 and (extras or lead):
+            if lead:
+                lead, parts = [], parts[1:]      # la ville part en premier
+            else:
+                extras.pop()
+                parts = [temp, label] + extras
+        x = CENTER_X - width(parts) // 2
+        surface.blit(weather_icon(w.kind, w.is_day, WEATHER_ICON),
+                     (x, WEATHER_Y - WEATHER_ICON // 2))
+        x += WEATHER_ICON + gap
+        for text, font, color in parts:
+            surf = font.render(text, True, color)
+            surface.blit(surf, (x, WEATHER_Y - surf.get_height() // 2))
+            x += surf.get_width()
         return band
 
     def _draw_news_if_changed(self, surface) -> list[pygame.Rect]:
@@ -306,6 +451,10 @@ class DefaultScreen(Screen):
 
     # ---------------------------------------------------------------- entrées
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
+        if self.weather is not None and WEATHER_BAND.collidepoint(pos):
+            self.app.manual_screen = "weather"
+            self.app.set_screen("weather")
+            return None
         if NEWS_STRIP.collidepoint(pos):
             self._open_news(self._news_article)
             return None
