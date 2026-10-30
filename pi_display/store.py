@@ -209,6 +209,55 @@ class Store:
                 "SELECT game_id FROM matches ORDER BY game_creation DESC LIMIT 1").fetchone()
         return row[0] if row else None
 
+    def fill_champion_names(self, name_of) -> int:
+        """Complète les noms de champion vides depuis leur id (`name_of(id)`, ex.
+        `Champions.name`) : résumés, participations et bilans 10 joueurs. Arrive
+        quand l'agent n'avait pas sa table de noms (démarré avant le réseau).
+        `name_of` peut faire du réseau : appelé hors verrou. Renvoie le nb de lignes."""
+        empty = "(champion_name IS NULL OR champion_name = '')"
+        with self._lock:
+            ids = {r[0] for t in ("participations", "matches") for r in self._conn.execute(
+                f"SELECT DISTINCT champion_id FROM {t} WHERE {empty} AND champion_id > 0")}
+            details = self._conn.execute(
+                "SELECT game_id, detail_json FROM matches WHERE detail_json LIKE ?",
+                ('%"championName": ""%',)).fetchall()
+        for _gid, raw in details:
+            try:
+                ids |= {p.get("championId") for p in json.loads(raw).get("players", [])
+                        if not p.get("championName") and p.get("championId")}
+            except (ValueError, AttributeError):
+                pass
+        names = {cid: name_of(cid) for cid in ids}
+        names = {cid: n for cid, n in names.items() if n}
+        if not names:
+            return 0
+        changed = 0
+        with self._lock:
+            for table in ("participations", "matches"):
+                for cid, n in names.items():
+                    changed += self._conn.execute(
+                        f"UPDATE {table} SET champion_name = ? WHERE champion_id = ? AND {empty}",
+                        (n, cid)).rowcount
+            for gid, raw in details:
+                try:
+                    detail = json.loads(raw)
+                except ValueError:
+                    continue
+                for p in detail.get("players", []):
+                    if not p.get("championName") and names.get(p.get("championId")):
+                        p["championName"] = names[p["championId"]]
+                self._conn.execute("UPDATE matches SET detail_json = ? WHERE game_id = ?",
+                                   (json.dumps(detail, ensure_ascii=False), gid))
+            self._conn.commit()
+        return changed
+
+    def oldest_creation(self) -> int | None:
+        """Date (ms) de la plus ancienne de nos parties stockées, ou None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MIN(game_creation) FROM matches WHERE game_creation > 0").fetchone()
+        return row[0] if row else None
+
     def total(self) -> int:
         with self._lock:
             return self._conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]

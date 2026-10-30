@@ -85,8 +85,13 @@ class Champions:
     def __init__(self):
         self._names: dict[int, str] | None = None
         self._alias: dict[int, str] | None = None
+        self._retry_at = 0.0     # échec (Pi démarré avant le réseau) -> nouvel essai
+
+    def _due(self) -> bool:
+        return not self._names and time.monotonic() >= self._retry_at
 
     def _load(self) -> None:
+        self._retry_at = time.monotonic() + 60
         self._names, self._alias = {}, {}
         raw = _http_get(CHAMPION_SUMMARY_URL, timeout=8)
         if not raw:
@@ -102,12 +107,12 @@ class Champions:
                 self._alias[cid] = champ.get("alias", "")
 
     def name(self, champion_id: int) -> str:
-        if self._names is None:
+        if self._due():
             self._load()
         return (self._names or {}).get(champion_id or 0, "")
 
     def alias(self, champion_id: int) -> str:
-        if self._alias is None:
+        if self._due():
             self._load()
         return (self._alias or {}).get(champion_id or 0, "")
 

@@ -13,6 +13,8 @@ mot de passe = le token. Le certificat est auto-signé -> verify=False (local).
 
 from __future__ import annotations
 
+import time
+
 import psutil
 import urllib3
 import requests
@@ -76,6 +78,7 @@ class LcuClient:
         self._champions: dict[int, str] | None = None      # cache id -> nom
         self._champion_ids: dict[str, int] | None = None   # cache nom (minuscule) -> id
         self._champion_alias: dict[int, str] | None = None  # cache id -> alias (ex. "MissFortune")
+        self._summary_retry_at = 0.0   # échec de chargement -> nouvel essai après ce délai
 
     @property
     def connected(self) -> bool:
@@ -170,7 +173,7 @@ class LcuClient:
         """Nom du champion depuis le résumé des champions (mis en cache)."""
         if not champion_id or champion_id <= 0:
             return ""
-        if self._champions is None:
+        if self._summary_due():
             self._load_champion_summary()
         return (self._champions or {}).get(champion_id, "")
 
@@ -178,7 +181,7 @@ class LcuClient:
         """Id d'un champion depuis son nom affiché (0 si inconnu)."""
         if not name:
             return 0
-        if self._champion_ids is None:
+        if self._summary_due():
             self._load_champion_summary()
         return (self._champion_ids or {}).get(name.lower(), 0)
 
@@ -186,11 +189,18 @@ class LcuClient:
         """Alias d'un champion (ex. 'MissFortune'), pour les URL d'art."""
         if not champion_id or champion_id <= 0:
             return ""
-        if self._champion_alias is None:
+        if self._summary_due():
             self._load_champion_summary()
         return (self._champion_alias or {}).get(champion_id, "")
 
+    def _summary_due(self) -> bool:
+        """Table à (re)charger : jamais chargée, ou dernier essai raté il y a plus
+        d'une minute. ⚠️ Lancé à l'ouverture de session, l'agent démarre souvent
+        avant le réseau : une table vide gardée à vie viderait tous les noms."""
+        return not self._champions and time.monotonic() >= self._summary_retry_at
+
     def _load_champion_summary(self) -> None:
+        self._summary_retry_at = time.monotonic() + 60
         self._champions = {}
         self._champion_ids = {}
         self._champion_alias = {}

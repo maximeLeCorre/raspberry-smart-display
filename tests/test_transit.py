@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from modules.transit.transit_feed import Departure, parse_departures, parse_messages
 from modules.transit.transit_screen import minutes_label, status_text
 
@@ -107,3 +109,58 @@ def test_prochain_train_pour_paris_a_l_arrivee_en_gare():
     assert dep is deps[3] and arrival_label(dep, now) == "9 min"
     assert arrival_label(_dep(at_stop=True), now) == "à quai"
     assert next_arrival([], "saint-lazare", now) is None
+
+
+# ------------------------------------------------- rythme calé sur le quota PRIM
+import io  # noqa: E402
+import urllib.error  # noqa: E402
+from email.message import Message  # noqa: E402
+
+from modules.transit import transit_feed as tf  # noqa: E402
+
+NOON = time.mktime((2026, 10, 30, 12, 0, 0, 0, 0, -1))
+NIGHT = time.mktime((2026, 10, 30, 3, 0, 0, 0, 0, -1))
+
+
+def _feed():
+    return tf.TransitFeed("k", stop_area="1", lines={}, paris_words=("paris",))
+
+
+def _headers(remaining, reset, retry=None):
+    h = Message()
+    h["x-ratelimit-remaining-day"] = str(remaining)
+    h["ratelimit-reset"] = str(reset)
+    if retry is not None:
+        h["retry-after"] = str(retry)
+    return h
+
+
+def test_intervalle_reparti_sur_le_quota_restant(monkeypatch):
+    feed = _feed()
+    assert feed.next_delay(NOON) == 60                     # quota inconnu : plancher
+    monkeypatch.setattr(tf.time, "time", lambda: NOON)
+    feed._note_quota(tf.STOP_PATH, _headers(540, 13 * 3600))
+    assert feed.next_delay(NOON) == 13 * 3600 / 500       # 500 hors réserve → 93,6 s
+    feed._note_quota(tf.STOP_PATH, _headers(5000, 3600))
+    assert feed.next_delay(NOON) == 60                     # jamais sous le plancher
+    feed._note_quota(tf.STOP_PATH, _headers(tf.QUOTA_RESERVE, 3600))
+    assert feed.next_delay(NOON) == 3605                   # réserve : attente remise à zéro
+    assert feed.next_delay(NIGHT) == 15 * 60               # nuit : 1 relevé / 15 min
+
+
+def test_quota_epuise_plus_de_requete_jusqu_a_la_remise_a_zero(monkeypatch):
+    feed = _feed()
+    calls = []
+
+    def urlopen(req, timeout):
+        calls.append(req.full_url)
+        raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests",
+                                     _headers(0, 7200, retry=7200), io.BytesIO(b"{}"))
+    monkeypatch.setattr(tf.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(tf.time, "time", lambda: NOON)
+    feed._poll()
+    assert len(calls) == 1
+    assert feed.snapshot()["error"].startswith("quota du jour atteint, reprise à ")
+    assert feed.next_delay(NOON) == 7205
+    feed._poll()                                           # toujours bloqué : aucun appel
+    assert len(calls) == 1
