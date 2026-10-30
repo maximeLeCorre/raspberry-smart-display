@@ -63,7 +63,7 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
 - `screen.py` : base `Screen` (attr `cycle`), fond PNG chargé 1×, redessin par **dirty rects**.
 - **system/** : `default` (horloge, météo, pastille PC haut-gauche, alerte santé Pi, 1 actu qui tourne, **dock de tuiles
   vivantes** selon modules : Jouer/Rejoindre, Historique, Serveur, Actus ; états écrits, pas que colorés : user daltonien),
-  `news` + `rss_feed` (flux lu par le Pi), `weather` (courbe du jour + pluie, ◀/▶ + menu des jours ; clic sur la météo).
+  `news` + `rss_feed` (flux lu par le Pi ; article **complet** = page web parsée par `article_text.py` `c-chapo`/`c-body`, paginée ▲/▼), `weather` (courbe du jour + pluie, ◀/▶ + menu des jours ; clic sur la météo).
   `weather.py` = Open-Meteo sans clé (`[weather]`) → série **horaire** upsertée dans **`weather.db`** (base vide → rattrapage,
   ~50 j réels) ; `pi_health.py` = /proc local, seuils `[pi_health]` (CPU soutenu). Tout marche PC éteint.
 - **league/** : `queue` (ready-check, **bouton Accepter** → `lcu_action`), `champselect` (clic → dossier + splash), `lol`, `postgame`, `history`.
@@ -80,7 +80,7 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
 - Liste lue depuis **`store.py`** (SQLite `matches.db`, *.db gitignoré). Filtres SQL : **ARAM Chaos (défaut)** /
   Classé / Normale / ARAM ; ◀/▶. Clic → `App.open_postgame_review(gameId)` (revue, RETOUR → liste).
 - **Toutes les parties viennent de la LCU** (via agent) : résumé **+ bilan 10 joueurs** (PC éteint OK).
-- **STATS** (`stats`, bouton de l'historique) : toi seul / ami seul / **ensemble = même équipe** (`[lol] compare`).
+- **STATS** (`stats`, bouton de l'historique) : toi seul / ami seul / **ensemble = même équipe** (`[lol] compare`) ; bouton **Période** (`period.py`, dates incluses sur `game_creation` ms).
   Table `participations` (1 ligne/joueur/partie, rétro-remplie des bilans) ; parties de l'ami lues par
   l'agent (`/products/lol/{puuid}/matches`, puuid via liste d'amis), **hors historique affiché**.
 - **Synchro** (`App.sync_lcu` → `request_lcu_sync{since}` → agent `iter_lcu_sync` → lots
@@ -96,14 +96,14 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
 **Sauvegarde** (`backup.py`, `[server.backup]`) : 1×/jour, copie SQLite cohérente de `matches.db`+`weather.db` → SFTP `~/pi-display-backups/<base>-AAAA-MM-JJ.db`, rotation `keep_days`.
 Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` TOFU). ⚠️ paramiko dans `requirements.txt` **et** le `pip` de `deploy_pi.py`.
 ### Trains (`transit`, Pi-only) — API **PRIM** IDFM, clé `IDFM_API_KEY` (.env), en-tête `apikey`
-`transit_feed.py` : `stop-monitoring` (ZdA `[transit] stop_area`, Chaville RD = 43241) /60 s + `general-message` par ligne /5 min, SIRI Lite.
+`transit_feed.py` : `stop-monitoring` (ZdA `[transit] stop_area`, Chaville RD = 43241) + `general-message` par ligne /5 min, SIRI Lite. ⚠️ **Quota 1 000 req/jour PAR endpoint** (RAZ minuit UTC) → rythme des départs calé sur `x-ratelimit-remaining-day` (`next_delay`), nuit 15 min, 429 = pause jusqu'au `retry-after`.
 ⚠️ **2 lignes** : L (C01740) **et U** (C01741) → `[transit.lines]` ; 2 colonnes par direction (`paris_destinations`), états **écrits** ;
 tuile Trains **remplace Actus** (liste via le bandeau) ; à droite de l'horloge : **arrivée en gare** du prochain St-Lazare (`home_*`).
 
 ## API Riot & pièges
 - **LCU** (`pc_agent/lcu.py`, agent, client ouvert) : phase, sélection, historique, **actions**
   (`post`, ex. `/lol-matchmaking/v1/ready-check/accept`). Auth = port+token du process
-  `LeagueClientUx.exe`, `verify=False`. Noms de champions via **Community Dragon**. ⚠️ PUUID
+  `LeagueClientUx.exe`, `verify=False`. Noms de champions via **Community Dragon** (⚠️ échec → réessai 60 s, jamais de table vide à vie ; noms vides du store réparés par `fill_champion_names`). ⚠️ PUUID
   LCU = **interne**, rejeté par l'API Web → l'agent envoie le **Riot ID**, le Pi résout le vrai
   PUUID (`resolve_puuid`). ⚠️ « ARAM Chaos » = gameMode interne **`KIWI`**.
 - **Live Client Data** (`pc_agent/riot_api.py`, `127.0.0.1:2999`) : **en partie uniquement**.

@@ -78,3 +78,18 @@ def test_synchro_ami_saute_les_parties_connues():
     assert ids == ["9", "7", "6"]                # pas d'arrêt à la 1re connue
     assert all("win" in p for p in json.loads(json.dumps(
         next(iter_player_sync(lcu, "p"))[0]["detail"]))["players"])
+
+
+def test_noms_de_champion_vides_completes_depuis_l_id(tmp_path):
+    """Agent démarré sans table de noms : résumés, participations et bilans réparés."""
+    st = Store(tmp_path / "m.db")
+    sans_nom = rec(1, [player(ME, 100, True, self_=True, champ=7), player(MATE, 100, True)])
+    sans_nom["championName"] = ""
+    for p in sans_nom["detail"]["players"]:
+        p["championName"] = ""
+    st.upsert_matches([sans_nom])
+    names = {1: "Annie", 7: "LeBlanc"}
+    assert st.fill_champion_names(names.get) == 3          # 1 résumé + 2 participations
+    assert st.query()[0]["championName"] == "Annie"
+    assert {p["championName"] for p in st.detail(1)["players"]} == {"LeBlanc", "Annie"}
+    assert st.fill_champion_names(names.get) == 0          # plus rien à compléter

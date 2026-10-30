@@ -134,8 +134,13 @@ tile_labels = ["Paris", "Versailles"]   # libellés courts de la tuile d'accueil
 home_destination = "saint-lazare"   # (sous-chaîne de la destination, insensible à la casse)
 home_label = "St-Lazare"
 home_line = "L"
-refresh_seconds = 60         # prochains passages
-messages_minutes = 5         # info trafic (une requête par ligne)
+# ⚠️ Quota PRIM : 1 000 requêtes/jour par endpoint (remis à zéro à minuit UTC).
+# Le rythme des départs s'adapte au quota restant (≈ 1 relevé / 90 s) ;
+# refresh_seconds n'est que le plancher. La nuit, un relevé toutes les N minutes.
+refresh_seconds = 60         # prochains passages : intervalle minimal
+night_hours = [1, 5]         # [début, fin[ en heures locales
+night_refresh_minutes = 15
+messages_minutes = 5         # info trafic (une requête par ligne : 2 × 288 = 576/j)
 
 [transit.lines]
 # Lignes de la gare : id IDFM = lettre affichée (info trafic suivie pour chacune).

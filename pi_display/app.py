@@ -116,6 +116,7 @@ class App:
 
         self.running = False
         self.set_screen(DEFAULT_SCREEN)
+        self._repair_champion_names()
 
     def _build_screens(self, modules_cfg: dict) -> None:
         self.screens = {}
@@ -395,8 +396,18 @@ class App:
             if self.agent_connected and game_id:
                 self.server.send({"type": "request_lcu_detail", "gameId": game_id})
 
+    def _repair_champion_names(self) -> None:
+        """Noms de champion vides dans le store (agent démarré sans sa table de
+        noms) : complétés depuis l'id, en tâche de fond (table CDN au besoin)."""
+        def done(changed):
+            name = self.current.name if self.current else None
+            if changed and name in ("history", "stats"):
+                self.screens[name].reload()
+        self.async_call(lambda: self.store.fill_champion_names(self.champions.name), done)
+
     def _on_sync_done(self) -> None:
         """Fin d'une synchro : rafraîchit l'écran courant si besoin."""
+        self._repair_champion_names()
         name = self.current.name if self.current else None
         if name == "history":
             self.screens["history"].reload()
@@ -547,6 +558,8 @@ class App:
             games = msg.get("games", [])
             if games:
                 self.store.upsert_player_games(games)
+            if msg.get("done"):
+                self._repair_champion_names()
             if msg.get("done") and self.current is not None and self.current.name == "stats":
                 self.screens["stats"].reload()
 

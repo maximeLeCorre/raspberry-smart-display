@@ -9,15 +9,22 @@ ses 20 dernières via la LCU, `[lol] compare`) et s'accumulent au fil du temps.
 Mise en valeur sans couleur seule (l'utilisateur est daltonien) : la meilleure
 valeur solo est en blanc, l'autre en gris (contraste de luminosité).
 
-En haut : filtres de mode (ARAM Chaos par défaut) et RETOUR (→ historique).
+En haut : filtres de mode (ARAM Chaos par défaut), bouton **Période** (fenêtre
+de dates, voir `period.py`) et RETOUR (→ historique). La période ouvre un
+sélecteur plein écran : préréglages (7/30/90 j, toutes dates) + début/fin
+réglables au jour ou au mois ; les stats sont relues à chaque changement
+(aperçu du nombre de parties). Elle reste choisie tant que l'appli tourne.
 """
 
 from __future__ import annotations
+
+from datetime import date, datetime, timedelta
 
 import pygame
 
 from screen import Screen
 
+from . import period
 from .history_screen import FILTERS
 
 STAT_FILTERS = FILTERS + [("Tout", "", ())]
@@ -30,6 +37,15 @@ COL_X = (300, 470, 660)          # centres : toi seul, ami seul, ensemble
 HEAD_Y = 66
 ROW_TOP, ROW_H = 100, 33
 TOP_Y = 352                      # bloc « champions les plus joués »
+
+# Sélecteur de période (plein écran).
+PRESET_Y, PRESET_H = 64, 56
+DATE_ROWS = (("Du", 156), ("Au", 250))          # (libellé, haut de la ligne)
+DATE_ROW_H = 66
+STEPS = (("-1 mois", "m", -1, 100, 112), ("-1 j", "d", -1, 222, 90),
+         ("+1 j", "d", 1, 530, 90), ("+1 mois", "m", 1, 630, 112))  # (texte, unité, sens, x, w)
+DATE_BOX = (322, 198)                            # (x, w) de la date affichée
+SUMMARY_Y = 352
 
 BG = (10, 14, 26)
 PANEL = (24, 32, 52)
@@ -91,6 +107,16 @@ class StatsScreen(Screen):
             w = self.font_btn.size(label)[0] + 22
             self._filter_rects.append(pygame.Rect(x, BTN_TOP, w, BTN_H))
             x += w + 6
+        self._period_rect = pygame.Rect(x + 6, BTN_TOP, RETOUR_RECT.x - x - 14, BTN_H)
+
+        # Période (dates incluses ; None = toutes) et sélecteur ouvert ?
+        self.start: date | None = None
+        self.end: date | None = None
+        self._picking = False
+        gap = 10
+        w = (self.width - 32 - gap * (len(period.PRESETS) - 1)) // len(period.PRESETS)
+        self._preset_rects = [pygame.Rect(16 + i * (w + gap), PRESET_Y, w, PRESET_H)
+                              for i in range(len(period.PRESETS))]
 
     @property
     def friend_name(self) -> str:
@@ -98,17 +124,77 @@ class StatsScreen(Screen):
 
     def reload(self) -> None:
         """Relit le store (ouverture, changement de filtre, fin de synchro)."""
-        _label, where, params = STAT_FILTERS[self.filter_idx]
+        _label, mode_where, mode_params = STAT_FILTERS[self.filter_idx]
+        per_where, per_params = period.where(self.start, self.end)
+        where = " AND ".join(f"({w})" for w in (mode_where, per_where) if w)
+        params = (*mode_params, *per_params)
         me, other = self.app.summoner_rid, self.app.compare_rid
         self.data = (self.app.store.compare(me, other, where, params)
                      if "#" in me and "#" in other else None)
         self._dirty = True
 
     def enter(self) -> None:
+        self._picking = False
         self._dirty = True
+
+    # --------------------------------------------------------------- période
+    @staticmethod
+    def _today() -> date:
+        return date.today()
+
+    def _set_period(self, start, end) -> None:
+        self.start, self.end = start, end
+        self.reload()
+
+    def _step(self, which: str, unit: str, sign: int) -> None:
+        """Décale le début ou la fin d'un jour / d'un mois (début ≤ fin ≤ aujourd'hui)."""
+        today = self._today()
+        start, end = self.start, self.end
+        if start is None or end is None:      # « toutes dates » → bornes réelles
+            oldest = self.app.store.oldest_creation()
+            start = datetime.fromtimestamp(oldest / 1000).date() if oldest else today
+            end = today
+        cur = start if which == "Du" else end
+        new = (period.add_months(cur, sign) if unit == "m"
+               else cur + timedelta(days=sign))
+        if which == "Du":
+            start = min(new, end)
+        else:
+            end = max(start, min(new, today))
+        self._set_period(start, end)
+
+    def _step_enabled(self, which: str, sign: int) -> bool:
+        if self.start is None or self.end is None:
+            return not (which == "Au" and sign > 0)
+        if which == "Du":
+            return sign < 0 or self.start < self.end
+        return (self.end < self._today()) if sign > 0 else self.end > self.start
+
+    def _touch_picker(self, pos) -> None:
+        if RETOUR_RECT.collidepoint(pos):          # OK : retour aux stats
+            self._picking = False
+            self._dirty = True
+            return
+        for rect, (_label, days) in zip(self._preset_rects, period.PRESETS):
+            if rect.collidepoint(pos):
+                self._set_period(*period.preset(days, self._today()))
+                return
+        for which, top in DATE_ROWS:
+            for _text, unit, sign, x, w in STEPS:
+                if (pygame.Rect(x, top, w, DATE_ROW_H).collidepoint(pos)
+                        and self._step_enabled(which, sign)):
+                    self._step(which, unit, sign)
+                    return
 
     # --------------------------------------------------------------- entrées
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
+        if self._picking:
+            self._touch_picker(pos)
+            return None
+        if self._period_rect.collidepoint(pos):
+            self._picking = True
+            self._dirty = True
+            return None
         if RETOUR_RECT.collidepoint(pos):
             self.app.open_history()
             return None
@@ -126,6 +212,9 @@ class StatsScreen(Screen):
             return []
         self._dirty = False
         surface.fill(BG)
+        if self._picking:
+            self._draw_picker(surface)
+            return [surface.get_rect()]
         self._draw_filters(surface)
         pygame.draw.rect(surface, PANEL, RETOUR_RECT, border_radius=8)
         hint = self.font_sub.render("RETOUR", True, GREY)
@@ -150,6 +239,70 @@ class StatsScreen(Screen):
                 pygame.draw.rect(surface, GOLD, rect, width=2, border_radius=8)
             surf = self.font_btn.render(STAT_FILTERS[i][0], True, WHITE if active else GREY)
             surface.blit(surf, surf.get_rect(center=rect.center))
+        # Période : encadrée en or (et texte blanc) dès qu'elle restreint les dates.
+        rect = self._period_rect
+        restricted = self.start is not None
+        pygame.draw.rect(surface, PANEL, rect, border_radius=8)
+        pygame.draw.rect(surface, GOLD if restricted else LINE, rect, width=2, border_radius=8)
+        text = period.short_label(self.start, self.end, self._today())
+        surf = self.font_btn.render(_fit(text, self.font_btn, rect.w - 12), True,
+                                    WHITE if restricted else GREY)
+        surface.blit(surf, surf.get_rect(center=rect.center))
+
+    # ------------------------------------------------------- sélecteur période
+    def _button(self, surface, rect, text, *, active=False, enabled=True) -> None:
+        pygame.draw.rect(surface, PANEL if enabled else PANEL_OFF, rect, border_radius=8)
+        if active:
+            pygame.draw.rect(surface, GOLD, rect, width=2, border_radius=8)
+        color = WHITE if active else (GREY if enabled else DIM)
+        surf = self.font_btn.render(text, True, color)
+        surface.blit(surf, surf.get_rect(center=rect.center))
+
+    def _draw_picker(self, surface) -> None:
+        today = self._today()
+        title = self.font_head.render("PÉRIODE DES STATS", True, GOLD)
+        surface.blit(title, (LABEL_X, 18))
+        self._button(surface, RETOUR_RECT, "OK", active=True)
+
+        for rect, (label, days) in zip(self._preset_rects, period.PRESETS):
+            active = (self.start, self.end) == period.preset(days, today)
+            self._button(surface, rect, label, active=active)
+
+        oldest = self.app.store.oldest_creation()
+        shown = {"Du": self.start or (datetime.fromtimestamp(oldest / 1000).date()
+                                      if oldest else None),
+                 "Au": self.end or today}
+        for which, top in DATE_ROWS:
+            lab = self.font_head.render(which, True, GREY)
+            surface.blit(lab, lab.get_rect(midleft=(LABEL_X + 6, top + DATE_ROW_H // 2)))
+            for text, _unit, sign, x, w in STEPS:
+                self._button(surface, pygame.Rect(x, top, w, DATE_ROW_H), text,
+                             enabled=self._step_enabled(which, sign))
+            box = pygame.Rect(DATE_BOX[0], top, DATE_BOX[1], DATE_ROW_H)
+            pygame.draw.rect(surface, (14, 19, 34), box, border_radius=8)
+            pygame.draw.rect(surface, LINE, box, width=2, border_radius=8)
+            d = shown[which]
+            surf = self.font_val.render(d.strftime("%d/%m/%Y") if d else "—", True, WHITE)
+            surface.blit(surf, surf.get_rect(center=box.center))
+
+        # Résumé : bornes en toutes lettres + nombre de parties (filtre de mode inclus).
+        if self.start is None:
+            line1 = "Toutes les parties stockées"
+        else:
+            n = (self.end - self.start).days + 1
+            line1 = (f"Du {period.long_date(self.start)} au {period.long_date(self.end)}"
+                     f"  ·  {n} jour{'s' if n > 1 else ''}")
+        surf = self.font_label.render(line1, True, WHITE)
+        surface.blit(surf, surf.get_rect(center=(self.width // 2, SUMMARY_Y)))
+        if self.data is not None:
+            games = self.data["me_solo"]["games"] + self.data["duo_me"]["games"]
+            line2 = (f"{games} partie{'s' if games > 1 else ''}"
+                     f" ({STAT_FILTERS[self.filter_idx][0]})")
+            surf = self.font_label.render(line2, True, GREY)
+            surface.blit(surf, surf.get_rect(center=(self.width // 2, SUMMARY_Y + 34)))
+        hint = self.font_sub.render(
+            "La période s'applique à toutes les colonnes (toi, ami, ensemble).", True, DIM)
+        surface.blit(hint, hint.get_rect(center=(self.width // 2, self.height - 24)))
 
     def _draw_headers(self, surface) -> None:
         heads = (("Toi", "seul"), (self.friend_name, "seul"),

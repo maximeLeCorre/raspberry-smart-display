@@ -15,6 +15,15 @@ Identifiants (open data IDFM, jeux « zones-d-arrets » / « referentiel-des-lig
 Chaville Rive Droite = zone d'arrêt 43241, desservie par la L (C01740, Saint-Lazare ↔
 Versailles RD) **et la U** (C01741, La Défense ↔ La Verrière).
 Tolérant : en cas d'erreur, garde les dernières données et expose ``error``.
+
+⚠️ **Quota PRIM : 1 000 requêtes/jour PAR endpoint** (compteurs séparés), remis à
+zéro à minuit UTC. Une requête/min (1 440/j) l'épuise vers 17 h 40. Le rythme des
+départs est donc **calé sur le quota** : chaque réponse donne le reste du jour
+(``x-ratelimit-remaining-day``) et le délai avant remise à zéro (``ratelimit-reset``),
+d'où un intervalle = temps restant / requêtes restantes (jamais sous
+``refresh_seconds``), en gardant une réserve (redémarrages). La nuit
+(``night_hours``), un relevé toutes les ``night_refresh_minutes``. Sur un 429, plus
+aucune requête jusqu'à la remise à zéro (``retry-after``).
 """
 
 from __future__ import annotations
@@ -31,6 +40,9 @@ from dataclasses import dataclass
 from datetime import datetime
 
 BASE_URL = "https://prim.iledefrance-mobilites.fr/marketplace"
+STOP_PATH, MSG_PATH = "stop-monitoring", "general-message"
+QUOTA_RESERVE = 40          # requêtes gardées pour les redémarrages / imprévus
+MAX_INTERVAL = 900.0        # jamais plus de 15 min sans relevé (hors quota épuisé)
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -166,14 +178,21 @@ class TransitFeed:
 
     def __init__(self, api_key: str, *, stop_area: str, lines: dict[str, str],
                  paris_words: tuple[str, ...], refresh_seconds: float = 60.0,
-                 messages_minutes: float = 5.0, timeout: float = 15.0):
+                 messages_minutes: float = 5.0, timeout: float = 15.0,
+                 night_hours: tuple[int, int] = (1, 5), night_refresh_minutes: float = 15.0):
         self.api_key = api_key
         self.stop_ref = f"STIF:StopArea:SP:{stop_area}:"
         self.lines = dict(lines)      # id IDFM -> lettre
         self.paris_words = tuple(w.lower() for w in paris_words)
         self.refresh_seconds = max(30.0, refresh_seconds)
         self.messages_seconds = max(60.0, messages_minutes * 60)
+        self.night_hours = (int(night_hours[0]), int(night_hours[1]))
+        self.night_seconds = max(self.refresh_seconds, night_refresh_minutes * 60)
         self.timeout = timeout
+        # Par endpoint : (requêtes restantes du jour, epoch de remise à zéro), et
+        # epoch avant lequel on ne requête plus (429 reçu).
+        self._quota: dict[str, tuple[int, float]] = {}
+        self._blocked_until: dict[str, float] = {}
         self._lock = threading.Lock()
         self._departures: list[Departure] = []
         self._messages: list[TrafficMessage] = []
@@ -201,32 +220,83 @@ class TransitFeed:
         url = f"{BASE_URL}/{path}?{urllib.parse.urlencode(params)}"
         req = urllib.request.Request(url, headers={"apikey": self.api_key,
                                                    "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            return json.load(resp)
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                self._note_quota(path, resp.headers)
+                return json.load(resp)
+        except urllib.error.HTTPError as exc:
+            self._note_quota(path, exc.headers)
+            if exc.code == 429:
+                wait = _to_float(exc.headers.get("retry-after")) or 3600.0
+                self._blocked_until[path] = time.time() + wait
+            raise
+
+    def _note_quota(self, path: str, headers) -> None:
+        """Mémorise le quota restant du jour d'après les en-têtes PRIM."""
+        if headers is None:
+            return
+        remaining = _to_float(headers.get("x-ratelimit-remaining-day"))
+        reset = _to_float(headers.get("ratelimit-reset"))
+        if remaining is not None and reset is not None:
+            self._quota[path] = (int(remaining), time.time() + reset)
+
+    def _blocked(self, path: str, now: float) -> bool:
+        return self._blocked_until.get(path, 0.0) > now
+
+    def _is_night(self, now: float) -> bool:
+        start, end = self.night_hours
+        hour = time.localtime(now).tm_hour
+        return start <= hour < end if start <= end else (hour >= start or hour < end)
+
+    def next_delay(self, now: float | None = None) -> float:
+        """Attente avant le prochain relevé des départs (voir docstring du module)."""
+        now = time.time() if now is None else now
+        until = self._blocked_until.get(STOP_PATH, 0.0)
+        if until > now:                          # 429 : attendre la remise à zéro
+            return until - now + 5
+        if self._is_night(now):
+            return self.night_seconds
+        quota = self._quota.get(STOP_PATH)
+        if quota is None:
+            return self.refresh_seconds
+        remaining, reset_at = quota
+        horizon = max(0.0, reset_at - now)
+        budget = remaining - QUOTA_RESERVE
+        if budget <= 0:                          # on garde la réserve : on attend
+            return horizon + 5
+        return min(MAX_INTERVAL, max(self.refresh_seconds, horizon / budget))
 
     def _loop(self) -> None:
         while True:
             self._poll()
-            time.sleep(self.refresh_seconds)
+            time.sleep(self.next_delay())
 
     def _poll(self) -> None:
-        try:
-            deps = parse_departures(self._get("stop-monitoring",
-                                              {"MonitoringRef": self.stop_ref}),
-                                    self.paris_words, self.lines)
-            with self._lock:
-                self._departures, self._updated, self._error = deps, time.time(), ""
-        except urllib.error.HTTPError as exc:
-            self._fail("clé API refusée" if exc.code in (401, 403) else f"erreur {exc.code}",
-                       exc)
-        except Exception as exc:  # réseau, parse… : on ne casse jamais l'UI
-            self._fail("réseau indisponible", exc)
-        if self.lines and time.time() - self._msg_ts >= self.messages_seconds:
+        now = time.time()
+        if not self._blocked(STOP_PATH, now):
+            try:
+                deps = parse_departures(self._get(STOP_PATH, {"MonitoringRef": self.stop_ref}),
+                                        self.paris_words, self.lines)
+                with self._lock:
+                    self._departures, self._updated, self._error = deps, time.time(), ""
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429:
+                    label = "quota du jour atteint, reprise à " + time.strftime(
+                        "%H:%M", time.localtime(self._blocked_until[STOP_PATH]))
+                elif exc.code in (401, 403):
+                    label = "clé API refusée"
+                else:
+                    label = f"erreur {exc.code}"
+                self._fail(label, exc)
+            except Exception as exc:  # réseau, parse… : on ne casse jamais l'UI
+                self._fail("réseau indisponible", exc)
+        if (self.lines and not self._blocked(MSG_PATH, now)
+                and time.time() - self._msg_ts >= self.messages_seconds):
             try:
                 msgs = []
                 for lid, name in self.lines.items():
                     msgs += parse_messages(self._get(
-                        "general-message", {"LineRef": f"STIF:Line::{lid}:"}), name)
+                        MSG_PATH, {"LineRef": f"STIF:Line::{lid}:"}), name)
                 msgs.sort(key=lambda m: not m.is_disruption)
                 with self._lock:
                     self._messages = msgs
@@ -238,6 +308,13 @@ class TransitFeed:
         print(f"[trains] échec des prochains passages : {exc}")
         with self._lock:
             self._error = label
+
+
+def _to_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def get_transit(app):
@@ -255,6 +332,8 @@ def get_transit(app):
                 paris_words=tuple(cfg.get("paris_destinations", ["saint-lazare"])),
                 refresh_seconds=float(cfg.get("refresh_seconds", 60)),
                 messages_minutes=float(cfg.get("messages_minutes", 5)),
+                night_hours=tuple(cfg.get("night_hours", (1, 5))),
+                night_refresh_minutes=float(cfg.get("night_refresh_minutes", 15)),
             )
             feed.start()
         app._transit_feed = feed

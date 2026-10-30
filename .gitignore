@@ -37,3 +37,6 @@ logs/
 
 # --- Empreinte SSH du Pi (deploy, TOFU) ---
 deploy/known_hosts
+
+# --- Scripts/rendus jetables (préfixe _, exclus aussi du déploiement) ---
+pi_display/_*
