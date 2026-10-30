@@ -139,7 +139,7 @@ class ServerScreen(Screen):
             snap.get("mem_used", 0) >> 24, snap.get("mem_total", 0) >> 24,
             snap.get("disk_used", 0) >> 28, snap.get("disk_total", 0) >> 28,
             int(snap.get("uptime", 0)), snap.get("temp_c"),
-            online, self.link is not None,
+            online, self.link is not None, self._backup_text(),
         )
         if mkey != self._metrics_key:
             dirty.append(self._draw_metrics(surface, snap, online))
@@ -226,7 +226,29 @@ class ServerScreen(Screen):
             info += f"        temp {snap['temp_c']:.0f} °C"
         color = GREY if online else DIM
         surface.blit(self.font_small.render(info, True, color), (LABEL_X, INFO_Y))
+
+        # Sauvegarde quotidienne des bases du Pi (à droite de la même ligne).
+        backup = self._backup_text()
+        if backup:
+            text, failed = backup
+            surf = self.font_small.render(text, True, RED if failed else GREY)
+            surface.blit(surf, surf.get_rect(topright=(760, INFO_Y)))
         return METRICS_AREA
+
+    def _backup_text(self):
+        """(texte, en_échec) de la dernière sauvegarde, ou None si désactivée."""
+        backup = getattr(self.link, "backup", None)
+        if backup is None:
+            return None
+        st = backup.status()
+        if st["ok"] is False:
+            return "sauvegarde en échec", True
+        last = st["last"]
+        if not last:
+            return "sauvegarde : aucune", False
+        if last == time.strftime("%Y-%m-%d") and st["ts"]:
+            return f"sauvegarde : auj. {time.strftime('%H:%M', time.localtime(st['ts']))}", False
+        return f"sauvegarde : {last[8:10]}/{last[5:7]}", False
 
     def _draw_chart(self, surface, hist: list, online: bool) -> pygame.Rect:
         """Courbes CPU (orange, aire remplie) et RAM (bleu ciel, trait seul) en %."""

@@ -92,8 +92,8 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
 
 ### Serveur (`server`, module **Pi-only** : pas de Source — SSH **depuis le Pi**, marche PC éteint)
 Écran code-drawn (jauges CPU/RAM/disque + **courbes CPU/RAM** `history()` en mémoire, `[server] history_minutes` + Démarrer/Arrêter/Redémarrer d'un service systemd ; accès **onglet accueil + cycle**).
-`server_link.py` = paramiko persistant, poll d'**une** cmd SSH `clé=valeur` (`[server] poll_seconds`), **CPU% = delta `/proc/stat`** côté Pi.
-Contrôle = `sudo systemctl` (**NOPASSWD** côté serveur). Config `[server]` + `[[server.services]]` ; IP = **`SERVER_HOST`** (.env, prioritaire sur `host`).
+`server_link.py` = paramiko persistant, poll d'**une** cmd SSH `clé=valeur` (`[server] poll_seconds`), **CPU% = delta `/proc/stat`** côté Pi. Contrôle = `sudo systemctl` (**NOPASSWD** côté serveur). Config `[server]` + `[[server.services]]` ; IP = **`SERVER_HOST`** (.env, prioritaire sur `host`).
+**Sauvegarde** (`backup.py`, `[server.backup]`) : 1×/jour, copie SQLite cohérente de `matches.db`+`weather.db` → SFTP `~/pi-display-backups/<base>-AAAA-MM-JJ.db`, rotation `keep_days`.
 Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` TOFU). ⚠️ paramiko dans `requirements.txt` **et** le `pip` de `deploy_pi.py`.
 ### Trains (`transit`, Pi-only) — API **PRIM** IDFM, clé `IDFM_API_KEY` (.env), en-tête `apikey`
 `transit_feed.py` : `stop-monitoring` (ZdA `[transit] stop_area`, Chaville RD = 43241) /60 s + `general-message` par ligne /5 min, SIRI Lite.
