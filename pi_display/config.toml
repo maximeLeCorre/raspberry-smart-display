@@ -101,6 +101,16 @@ disk_path = "/"           # partition suivie pour la jauge disque
 poll_seconds = 5          # fréquence du relevé des métriques
 history_minutes = 10      # fenêtre des courbes CPU/RAM (en mémoire, 1 point par relevé)
 
+# Sauvegarde quotidienne des bases du Pi (historique LoL matches.db + weather.db)
+# sur ce serveur, par SFTP : copie cohérente, une fois par jour à partir de `hour`
+# (rattrapée au démarrage si le Pi était éteint). Fichiers <dir>/matches-AAAA-MM-JJ.db,
+# `dir` relatif au home de `user` ; seules les `keep_days` plus récentes sont gardées.
+[server.backup]
+enabled = true
+hour = 4
+dir = "pi-display-backups"
+keep_days = 14
+
 # Services pilotables (start/stop/restart). Un seul pour l'instant (Minecraft).
 # use_sudo=true => le serveur doit autoriser `sudo systemctl ...` sans mot de
 # passe pour l'utilisateur SSH (règle sudoers NOPASSWD limitée à systemctl).

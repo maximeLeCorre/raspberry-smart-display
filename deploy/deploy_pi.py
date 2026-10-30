@@ -169,6 +169,10 @@ else
   IFS= read -r SUDO_PASS || true
   sudo_() { echo "$SUDO_PASS" | sudo -S -p "" "$@"; }
 fi
+# Secrets (clés privées SSH/TLS, .env) : lisibles par le seul utilisateur du
+# service. L'archive les extrait en 0644, et `ssh` refuse une clé aussi ouverte.
+chmod 700 "$PI_DIR/certs" 2>/dev/null || true
+chmod 600 "$PI_DIR/certs/"* "$PI_DIR/.env" 2>/dev/null || true
 DEPS_HASH_FILE="$PI_DIR/.deps_hash"
 INSTALL="__INSTALL__"
 if [ "$(cat "$DEPS_HASH_FILE" 2>/dev/null)" != "__DEPS_HASH__" ]; then INSTALL=1; fi

@@ -69,6 +69,7 @@ class ServerLink:
         self._client = None
         self._prev_cpu: tuple[int, int] | None = None   # (total, idle) du dernier poll
         self._snapshot: dict = {"online": False, "error": "", "services": {}}
+        self.backup = None                       # ServerBackup (cf. get_link)
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
     def start(self) -> None:
@@ -161,6 +162,26 @@ class ServerLink:
             except Exception as exc:
                 self._drop(f"erreur SSH : {exc}")
                 return None
+
+    def upload(self, local: Path, remote: str, timeout: float = 60.0) -> str:
+        """Envoie un fichier en SFTP (via `.part` puis renommage atomique).
+        Renvoie "" si OK, sinon le message d'erreur (le lien n'est pas coupé :
+        une erreur de fichier ne rend pas le serveur « hors ligne »)."""
+        with self._lock:
+            client = self._ensure_client()
+            if client is None:
+                return "serveur injoignable"
+            try:
+                sftp = client.open_sftp()
+                try:
+                    sftp.get_channel().settimeout(timeout)
+                    sftp.put(str(local), remote + ".part")
+                    sftp.posix_rename(remote + ".part", remote)
+                finally:
+                    sftp.close()
+                return ""
+            except Exception as exc:
+                return str(exc) or exc.__class__.__name__
 
     # ------------------------------------------------------------- sondage
     def _loop(self) -> None:
@@ -283,5 +304,11 @@ def get_link(app):
             cfg["host"] = host
             link = ServerLink(cfg)
             link.start()
+            # Sauvegarde quotidienne des bases du Pi sur ce serveur ([server.backup]).
+            backup_cfg = cfg.get("backup", {})
+            if backup_cfg.get("enabled", True):
+                from modules.server.backup import ServerBackup, default_files
+                link.backup = ServerBackup(link, backup_cfg, default_files())
+                link.backup.start()
         app._server_link = link
     return app._server_link
