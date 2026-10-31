@@ -28,6 +28,11 @@ CHAMPION_SUMMARY_URL = (
     "https://raw.communitydragon.org/latest/plugins/"
     "rcp-be-lol-game-data/global/default/v1/champion-summary.json"
 )
+# Objets (id -> prix total) : estimation de l'or des joueurs en direct.
+ITEMS_URL = (
+    "https://raw.communitydragon.org/latest/plugins/"
+    "rcp-be-lol-game-data/global/default/v1/items.json"
+)
 # Icône carrée par championId (Community Dragon) et splash par alias (Data Dragon).
 ICON_CDN_URL = (
     "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/"
@@ -118,6 +123,38 @@ class Champions:
         if self._due():
             self._load()
         return (self._alias or {}).get(champion_id or 0, "")
+
+
+class ItemPrices:
+    """Prix TOTAL des objets (id -> `priceTotal`, Community Dragon), chargé une
+    fois (~700 Ko) depuis un worker. ⚠️ Le `price` du Live Client n'est que le
+    coût de la dernière étape de fabrication (Lame du roi déchu : 725 au lieu
+    de 3200) : inutilisable pour estimer l'or investi."""
+
+    def __init__(self):
+        self._prices: dict[int, int] = {}
+        self._retry_at = 0.0     # échec réseau -> nouvel essai après 60 s
+
+    def ready(self) -> bool:
+        return bool(self._prices)
+
+    def load(self) -> bool:
+        if self._prices or time.monotonic() < self._retry_at:
+            return self.ready()
+        self._retry_at = time.monotonic() + 60
+        try:
+            data = json.loads(_http_get(ITEMS_URL, timeout=10) or b"[]")
+        except ValueError:
+            data = []
+        self._prices = {i["id"]: int(i.get("priceTotal") or 0)
+                        for i in data if isinstance(i, dict) and isinstance(i.get("id"), int)}
+        return self.ready()
+
+    def value(self, item_ids) -> int | None:
+        """Or investi dans ces objets ; None tant que la table n'est pas chargée."""
+        if not self._prices:
+            return None
+        return sum(self._prices.get(int(i), 0) for i in item_ids or [])
 
 
 class RiotWeb:

@@ -30,7 +30,7 @@ class FakeLcu:
     def champion_name(self, cid):
         return f"Champ{cid}"
 
-    def get_json(self, path):
+    def get_json(self, path, **_kw):
         if path.startswith("/lol-match-history/v1/products"):
             return {"games": {"games": [{"gameId": g} for g in self.order]}}
         if path.startswith("/lol-match-history/v1/games/"):

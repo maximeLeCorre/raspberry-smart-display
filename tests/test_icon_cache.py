@@ -26,7 +26,7 @@ def test_icone_servie_depuis_le_disque_au_meme_patch(tmp_path, monkeypatch):
 
 def test_icone_reprise_au_patch_suivant(tmp_path, monkeypatch):
     patch = {"v": "16.21"}
-    downloads = setup(monkeypatch, patch)
+    setup(monkeypatch, patch)
     cache = IconCache(tmp_path / "i.db")
     riot_web.icon_bytes(21, cache)
     patch["v"] = "16.22"

@@ -138,6 +138,11 @@ def msg_store_player_games(riot_id: str, games: list, done: bool = True) -> dict
     return {"type": "store_player_games", "riotId": riot_id, "games": games, "done": done}
 
 
+def msg_lcu_timeline(game_id, payload: dict | None) -> dict:
+    """Courbes (1 point/minute) d'une partie terminée, récupérées à la demande."""
+    return {"type": "lcu_timeline", "gameId": game_id, "payload": payload}
+
+
 def msg_lcu_detail(game_id, payload: dict | None) -> dict:
     """Bilan complet (10 joueurs) d'une partie, récupéré à la demande."""
     return {"type": "lcu_detail", "gameId": game_id, "payload": payload}

@@ -152,6 +152,57 @@ def build_lcu_detail(lcu: LcuClient, game_id) -> dict | None:
     return _lcu_detail_from_game(lcu, game)
 
 
+def build_lcu_timeline(lcu: LcuClient, game_id) -> dict | None:
+    """Courbes d'une partie terminée (LCU, 1 point par minute ; marche aussi en
+    ARAM Chaos/custom, absentes de `match-v5`). Même format que le relevé en
+    direct du Pi : `players` (ordre participantId) + `frames`
+    [{t (s), gold, cs, level, kills}] aux listes alignées sur `players`.
+    Or = total gagné **exact** ; kills = cumul des CHAMPION_KILL jusqu'à `t`."""
+    if not game_id:
+        return None
+    game = lcu.get_json(f"/lol-match-history/v1/games/{game_id}")
+    timeline = lcu.get_json(f"/lol-match-history/v1/game-timelines/{game_id}", timeout=8)
+    if not game or not timeline or not timeline.get("frames"):
+        return None
+    my_pid, _ident = _lcu_my_pid(lcu, game)
+    ident_by_pid = {i.get("participantId"): (i.get("player", {}) or {})
+                    for i in game.get("participantIdentities", [])}
+    parts = sorted(game.get("participants", []), key=lambda p: p.get("participantId", 0))
+    pids = [p.get("participantId") for p in parts]
+    players = []
+    for p in parts:
+        player = ident_by_pid.get(p.get("participantId"), {})
+        name = player.get("gameName") or player.get("summonerName") or ""
+        tag = player.get("tagLine") or ""
+        cid = p.get("championId", 0) or 0
+        players.append({"name": name, "riotId": f"{name}#{tag}" if (name and tag) else "",
+                        "championId": cid, "champion": lcu.champion_name(cid),
+                        "team": p.get("teamId", 0) or 0,
+                        "isSelf": p.get("participantId") == my_pid})
+
+    index = {pid: i for i, pid in enumerate(pids)}
+    kill_events = sorted((e.get("timestamp") or 0, index[e.get("killerId")])
+                         for fr in timeline["frames"] for e in fr.get("events") or []
+                         if e.get("type") == "CHAMPION_KILL" and e.get("killerId") in index)
+    kills, k = [0] * len(pids), 0
+    frames = []
+    for fr in timeline["frames"]:
+        ts = fr.get("timestamp") or 0
+        while k < len(kill_events) and kill_events[k][0] <= ts:
+            kills[kill_events[k][1]] += 1
+            k += 1
+        pf = [(fr.get("participantFrames") or {}).get(str(pid)) or {} for pid in pids]
+        frames.append({
+            "t": round(ts / 1000),
+            "gold": [f.get("totalGold", 0) or 0 for f in pf],
+            "cs": [(f.get("minionsKilled", 0) or 0) + (f.get("jungleMinionsKilled", 0) or 0)
+                   for f in pf],
+            "level": [f.get("level", 0) or 0 for f in pf],
+            "kills": list(kills),
+        })
+    return {"players": players, "frames": frames, "estimated": False}
+
+
 def _lcu_full_record(lcu: LcuClient, game_id) -> dict | None:
     """Enregistrement COMPLET (résumé + bilan 10 joueurs) pour le store Pi.
 

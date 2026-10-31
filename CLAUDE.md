@@ -12,8 +12,7 @@ l'activité League of Legends du PC Windows. Tout se teste aussi **sur le PC** (
   trains, RSS, SSH serveur — clés dans le **.env du Pi**. Appels réseau hors boucle de rendu : `App.async_call(fn, cb)`
   (worker → résultat livré au thread principal par `_drain_io`) ou thread de fond + `snapshot()`.
 - **`pc_agent/`** (Windows) = **purement local, SANS clé**. Lit les API **locales** Riot
-  (LCU = phase/sélection/historique ; Live Client Data = partie en cours) et pousse
-  écran + données au Pi.
+  (LCU = phase/sélection/historique ; Live Client Data = partie en cours) et pousse écran + données au Pi.
 - **Historique** : stocké **sur le Pi en SQLite** (`store.py`), consultable **PC éteint**, alimenté par la **LCU** via l'agent (§ History).
 
 ### Modularité
@@ -47,11 +46,11 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
 - **Sécurité** (2 couches activables) : TLS `wss://` (cert auto-signé du Pi épinglé par
   l'agent, `check_hostname=False`) et/ou **jeton** `DISPLAY_AUTH_TOKEN` (.env racine, 1er
   message `auth` de l'agent). `tls=false`/jeton vide = clair/ouvert (test local).
-- **Pi → agent** : `hello{modules}`, `request_lcu_sync{since}`, `request_player_sync{riotId,known}`, `request_lcu_detail{gameId}`,
+- **Pi → agent** : `hello{modules}`, `request_lcu_sync{since}`, `request_player_sync{riotId,known}`, `request_lcu_detail{gameId}`, `request_lcu_timeline{gameId}`,
   `lcu_action{action…}` (accepter un ready-check ; ou `play{queueId,invite}` = bouton « Jouer », § Bouton Jouer).
 - **agent → Pi** : `auth{token}`, `set_screen{screen}`, `data{screen,payload}`
   (queue/champselect/lol ; joueur = `riotId` Nom#TAG ; `default`/`playStatus` = étape du bouton
-  Jouer), `store_matches{games,done}`, `store_player_games{riotId,games,done}` (ami), `lcu_detail{gameId,payload}`.
+  Jouer), `store_matches{games,done}`, `store_player_games{riotId,games,done}` (ami), `lcu_detail{gameId,payload}`, `lcu_timeline{gameId,payload}`.
 - Interne (serveur Pi) : `_connected`/`_disconnected` (**seulement si le client COURANT part** : après veille,
   l'ancien lien tombe après la reconnexion). Déconnexion → `default`. Heartbeat agent (`set_screen` répété) = no-op.
 - NB : dossiers/icônes/splash ne sont **pas** des messages réseau — le Pi les fait lui-même
@@ -66,6 +65,9 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
   ~50 j réels) ; `pi_health.py` = /proc local, seuils `[pi_health]` (CPU soutenu). Tout marche PC éteint.
 - **league/** : `queue` (ready-check, **bouton Accepter** → `lcu_action`), `champselect` (clic → dossier + splash), `lol`, `postgame`, `history`.
 - `LolScreen` : **timers d'objectifs** (Faille only) + **dossier adverse au clic** (`riotId`) ; compteurs extrapolés (agent ~1/s).
+- **`curves`** (bouton COURBES de `lol`/`postgame`) : or/CS/niveau/kills, vues Équipes/Écart/Joueurs. Direct = relevé mémoire /10 s,
+  or **estimé** (`priceTotal` des objets ; ⚠️ `price` Live = dernière étape). Après : timeline **LCU** (1 pt/min, or exact) → table
+  `timelines`, demandée **une à la fois** ; ⚠️ `match-v5` n'a **pas** l'ARAM Chaos (403).
 
 ### PostGame (`postgame`, code-drawn)
 Barres horizontales des 10 joueurs ; onglets = métrique (`dmg/taken/gold/cs/vision/heal`),
@@ -115,9 +117,8 @@ tuile Trains **remplace Actus** (liste via le bandeau) ; à droite de l'horloge 
 Chaque tick (`update_interval` 1–2 s) : 1ère `poll()` non-None gagne → `set_screen` (+ `data`).
 `LeagueSource` mappe `gameflow_phase` → `queue`/`champselect`/`lol`/`postgame` (payload None).
 `handle_request` répond au Pi : `request_lcu_sync` (synchro en **thread**, `store_matches` par
-lots), `request_lcu_detail`, `lcu_action`. `summarize_full` (partie) porte `game_mode`/
-`objectives`/`riotId`. **Agent sans clé ni `RiotWeb`.** Simu (`simulator.py`) = données locales
-fictives ; l'enrichissement/historique dépendent du Pi (clé/compte réels).
+lots), `request_lcu_detail`, `request_lcu_timeline` (courbes), `lcu_action`. `summarize_full` (partie) porte `game_mode`/
+`objectives`/`riotId`. **Agent sans clé ni `RiotWeb`.** Simu (`simulator.py`) = données locales fictives ; l'enrichissement/historique dépendent du Pi (clé/compte réels).
 
 ### Bouton « Jouer une ARAM Chaos » (défaut) → action `play`
 `LeagueSource._play` (thread) : lance le client si fermé, crée le lobby (`[lol] lobby_queue`,
@@ -131,8 +132,7 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
 ## Config & secrets
 - `pi_display/config.toml` : réseau, FPS, GPIO, `[rss]`, `[modules]`, **`[riot] platform/regional`**,
   **`[lol] summoner`/`friends`/`lobby_queue`/`lobby_invite`** (bouton Jouer).
-- `pc_agent/config.toml` : IP/port du Pi, `update_interval`, process LoL, `[lol] launch_exe`/
-  `launch_args` (Riot Client, pour le bouton Jouer). **Pas de clé.**
+- `pc_agent/config.toml` : IP/port du Pi, `update_interval`, process LoL, `[lol] launch_exe`/`launch_args` (Riot Client, pour le bouton Jouer). **Pas de clé.**
 - **`.env`** (racine, **ignoré**, modèle `.env.example`) : `RIOT_API_KEY`, `DISPLAY_AUTH_TOKEN`, `SERVER_HOST`, `IDFM_API_KEY` ;
   ⚠️ c'est le `.env` **du Pi** qui compte (Pi autonome) : `deploy_pi.py` y copie ces 4 clés.
 
