@@ -9,6 +9,9 @@ Table `participations` : une ligne par (partie, joueur) tirée des bilans 10
 joueurs — de NOS parties et de celles d'un ami suivi (`[lol] compare`). Elle
 permet de comparer « moi seul », « l'ami seul » et « nous deux, même équipe ».
 
+Table `timelines` : courbes d'une partie (1 point/minute : or total exact, CS,
+niveau, kills des 10 joueurs), tirées de la LCU après la partie (~6 Ko).
+
 Thread-safe (un verrou) car les écritures arrivent depuis la boucle réseau et les
 lectures depuis la boucle de rendu.
 """
@@ -63,6 +66,10 @@ CREATE TABLE IF NOT EXISTS participations (
     PRIMARY KEY (game_id, riot_key)
 );
 CREATE INDEX IF NOT EXISTS idx_part_key ON participations(riot_key);
+CREATE TABLE IF NOT EXISTS timelines (
+    game_id       TEXT PRIMARY KEY,
+    timeline_json TEXT
+);
 """
 
 # Agrégats d'un groupe de participations (alias `p`).
@@ -316,6 +323,32 @@ class Store:
                         "ORDER BY COUNT(*) DESC, SUM(win) * 1.0 / COUNT(*) DESC LIMIT 3",
                         args).fetchall()]
         return out
+
+    def set_timeline(self, game_id, timeline: dict) -> None:
+        with self._lock:
+            self._conn.execute("INSERT OR REPLACE INTO timelines VALUES (?, ?)",
+                               (str(game_id), json.dumps(timeline, ensure_ascii=False)))
+            self._conn.commit()
+
+    def timeline(self, game_id) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT timeline_json FROM timelines WHERE game_id = ?",
+                                     (str(game_id),)).fetchone()
+        try:
+            return json.loads(row[0]) if row and row[0] else None
+        except ValueError:
+            return None
+
+    def without_timeline(self, game_ids) -> list[str]:
+        """Parmi ces parties (stockées), celles dont on n'a pas encore les courbes."""
+        ids = [str(g) for g in game_ids if g]
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))
+        with self._lock:
+            have = {r[0] for r in self._conn.execute(
+                f"SELECT game_id FROM timelines WHERE game_id IN ({marks})", ids)}
+        return [g for g in ids if g not in have]
 
     def detail(self, game_id) -> dict | None:
         with self._lock:

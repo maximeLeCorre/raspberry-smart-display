@@ -1,5 +1,10 @@
 """Logique du module League (côté Pi) : API Web Riot + CDN, store des parties,
-synchro LCU via l'agent, bilan de fin de partie, bouton « Jouer ».
+synchro LCU via l'agent, bilan de fin de partie, bouton « Jouer », courbes.
+
+Courbes (écran `curves`) : en direct, relevé en mémoire toutes les `LIVE_STEP` s
+de jeu (or ESTIMÉ = valeur des objets : le Live Client ne donne pas l'or des
+autres) ; après la partie, la timeline LCU (1 point/min, or total exact) est
+demandée à l'agent et stockée (`timelines`). Le relevé direct n'est jamais stocké.
 
 Sorti de `app.py` (qui reste agnostique du jeu) : l'App appelle les crochets
 de `Module` ; les écrans League passent par `app.modules["league"]`.
@@ -14,19 +19,32 @@ from config import load_riot_key
 from icon_cache import IconCache
 from modules.base import Module
 from modules.league.champ_select_screen import ChampSelectScreen
+from modules.league.curves_screen import CurvesScreen
 from modules.league.history_screen import MatchHistoryScreen
 from modules.league.lol_screen import LolScreen
 from modules.league.postgame_screen import PostGameScreen
 from modules.league.queue_screen import QueueScreen
 from modules.league.stats_screen import StatsScreen
-from riot_web import (PATCH_TTL, Champions, RiotWeb, build_player_info, current_patch,
-                      icon_bytes, normalize_riot_id, splash_bytes)
+from riot_web import (PATCH_TTL, Champions, ItemPrices, RiotWeb, build_player_info,
+                      current_patch, icon_bytes, normalize_riot_id, splash_bytes)
 from store import Store
+
+LIVE_STEP = 10                         # s de jeu entre deux points en direct
+TEAM_IDS = {"ORDER": 100, "CHAOS": 200}
+TIMELINE_BACKFILL = 20                 # parties récentes dont on veut les courbes
+
+
+def _new_series() -> dict:
+    return {"players": [], "frames": [], "estimated": True}
+
+
+def _live_key(player: dict) -> str:
+    return player.get("riotId") or player.get("name") or ""
 
 
 class LeagueModule(Module):
     name = "league"
-    screens = [QueueScreen, ChampSelectScreen, LolScreen, PostGameScreen,
+    screens = [QueueScreen, ChampSelectScreen, LolScreen, CurvesScreen, PostGameScreen,
                MatchHistoryScreen, StatsScreen]
 
     def __init__(self, app):
@@ -69,6 +87,16 @@ class LeagueModule(Module):
         # d'indexation. `_last_sync` = time.monotonic() du dernier scan.
         self._sync_interval = max(0, int(lol_cfg.get("sync_minutes", 3) or 0)) * 60
         self._last_sync = 0.0
+        # Courbes en direct (mémoire) + prix des objets pour estimer l'or.
+        self.items = ItemPrices()
+        self._items_loading = False
+        self.live = _new_series()
+        # Partie affichée par le bilan (courbes « de cette partie »).
+        self.postgame_game_id = None
+        # Timelines demandées à l'agent UNE à la fois (sans bloquer son récepteur).
+        self._timeline_queue: list[str] = []
+        self._timeline_pending: str | None = None
+        self._timeline_failed: set[str] = set()   # indisponibles (pas de re-demande)
         self._repair_champion_names()
 
     def _current(self) -> str | None:
@@ -81,6 +109,7 @@ class LeagueModule(Module):
 
     def on_disconnected(self) -> None:
         self.postgame_return = None
+        self._timeline_queue, self._timeline_pending = [], None
 
     def tick(self) -> None:
         self._maybe_sync()
@@ -91,6 +120,8 @@ class LeagueModule(Module):
     def on_agent_screen(self, screen: str, shown: bool) -> None:
         # Un écran poussé par l'agent (vraie partie) sort du mode « revue ».
         self.postgame_return = None
+        if screen == "lol":                   # nouvelle partie : courbes à zéro
+            self.live = _new_series()
         # Fin de partie : on tente une synchro immédiate (+ re-synchros
         # différées : la LCU met parfois quelques secondes à indexer).
         # Le scan périodique reste le filet. `_postgame_baseline` =
@@ -129,6 +160,19 @@ class LeagueModule(Module):
                 self._repair_champion_names()
             if msg.get("done") and self._current() == "stats":
                 screens["stats"].reload()
+
+        elif msg_type == "lcu_timeline":
+            gid = str(msg.get("gameId") or "")
+            if msg.get("payload"):
+                self.store.set_timeline(gid, msg["payload"])
+            elif gid:
+                self._timeline_failed.add(gid)
+            if self._timeline_pending == gid:
+                self._timeline_pending = None
+            curves = screens.get("curves")
+            if curves is not None and self._current() == "curves":
+                curves.refresh()
+            self._next_timeline()
 
         elif msg_type == "lcu_detail":
             # Bilan complet (10 joueurs) demandé au clic : on le met en cache
@@ -247,9 +291,114 @@ class LeagueModule(Module):
                 self.app.screens[name].reload()
         self.app.async_call(lambda: self.store.fill_champion_names(self.champions.name), done)
 
+    # ---------------------------------------------------------------- courbes
+    def note_live(self, payload: dict) -> None:
+        """Partie en cours (agent, ~1/s) : un point toutes les `LIVE_STEP` s de jeu.
+        Or = valeur totale des objets (estimée) ; CS, niveau, kills exacts."""
+        players = (payload or {}).get("players") or []
+        if not players:
+            return
+        t = int(payload.get("game_time") or 0)
+        frames = self.live["frames"]
+        if frames and t < frames[-1]["t"]:     # autre partie (Pi redémarré en jeu…)
+            self.live = _new_series()
+            frames = self.live["frames"]
+        if not self.live["players"]:
+            self.live["players"] = [{
+                "name": p.get("name", ""), "riotId": p.get("riotId", ""),
+                "championId": p.get("championId", 0), "champion": p.get("champion", ""),
+                "team": TEAM_IDS.get(p.get("team"), 0), "isSelf": bool(p.get("isSelf")),
+            } for p in players]
+        if not self.items.ready():
+            self._load_items()
+        if frames and t - frames[-1]["t"] < LIVE_STEP:
+            return
+        by_key = {_live_key(p): p for p in players}
+        cols = [by_key.get(_live_key(p)) or {} for p in self.live["players"]]
+        frames.append({
+            "t": t,
+            "gold": [self.items.value(p.get("items")) if p else None for p in cols],
+            "cs": [p.get("cs", 0) for p in cols],
+            "level": [p.get("level", 0) for p in cols],
+            "kills": [p.get("k", 0) for p in cols],
+        })
+
+    def _load_items(self) -> None:
+        if self._items_loading:
+            return
+        self._items_loading = True
+
+        def done(_):
+            self._items_loading = False
+        self.app.async_call(self.items.load, done)
+
+    def curves_series(self, game_id) -> tuple[dict | None, str]:
+        """Courbes d'une partie terminée : (série, état). Timeline stockée si
+        connue ; sinon, juste après la partie, le relevé en direct (estimé)."""
+        timeline = self.store.timeline(game_id) if game_id else None
+        if timeline:
+            return timeline, "ok"
+        if self._postgame_latest and self.live["frames"]:
+            return self.live, "ok"
+        if game_id and str(game_id) in self._timeline_failed:
+            return None, "unavailable"
+        if game_id and self.app.agent_connected:
+            return None, "loading"
+        return None, "offline"
+
+    def _queue_timelines(self, game_ids) -> None:
+        """Demande à l'agent les courbes manquantes de ces parties (une à la fois)."""
+        missing = [g for g in self.store.without_timeline(game_ids)
+                   if g not in self._timeline_failed and g not in self._timeline_queue
+                   and g != self._timeline_pending]
+        self._timeline_queue.extend(missing)
+        self._next_timeline()
+
+    def _next_timeline(self) -> None:
+        if self._timeline_pending or not self._timeline_queue or not self.app.agent_connected:
+            return
+        self._timeline_pending = self._timeline_queue.pop(0)
+        self.app.server.send({"type": "request_lcu_timeline", "gameId": self._timeline_pending})
+
+    def open_curves(self) -> None:
+        """Depuis l'écran de partie : courbes en direct (sans verrou : l'agent
+        reprend la main en fin de partie, comme pour le tableau)."""
+        curves = self.app.screens.get("curves")
+        if curves is None:
+            return
+        curves.show_live()
+        self.app.set_screen("curves")
+
+    def open_curves_review(self) -> None:
+        """Depuis le bilan : courbes de cette partie (RETOUR -> bilan)."""
+        curves = self.app.screens.get("curves")
+        if curves is None:
+            return
+        gid = self.postgame_game_id
+        key = str(gid or "")
+        if (key and not self.store.timeline(key) and key not in self._timeline_queue
+                and key != self._timeline_pending and key not in self._timeline_failed):
+            self._timeline_queue.insert(0, key)       # priorité : on la regarde
+            self._next_timeline()
+        curves.show_game(gid)
+        self.app.manual_screen = "curves"
+        self.app.set_screen("curves")
+
+    def close_curves(self, live: bool) -> None:
+        """RETOUR/TABLEAU des courbes : partie en cours -> écran voulu par
+        l'agent ; revue -> bilan."""
+        if live:
+            target = self.app.network_screen
+            self.app.set_screen(target if target in self.app.screens else "default")
+        else:
+            self.app.manual_screen = "postgame"
+            self.app.set_screen("postgame")
+
     def _on_sync_done(self) -> None:
-        """Fin d'une synchro : rafraîchit l'écran courant si besoin."""
+        """Fin d'une synchro : rafraîchit l'écran courant si besoin, et demande
+        les courbes des parties récentes qui ne les ont pas encore."""
         self._repair_champion_names()
+        self._queue_timelines([g["gameId"] for g in self.store.query(limit=TIMELINE_BACKFILL)])
         name = self._current()
         if name == "history":
             self.app.screens["history"].reload()
@@ -325,6 +474,7 @@ class LeagueModule(Module):
     def _load_detail(self, game_id) -> None:
         """Affiche le bilan : depuis le store (consultable PC éteint) si connu,
         sinon le demande à l'agent/LCU, qui le renverra et on le met en cache."""
+        self.postgame_game_id = game_id
         detail = self.store.detail(game_id) if game_id else None
         if detail:
             self._show_postgame(detail)

@@ -118,6 +118,9 @@ def summarize_full(data: dict, id_resolver=None) -> dict:
             "k": kills, "d": scores.get("deaths", 0), "a": scores.get("assists", 0),
             "cs": int(scores.get("creepScore", 0) or 0),
             "level": p.get("level", 0),
+            # Objets (id répété selon la quantité) : le Pi en estime l'or investi.
+            "items": [int(i.get("itemID", 0) or 0) for i in p.get("items") or []
+                      for _ in range(max(1, int(i.get("count", 1) or 1)))],
             "isDead": bool(p.get("isDead", False)),
             "respawn": round(p.get("respawnTimer", 0) or 0),
             "isSelf": name == me_name,

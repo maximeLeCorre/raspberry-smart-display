@@ -19,10 +19,11 @@ import psutil
 from champ_select import build_champ_select_payload
 from lcu import LcuClient, find_lcu_credentials
 from riot_client import RiotClient
-from phases import (build_lcu_detail, build_queue_payload, find_friend_puuid,
-                    iter_lcu_sync, iter_player_sync)
+from phases import (build_lcu_detail, build_lcu_timeline, build_queue_payload,
+                    find_friend_puuid, iter_lcu_sync, iter_player_sync)
 from riot_api import get_all_game_data, summarize_full
-from sender import msg_data, msg_lcu_detail, msg_store_matches, msg_store_player_games
+from sender import (msg_data, msg_lcu_detail, msg_lcu_timeline, msg_store_matches,
+                    msg_store_player_games)
 from sources.base import Source
 
 # Actions LCU « simples » (un POST sans corps).
@@ -120,6 +121,10 @@ class LeagueSource(Source):
         if msg_type == "request_lcu_detail":
             gid = message.get("gameId")
             sender.send_safe(msg_lcu_detail(gid, build_lcu_detail(self.lcu, gid)))
+            return True
+        if msg_type == "request_lcu_timeline":
+            gid = message.get("gameId")
+            sender.send_safe(msg_lcu_timeline(gid, build_lcu_timeline(self.lcu, gid)))
             return True
         if msg_type == "lcu_action":
             action = message.get("action")
