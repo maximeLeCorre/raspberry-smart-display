@@ -38,6 +38,16 @@ latitude = 48.8086
 longitude = 2.1886
 refresh_minutes = 15
 
+[backlight]
+# Veille douce de l'écran (rétroéclairage DSI) : PC absent (éteint ou en veille)
+# et aucun appui depuis dim_after_minutes -> luminosité baissée. Un appui la
+# rétablit (sans cliquer) ; PC connecté -> toujours normale. Valeurs 0..255
+# (à 0 l'écran reste un peu visible sur ce clone Waveshare).
+enabled = true
+dim_after_minutes = 5
+dim_level = 30
+normal_level = 255
+
 [pi_health]
 # Alerte sur l'accueil (ligne d'état) quand le Pi LUI-MÊME dépasse un seuil.
 # Relevé local (/proc, /sys) ; rien ne s'affiche tant que tout va bien.

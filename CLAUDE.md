@@ -1,7 +1,6 @@
 # CLAUDE.md — Guide du projet
 
-Lu au démarrage. **Garde ce fichier ≤ 150 lignes** (coût en tokens) : concis, exact, sans doublon. Dès que tu découvres
-un fait non évident (comportement d'API, décision de design, piège), mets à jour la section concernée. **Jamais de secret ici.**
+Lu au démarrage. **Garde ce fichier ≤ 150 lignes** (coût en tokens) : concis, exact, sans doublon. Dès que tu découvres un fait non évident (comportement d'API, décision de design, piège), mets à jour la section concernée. **Jamais de secret ici.**
 
 ## But
 Écran d'info tactile (Raspberry Pi 3 B+ + écran 5" 800×480) : accueil (heure, météo, trains, actus) + écrans selon
@@ -63,6 +62,7 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
   `news` + `rss_feed` (flux lu par le Pi ; article **complet** = page web parsée par `article_text.py` `c-chapo`/`c-body`, paginée ▲/▼), `weather` (courbe du jour + pluie, ◀/▶ + menu des jours ; clic sur la météo).
   `weather.py` = Open-Meteo sans clé (`[weather]`) → série **horaire** upsertée dans **`weather.db`** (base vide → rattrapage,
   ~50 j réels) ; `pi_health.py` = /proc local, seuils `[pi_health]` (CPU soutenu). Tout marche PC éteint.
+  **Veille douce** (`backlight.py`, `[backlight]`) : PC absent + 5 min sans appui → luminosité baissée (fondu) ; appui = réveil **non transmis** ; écriture sysfs via règle udev (deploy).
 - **league/** : `queue` (ready-check, **bouton Accepter** → `lcu_action`), `champselect` (clic → dossier + splash), `lol`, `postgame`, `history`.
 - `LolScreen` : **timers d'objectifs** (Faille only) + **dossier adverse au clic** (`riotId`) ; compteurs extrapolés (agent ~1/s).
 - **`counters`** (**défaut en jeu** via `route_screen` ; TABLEAU → `lol`, ÉCARTS ← `lol`/`postgame`) : compteurs ton équipe/adversaires + **écart** écrit (or/kills/CS/niveau moyen) et tendance
