@@ -195,6 +195,34 @@ else
   echo "[pi] Dependances a jour (--full pour forcer)."
 fi
 
+# Wi-Fi (Pi 3 B+, cf. CLAUDE.md) : la box diffuse le SSID en 2,4 + 5 GHz ; le Pi
+# s'accrochait à la 5 GHz (faible), la box le rejetait, l'itinérance de la puce
+# déclenchait le bug cfg80211_roamed de brcmfmac et NetworkManager abandonnait.
+# => 2,4 GHz forcé, itinérance firmware coupée, pas d'économie d'énergie,
+# réessais sans fin, + chien de garde pi-netwatch.
+echo "options brcmfmac roamoff=1" > /tmp/brcmfmac.conf
+if ! cmp -s /tmp/brcmfmac.conf /etc/modprobe.d/brcmfmac.conf; then
+  sudo_ mv /tmp/brcmfmac.conf /etc/modprobe.d/brcmfmac.conf
+  echo "[pi] Wi-Fi : itinerance firmware coupee (effective au prochain reboot du Pi)."
+fi
+rm -f /tmp/brcmfmac.conf
+WIFI_CON="$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | sed -n 's/:wlan0$//p' | head -n 1)"
+if [ -n "$WIFI_CON" ]; then
+  if [ "$(nmcli -g 802-11-wireless.band con show "$WIFI_CON")" != "bg" ]; then
+    sudo_ nmcli con mod "$WIFI_CON" 802-11-wireless.band bg 802-11-wireless.powersave 2 \\
+        connection.autoconnect-retries 0
+    # Reconnexion différée (détachée) : elle coupe ce SSH qui passe par le Wi-Fi.
+    sudo_ systemd-run --on-active=20 --unit=pi-wifi-reconnect nmcli con up "$WIFI_CON" >/dev/null
+    echo "[pi] Wi-Fi : '$WIFI_CON' force en 2,4 GHz (reconnexion dans 20 s)."
+  fi
+fi
+sudo_ mv /tmp/pi-netwatch.sh /usr/local/bin/pi-netwatch
+sudo_ chmod 755 /usr/local/bin/pi-netwatch
+sudo_ mv /tmp/pi-netwatch.service /etc/systemd/system/pi-netwatch.service
+sudo_ systemctl daemon-reload
+sudo_ systemctl enable pi-netwatch >/dev/null 2>&1
+sudo_ systemctl restart pi-netwatch
+
 if [ "__SERVICE__" = "1" ]; then
   echo "[pi] Installation du service systemd..."
   sudo_ mv /tmp/pi-display.service /etc/systemd/system/pi-display.service
@@ -251,6 +279,52 @@ SyslogIdentifier=pi-display
 {sdl}{vt}ExecStart={pi_dir}/.venv/bin/python {pi_dir}/pi_display/main.py{fs}
 Restart=always
 RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+NETWATCH_SCRIPT = r"""#!/usr/bin/env bash
+# Chien de garde Wi-Fi du Pi : ping de la box toutes les 30 s. Après 2 min sans
+# réponse, reconnexion NetworkManager ; si ça ne suffit pas, rechargement du
+# pilote brcmfmac + redémarrage de NetworkManager, puis nouvel essai toutes les
+# 10 min. Journal : journalctl -t pi-netwatch (seulement les changements d'état).
+fails=0; step=0
+while true; do
+  gw="$(ip -4 route show default | awk '{print $3; exit}')"
+  if [ -n "$gw" ] && ping -c 1 -W 3 "$gw" >/dev/null 2>&1; then
+    [ "$fails" -ge 4 ] && echo "reseau revenu apres $((fails * 30)) s ($(nmcli -t -f ACTIVE,SSID,CHAN,SIGNAL dev wifi | grep '^yes'))"
+    fails=0; step=0
+  else
+    fails=$((fails + 1))
+    if [ "$fails" -eq 4 ] || { [ "$fails" -gt 4 ] && [ $(( (fails - 4) % 20 )) -eq 0 ]; }; then
+      step=$((step + 1))
+      con="$(nmcli -t -f NAME,TYPE con show | sed -n 's/:802-11-wireless$//p' | head -n 1)"
+      echo "box injoignable depuis $((fails * 30)) s (passerelle '${gw:-aucune}'), action $step : $(nmcli -t -f DEVICE,STATE dev | grep wlan0)"
+      if [ "$step" -eq 1 ]; then
+        nmcli dev wifi rescan 2>/dev/null; sleep 5
+        nmcli con up "$con" || echo "reconnexion de '$con' echouee"
+      else
+        modprobe -r brcmfmac; sleep 2; modprobe brcmfmac; sleep 5
+        systemctl restart NetworkManager
+        echo "pilote brcmfmac recharge, NetworkManager redemarre"
+      fi
+    fi
+  fi
+  sleep 30
+done
+"""
+
+NETWATCH_UNIT = """[Unit]
+Description=Chien de garde Wi-Fi du Pi Display
+After=NetworkManager.service
+
+[Service]
+ExecStart=/usr/local/bin/pi-netwatch
+SyslogIdentifier=pi-netwatch
+Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
@@ -356,6 +430,8 @@ def main() -> None:
             sftp.put(str(tgz), "/tmp/pi-display-deploy.tgz")
             put_bytes(sftp, remote_setup_script().encode("utf-8"),
                       "/tmp/pi-display-setup.sh")
+            put_bytes(sftp, NETWATCH_SCRIPT.encode("utf-8"), "/tmp/pi-netwatch.sh")
+            put_bytes(sftp, NETWATCH_UNIT.encode("utf-8"), "/tmp/pi-netwatch.service")
             if SETUP_SERVICE:
                 put_bytes(sftp, systemd_unit().encode("utf-8"),
                           "/tmp/pi-display.service")

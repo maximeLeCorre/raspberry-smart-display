@@ -30,8 +30,7 @@ l'activité League of Legends du PC Windows. Tout se teste aussi **sur le PC** (
 ## Commandes (Windows)
 - `python` = stub Store (échoue) → **`py -3.11`** ; venv racine **`.venv`**.
 - Install : `.\.venv\Scripts\python -m pip install -r pi_display\requirements.txt -r pc_agent\requirements.txt`
-- Affichage : `.\.venv\Scripts\python pi_display\main.py --scale 2`
-- Agent réel : `pc_agent\main.py` ; simu : `--simulate --scenario home|champselect|game|aram|queue|postgame|full`
+- Affichage : `.\.venv\Scripts\python pi_display\main.py --scale 2` · Agent réel : `pc_agent\main.py` ; simu : `--simulate --scenario home|champselect|game|aram|queue|postgame|full`
 - ⚠️ En `--simulate`, l'agent vise **`127.0.0.1`** par défaut (pas l'IP Pi de la config) ; `--host` pour changer.
 - Pas de hot-reload → **relancer** après modif. TLS : `tools/gen_cert.py` + `tls=true` des 2 côtés.
 
@@ -91,7 +90,7 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
   ⚠️ La LCU **ne pagine pas** → seulement les **20 récentes** ; l'historique s'accumule au fil du jeu.
 
 ### Serveur (`server`, module **Pi-only** : pas de Source — SSH **depuis le Pi**, marche PC éteint)
-Écran code-drawn (jauges CPU/RAM/disque + **courbes CPU/RAM** `history()` en mémoire, `[server] history_minutes` + Démarrer/Arrêter/Redémarrer d'un service systemd ; accès **onglet accueil + cycle**).
+Écran code-drawn (jauges CPU/RAM/disque + **courbes CPU/RAM** `history()` en mémoire, `[server] history_minutes` + Démarrer/Arrêter/Redémarrer d'un service systemd ; accès **onglet accueil + cycle**). **Joueurs Minecraft** : `minecraft_port` du service → `minecraft_ping.py` (Server List Ping TCP, sans SSH, ≤ 12 pseudos) → `link.players(unit)`.
 `server_link.py` = paramiko persistant, poll d'**une** cmd SSH `clé=valeur` (`[server] poll_seconds`), **CPU% = delta `/proc/stat`** côté Pi. Contrôle = `sudo systemctl` (**NOPASSWD** côté serveur). Config `[server]` + `[[server.services]]` ; IP = **`SERVER_HOST`** (.env, prioritaire sur `host`).
 **Sauvegarde** (`backup.py`, `[server.backup]`) : 1×/jour, copie SQLite cohérente de `matches.db`+`weather.db` → SFTP `~/pi-display-backups/<base>-AAAA-MM-JJ.db`, rotation `keep_days`.
 Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` TOFU). ⚠️ paramiko dans `requirements.txt` **et** le `pip` de `deploy_pi.py`.
@@ -148,3 +147,4 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
   `pi_display/` (hors `_*`/`__pycache__`/**`*.db`**) + `certs/` + `.env` ; service **systemd** `pi-display` (autostart, `kmsdrm`,
   plein écran, lié à **tty1** = DRM master ; libs EGL/GLES Mesa ; jamais exclure les `__init__.py`). Logs : **`journalctl -t
   pi-display -f`** (`-u` = systemd seul : PAM/tty1 met le process en session de login). 1er boot écran noir → rebooter.
+  ⚠️ **Wi-Fi** : en 5 GHz (faible) la box rejetait le Pi → bug `cfg80211_roamed` de brcmfmac → NM abandonnait (Pi hors réseau, écran vivant). deploy force **2,4 GHz**, `roamoff=1`, powersave off, réessais infinis + chien de garde **`pi-netwatch`** (`journalctl -t pi-netwatch`).

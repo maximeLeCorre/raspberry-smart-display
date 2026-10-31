@@ -25,3 +25,42 @@ def test_historique_borne_a_la_fenetre():
     for i in range(50):
         link._apply_metrics(metrics(f"{i} 0 0 {i} 0 0 0"))
     assert len(link.history()) == 60 // 5 + 1
+
+
+def test_ping_minecraft_sur_un_faux_serveur():
+    import json
+    import socket
+    import threading
+
+    from modules.server import minecraft_ping as mp
+
+    status = {"version": {"name": "1.21.1"}, "players": {
+        "max": 20, "online": 3, "sample": [{"name": "bob"}, {"name": "Alice"}]}}
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+
+    def serve():
+        conn, _ = srv.accept()
+        with conn:
+            conn.recv(1024)                  # handshake + demande de statut
+            body = json.dumps(status).encode()
+            payload = mp._varint(0) + mp._varint(len(body)) + body
+            conn.sendall(mp._varint(len(payload)) + payload)
+
+    threading.Thread(target=serve, daemon=True).start()
+    res = mp.ping("127.0.0.1", srv.getsockname()[1], timeout=2)
+    srv.close()
+    assert (res["online"], res["max"], res["names"], res["version"]) == \
+        (3, 20, ["Alice", "bob"], "1.21.1")
+
+
+def test_ligne_des_joueurs():
+    from modules.server.server_screen import players_line
+
+    assert players_line(None) == "joueurs : …"
+    assert players_line({"error": "refused"}).startswith("joueurs : le serveur ne répond pas")
+    assert players_line({"online": 0, "max": 20, "names": []}) == "personne en ligne (0/20)"
+    assert players_line({"online": 3, "max": 20, "names": ["Alice", "bob"]}) == \
+        "3/20 en ligne : Alice, bob +1"
+    assert players_line({"online": 2, "max": 20, "names": []}) == "2/20 en ligne"

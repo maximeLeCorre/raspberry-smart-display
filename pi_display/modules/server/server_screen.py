@@ -55,8 +55,9 @@ CHART = pygame.Rect(40, 190, 720, 106)           # panneau des courbes
 PLOT = pygame.Rect(CHART.x + 40, CHART.y + 30, CHART.w - 92, CHART.h - 38)  # marge droite = étiquettes
 
 SVC_AREA = pygame.Rect(0, 300, 800, 180)         # zone effaçable service+boutons
-SVC_LABEL_Y = 328
-SVC_BADGE = pygame.Rect(520, 312, 240, 34)
+SVC_LABEL_Y = 314
+PLAYERS_Y = 344                                  # joueurs Minecraft connectés
+SVC_BADGE = pygame.Rect(520, 308, 240, 34)
 BTN_W, BTN_H, BTN_Y = 190, 62, 372
 START_BTN = pygame.Rect(40, BTN_Y, BTN_W, BTN_H)
 STOP_BTN = pygame.Rect(305, BTN_Y, BTN_W, BTN_H)
@@ -69,6 +70,28 @@ _VERB = {"start": "démarrage", "stop": "arrêt", "restart": "redémarrage"}
 def _fmt_bytes(n: int) -> str:
     """Octets -> Go (1 décimale)."""
     return f"{n / 1024 ** 3:.1f} Go"
+
+
+def players_line(res: dict | None, font=None, max_w: int = 0) -> str:
+    """Joueurs Minecraft en texte ; les pseudos qui ne tiennent pas deviennent « +N »."""
+    if res is None:
+        return "joueurs : …"
+    if "error" in res:
+        return "joueurs : le serveur ne répond pas (démarrage ?)"
+    count = f"{res['online']}/{res['max']}"
+    if not res["online"]:
+        return f"personne en ligne ({count})"
+    names = list(res["names"])
+    head = f"{count} en ligne"
+    if not names:                       # pseudos masqués (hide-online-players)
+        return head
+    hidden = res["online"] - len(names)
+    while True:
+        text = f"{head} : {', '.join(names)}" + (f" +{hidden}" if hidden > 0 else "")
+        if font is None or not max_w or font.size(text)[0] <= max_w or len(names) == 1:
+            return text
+        names.pop()
+        hidden += 1
 
 
 def _fmt_uptime(sec: int) -> str:
@@ -154,7 +177,7 @@ class ServerScreen(Screen):
 
         # Service : badge d'état + boutons.
         status = self._status(snap)
-        skey = (status, self._pending, online)
+        skey = (status, self._pending, online, self._players_text(status))
         if skey != self._svc_key:
             dirty.append(self._draw_service(surface, status, online))
             self._svc_key = skey
@@ -373,6 +396,10 @@ class ServerScreen(Screen):
         surf = self.font_value.render(text, True, color)
         surface.blit(surf, (SVC_BADGE.x + 28, SVC_BADGE.centery - surf.get_height() // 2))
 
+        players = self._players_text(status)
+        if players:
+            surface.blit(self.font_small.render(players, True, GREY), (LABEL_X, PLAYERS_Y))
+
         # Boutons neutralisés si une action est en cours ou le serveur injoignable.
         active = status == "active"
         ready = online and not self._pending
@@ -407,6 +434,14 @@ class ServerScreen(Screen):
         if self.service is None:
             return ""
         return snap.get("services", {}).get(self.service["unit"], "")
+
+    def _players_text(self, status: str) -> str:
+        """Ligne « 2/20 en ligne : Alice, Bob » ; "" si pas de ping configuré ou
+        service arrêté."""
+        if self.service is None or self.link is None or status != "active"                 or not self.service.get("minecraft_port"):
+            return ""
+        return players_line(self.link.players(self.service["unit"]),
+                            self.font_small, 720)
 
     @staticmethod
     def _status_text(status: str):
