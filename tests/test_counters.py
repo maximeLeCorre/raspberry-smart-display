@@ -1,9 +1,9 @@
-"""Courbes : relevé en direct, timelines LCU (agent -> store, une à la fois),
-navigation tableau <-> courbes <-> bilan, rendu sans erreur."""
+"""Écarts : compteurs en direct, tendance sur 1 min, timelines LCU (agent ->
+store, une à la fois), navigation tableau <-> écarts <-> bilan, rendu."""
 
 from __future__ import annotations
 
-from modules.league.curves_screen import axis_ticks, team_series
+from modules.league.counters_screen import fmt, team_totals, trend
 from phases import build_lcu_timeline
 from test_app_routing import app, net  # noqa: F401  (fixture)
 from test_phases import FakeLcu
@@ -18,19 +18,18 @@ def live(t, kills=0, items=(3153,)):
     return {"game_time": t, "game_mode": "KIWI", "players": players, "scores": {}}
 
 
-def test_releve_en_direct_toutes_les_10_s(app):
+def test_compteurs_a_chaque_message_releve_toutes_les_10_s(app):
     league = app.modules["league"]
     league.items._prices = {3153: 3200, 1037: 875}         # table des prix chargée
     net(app, type="_connected")
     net(app, type="set_screen", screen="lol")
     for t in (0, 4, 10, 15, 21):
         net(app, type="data", screen="lol", payload=live(t, kills=t // 10))
-    frames = league.live["frames"]
-    assert [f["t"] for f in frames] == [0, 10, 21]
-    assert frames[-1]["gold"] == [3200, 875] and frames[-1]["kills"] == [2, 0]
+    assert [f["t"] for f in league.live["frames"]] == [0, 10, 21]
+    cur = league.live["current"]
+    assert cur["t"] == 21 and cur["gold"] == [3200, 875] and cur["kills"] == [2, 0]
+    assert team_totals(league.live, cur, "gold") == (3200, 875)
     assert [p["team"] for p in league.live["players"]] == [100, 200]
-    ally, enemy = team_series(league.live, "gold")
-    assert ally[-1] == (21, 3200) and enemy[-1] == (21, 875)
 
 
 def test_or_inconnu_tant_que_les_prix_ne_sont_pas_charges(app):
@@ -38,16 +37,26 @@ def test_or_inconnu_tant_que_les_prix_ne_sont_pas_charges(app):
     league._items_loading = True                             # pas de réseau en test
     net(app, type="set_screen", screen="lol")
     net(app, type="data", screen="lol", payload=live(0))
-    assert league.live["frames"][0]["gold"] == [None, None]
-    assert team_series(league.live, "gold") == ([], [])
+    assert team_totals(league.live, league.live["current"], "gold") == (None, None)
 
 
-def test_nouvelle_partie_remet_les_courbes_a_zero(app):
+def test_nouvelle_partie_remet_les_ecarts_a_zero(app):
     league = app.modules["league"]
     net(app, type="set_screen", screen="lol")
     net(app, type="data", screen="lol", payload=live(300))
     net(app, type="data", screen="lol", payload=live(5))      # temps qui recule
     assert [f["t"] for f in league.live["frames"]] == [5]
+
+
+def test_tendance_sur_la_derniere_minute():
+    series = {"players": [{"team": 100, "isSelf": True}, {"team": 200}],
+              "frames": [{"t": 0, "gold": [500, 500]}, {"t": 60, "gold": [1500, 1000]},
+                         {"t": 120, "gold": [2500, 1600]}]}
+    assert team_totals(series, series["frames"][-1], "gold") == (2500, 1600)
+    assert trend(series, "gold") == 400                    # écart 500 -> 900
+    assert trend({"players": series["players"], "frames": series["frames"][:1]}, "gold") is None
+    assert fmt("gold", 900, signed=True) == "+900" and fmt("gold", -3500, signed=True) == "-3.5k"
+    assert fmt("level", 0.4, signed=True) == "+0.4"
 
 
 def test_timelines_demandees_une_a_la_fois_puis_stockees(app):
@@ -66,34 +75,30 @@ def test_timelines_demandees_une_a_la_fois_puis_stockees(app):
     asked = [m["gameId"] for m in sent if m["type"] == "request_lcu_timeline"]
     assert asked == ["2", "1"]
     assert league.store.timeline("2") and league.store.without_timeline(["1", "2"]) == ["1"]
-    assert league.curves_series("1") == (None, "unavailable")
+    assert league.game_series("1") == (None, "unavailable")
 
 
-def test_navigation_tableau_courbes_bilan(app):
+def test_navigation_tableau_ecarts_bilan(app):
     league = app.modules["league"]
     net(app, type="_connected")
     net(app, type="set_screen", screen="lol")
-    league.open_curves()
-    assert app.current.name == "curves" and app.manual_screen is None
-    app.current.draw(app.surface)                            # « quelques secondes… »
-    league.close_curves(live=True)
+    league.open_counters()
+    assert app.current.name == "counters" and app.manual_screen is None
+    app.current._last_signature = None                       # set_screen l'a déjà dessiné
+    assert app.current.draw(app.surface)                     # « dès les premières… »
+    league.close_counters(live=True)
     assert app.current.name == "lol"
     league.store.set_timeline("9", {"players": [{"team": 100, "isSelf": True}, {"team": 200}],
-                                    "frames": [{"t": 0, "gold": [500, 500]},
-                                               {"t": 60, "gold": [1200, 900]}]})
+                                    "frames": [{"t": 0, "gold": [500, 500], "kills": [0, 0],
+                                                "cs": [0, 0], "level": [1, 1]},
+                                               {"t": 60, "gold": [1200, 900], "kills": [1, 0],
+                                                "cs": [5, 4], "level": [3, 3]}]})
     league.postgame_game_id = "9"
-    league.open_curves_review()
-    curves = app.screens["curves"]
-    for view in ("teams", "diff", "players"):
-        curves.view, curves._last_signature = view, None
-        assert app.current.draw(app.surface)                  # rendu sans erreur
-    league.close_curves(live=False)
+    league.open_counters_review()
+    app.current._last_signature = None
+    assert app.current.draw(app.surface)                     # rendu sans erreur
+    league.close_counters(live=False)
     assert app.current.name == "postgame" and app.manual_screen == "postgame"
-
-
-def test_graduations_rondes():
-    assert axis_ticks(0, 22814) == [0, 5000, 10000, 15000, 20000, 25000]
-    assert axis_ticks(-3500, 3500) == [-4000, -2000, 0, 2000, 4000]
 
 
 class TimelineLcu(FakeLcu):
@@ -118,3 +123,18 @@ def test_timeline_lcu_format_commun():
     me = [p for p in tl["players"] if p["isSelf"]]
     assert me[0]["riotId"] == "J3#EUW" and tl["estimated"] is False
     assert build_lcu_timeline(TimelineLcu([]), 42) is None
+
+
+def test_ecarts_par_defaut_en_partie(app):
+    league = app.modules["league"]
+    net(app, type="_connected")
+    net(app, type="set_screen", screen="lol")
+    assert app.current.name == "counters" and app.screens["counters"].live
+    league.close_counters(live=True)                         # bouton TABLEAU
+    assert app.current.name == "lol"
+    net(app, type="set_screen", screen="lol")                # heartbeat : reste au tableau
+    assert app.current.name == "lol"
+    app.manual_screen = "server"
+    app.set_screen("server")
+    app.join_screen()                                        # « Rejoindre » depuis l'accueil
+    assert app.current.name == "counters"

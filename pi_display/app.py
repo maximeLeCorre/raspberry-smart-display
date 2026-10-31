@@ -202,7 +202,13 @@ class App:
         target = self.network_screen
         if target in self.screens and target != DEFAULT_SCREEN:
             self.manual_screen = None
-            self.set_screen(target)
+            self.set_screen(self._route(target))
+
+    def _route(self, screen: str) -> str:
+        """Vue par défaut d'un écran demandé par l'agent (cf. `Module.route_screen`)."""
+        for module in self.modules.values():
+            screen = module.route_screen(screen)
+        return screen
 
     # --------------------------------------------------------------- boucles
     def _dispatch_touch(self, pos) -> None:
@@ -290,7 +296,7 @@ class App:
                 self.manual_screen = None
             shown = self.manual_screen is None
             if shown:
-                self.set_screen(screen)
+                self.set_screen(self._route(screen))
             for module in self.modules.values():
                 module.on_agent_screen(screen, shown)
 

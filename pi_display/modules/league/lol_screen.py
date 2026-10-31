@@ -37,7 +37,7 @@ from screen import Screen
 # Zones alignées sur les cadres du fond (lol.png) : bandeau haut (0-48),
 # colonnes gauche/droite (y 52-354), panneau bas (y 369-466).
 RETOUR_RECT = pygame.Rect(742, 4, 54, 30)
-CURVES_RECT = pygame.Rect(640, 4, 92, 30)      # bascule vers les courbes
+COUNTERS_RECT = pygame.Rect(640, 4, 92, 30)    # bascule vers les écarts
 ICON = 34
 ROWS_TOP = 54
 ROWS_BOTTOM = 352
@@ -126,8 +126,8 @@ class LolScreen(Screen):
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         if RETOUR_RECT.collidepoint(pos):
             return ACTION_BACK
-        if CURVES_RECT.collidepoint(pos):
-            self.league.open_curves()
+        if COUNTERS_RECT.collidepoint(pos):
+            self.league.open_counters()
             return None
         for rect, player in self._rows:
             if rect.collidepoint(pos):
@@ -193,10 +193,10 @@ class LolScreen(Screen):
 
         hint = self.font_hint.render("RETOUR", True, GREY)
         surface.blit(hint, hint.get_rect(center=RETOUR_RECT.center))
-        pygame.draw.rect(surface, (30, 44, 70), CURVES_RECT, border_radius=6)
-        pygame.draw.rect(surface, (70, 90, 130), CURVES_RECT, width=1, border_radius=6)
-        btn = self.font_hint.render("COURBES", True, WHITE)
-        surface.blit(btn, btn.get_rect(center=CURVES_RECT.center))
+        pygame.draw.rect(surface, (30, 44, 70), COUNTERS_RECT, border_radius=6)
+        pygame.draw.rect(surface, (70, 90, 130), COUNTERS_RECT, width=1, border_radius=6)
+        btn = self.font_hint.render("ÉCARTS", True, WHITE)
+        surface.blit(btn, btn.get_rect(center=COUNTERS_RECT.center))
 
     def _draw_objectives(self, surface, objectives, strip) -> None:
         """Rangée compacte de timers d'objectifs dans `strip` (Faille seule).

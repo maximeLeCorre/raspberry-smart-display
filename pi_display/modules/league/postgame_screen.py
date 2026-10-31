@@ -42,10 +42,10 @@ METRICS = [
     ("heal", "Soins"),
 ]
 
-# Barre d'onglets (haut) + boutons COURBES et RETOUR à droite.
+# Barre d'onglets (haut) + boutons ÉCARTS et RETOUR à droite.
 TAB_TOP, TAB_H = 8, 38
 TAB_LEFT, TAB_RIGHT, TAB_GAP = 8, 590, 6
-CURVES_RECT = pygame.Rect(600, 8, 92, 38)
+COUNTERS_RECT = pygame.Rect(600, 8, 92, 38)
 RETOUR_RECT = pygame.Rect(700, 8, 92, 38)
 
 TITLE_Y = 64
@@ -147,8 +147,8 @@ class PostGameScreen(Screen):
                 self.app.set_screen(ret)
                 return None
             return ACTION_BACK
-        if CURVES_RECT.collidepoint(pos) and self.data.get("players"):
-            self.league.open_curves_review()
+        if COUNTERS_RECT.collidepoint(pos) and self.data.get("players"):
+            self.league.open_counters_review()
             return None
         for key, rect in self._tab_rects:
             if rect.collidepoint(pos):
@@ -178,10 +178,10 @@ class PostGameScreen(Screen):
         pygame.draw.rect(surface, PANEL, RETOUR_RECT, border_radius=8)
         surface.blit(hint, hint.get_rect(center=RETOUR_RECT.center))
         if self.data.get("players"):
-            pygame.draw.rect(surface, PANEL, CURVES_RECT, border_radius=8)
-            pygame.draw.rect(surface, GOLD, CURVES_RECT, width=1, border_radius=8)
-            btn = self.font_hint.render("COURBES", True, WHITE)
-            surface.blit(btn, btn.get_rect(center=CURVES_RECT.center))
+            pygame.draw.rect(surface, PANEL, COUNTERS_RECT, border_radius=8)
+            pygame.draw.rect(surface, GOLD, COUNTERS_RECT, width=1, border_radius=8)
+            btn = self.font_hint.render("ÉCARTS", True, WHITE)
+            surface.blit(btn, btn.get_rect(center=COUNTERS_RECT.center))
 
         if not players:
             text = ("Détail non disponible"
