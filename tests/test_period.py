@@ -42,9 +42,10 @@ def test_fin_incluse_dans_le_filtre_sql(tmp_path):
 
 def test_selecteur_de_l_ecran_stats(app):
     stats = app.screens["stats"]
-    app.compare_rid, app.summoner_rid = MATE, ME
+    league = app.modules["league"]
+    league.compare_rid, league.summoner_rid = MATE, ME
     stats._today = lambda: TODAY
-    app.open_stats()
+    league.open_stats()
     stats.handle_touch(stats._period_rect.center)
     assert stats._picking
     stats.handle_touch(stats._preset_rects[0].center)              # 7 derniers jours

@@ -29,6 +29,7 @@ class QueueScreen(Screen):
 
     def __init__(self, app):
         super().__init__(app)
+        self.league = app.modules["league"]
         self.font_title = pygame.font.Font(None, 46)
         self.font_big = pygame.font.Font(None, 132)
         self.font_sub = pygame.font.Font(None, 34)
@@ -50,7 +51,7 @@ class QueueScreen(Screen):
         if (self.data.get("state") == "readycheck"
                 and self.data.get("response") != "Accepted"
                 and ACCEPT_RECT.collidepoint(pos)):
-            self.app.lcu_action("accept")
+            self.league.lcu_action("accept")
         return None
 
     def draw(self, surface: pygame.Surface) -> list[pygame.Rect]:

@@ -104,6 +104,7 @@ class PostGameScreen(Screen):
 
     def __init__(self, app):
         super().__init__(app)
+        self.league = app.modules["league"]
         self.font_title = pygame.font.Font(None, 40)
         self.font_tab = pygame.font.Font(None, 26)
         self.font_row = pygame.font.Font(None, 26)
@@ -143,9 +144,9 @@ class PostGameScreen(Screen):
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         if RETOUR_RECT.collidepoint(pos):
             # En mode « revue » (ouvert depuis l'historique), RETOUR y revient.
-            ret = getattr(self.app, "postgame_return", None)
+            ret = self.league.postgame_return
             if ret and ret in self.app.screens:
-                self.app.postgame_return = None
+                self.league.postgame_return = None
                 self.app.manual_screen = ret
                 self.app.set_screen(ret)
                 return None
@@ -280,7 +281,7 @@ class PostGameScreen(Screen):
             return self._icon_cache[champ_id]
         if champ_id > 0 and champ_id not in self._requested:
             self._requested.add(champ_id)
-            self.app.request_icon(champ_id)
+            self.league.request_icon(champ_id)
         return self._placeholder(name)
 
     def _decode_icon(self, icon_b64) -> pygame.Surface | None:

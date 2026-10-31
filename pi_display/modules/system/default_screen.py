@@ -465,7 +465,7 @@ class DefaultScreen(Screen):
             return ("Jouer", "PC hors ligne", FAINT, True, False)
         if tid == "history":
             if time.monotonic() - self._history_ts > 5:
-                self._history_count = self.app.store.total()
+                self._history_count = self.app.modules["league"].store.total()
                 self._history_ts = time.monotonic()
             n = self._history_count
             return ("Historique", f"{n} partie{'s' if n > 1 else ''}", DIM, False, True)
@@ -572,9 +572,9 @@ class DefaultScreen(Screen):
             if self.app.joinable_screen():
                 self.app.join_screen()
             elif not self._play_status:
-                self.app.play()       # ignoré si l'agent est déconnecté
+                self.app.modules["league"].play()       # ignoré si l'agent est déconnecté
         elif tid == "history":
-            self.app.open_history()
+            self.app.modules["league"].open_history()
         elif tid == "server":
             self.app.manual_screen = "server"
             self.app.set_screen("server")

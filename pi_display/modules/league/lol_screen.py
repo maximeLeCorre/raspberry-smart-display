@@ -77,6 +77,7 @@ class LolScreen(Screen):
 
     def __init__(self, app):
         super().__init__(app)
+        self.league = app.modules["league"]
         self.font_time = pygame.font.Font(None, 44)
         self.font_label = pygame.font.Font(None, 26)
         self.font_name = pygame.font.Font(None, 25)
@@ -137,7 +138,7 @@ class LolScreen(Screen):
                     if rid and rid not in self.player_info \
                             and rid not in self._requested_info:
                         self._requested_info.add(rid)
-                        self.app.request_player_info(rid, player.get("championId", 0))
+                        self.league.request_player_info(rid, player.get("championId", 0))
                 self._last_signature = None
                 return None
         return None
@@ -344,7 +345,7 @@ class LolScreen(Screen):
             return self._icon_cache[champ_id]
         if champ_id > 0 and champ_id not in self._requested:
             self._requested.add(champ_id)
-            self.app.request_icon(champ_id)
+            self.league.request_icon(champ_id)
         return self._placeholder_icon(player.get("champion") or "?")
 
     def _decode_icon(self, icon_b64) -> pygame.Surface | None:

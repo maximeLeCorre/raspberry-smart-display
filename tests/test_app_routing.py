@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 import app as app_module
+from modules.league import module as league_module
 from config import load_config
 from store import Store
 
@@ -12,13 +13,13 @@ from store import Store
 @pytest.fixture
 def app(tmp_path, free_port, monkeypatch):
     # Base des parties jetable (jamais le matches.db réel) ; synchro neutralisée.
-    monkeypatch.setattr(app_module, "Store", lambda: Store(tmp_path / "t.db"))
+    monkeypatch.setattr(league_module, "Store", lambda: Store(tmp_path / "t.db"))
     cfg = load_config(app_module.__file__.replace("app.py", "config.toml"))
     cfg.setdefault("server", {})["host"] = ""
     cfg.setdefault("weather", {})["enabled"] = False
     a = app_module.App(cfg, fullscreen=False, scale=1, monitor=None, debug=False,
                        host="127.0.0.1", port=free_port)
-    a.sync_lcu = lambda: None
+    a.modules["league"].sync_lcu = lambda: None
     yield a
     a.shutdown()
 
@@ -60,14 +61,14 @@ def test_bilan_de_fin_non_reinitialise_par_le_heartbeat(app):
     net(app, type="_connected")
     net(app, type="set_screen", screen="postgame")
     calls = []
-    app._show_postgame = lambda detail: calls.append(detail)
+    app.modules["league"]._show_postgame = lambda detail: calls.append(detail)
     net(app, type="set_screen", screen="postgame")
     assert calls == []
 
 
 def test_parties_de_l_ami_stockees_et_stats_rafraichies(app):
     net(app, type="_connected")
-    app.open_stats()
+    app.modules["league"].open_stats()
     reloads = []
     app.screens["stats"].reload = lambda: reloads.append(1)
     game = {"gameId": 5, "gameMode": "KIWI", "queueId": 2400, "duration": 600,
@@ -75,17 +76,18 @@ def test_parties_de_l_ami_stockees_et_stats_rafraichies(app):
                                     "kda": [1, 2, 3], "metrics": {}}]}}
     net(app, type="store_player_games", riotId="Matte mwa#EUW", games=[game], done=False)
     net(app, type="store_player_games", riotId="Matte mwa#EUW", games=[], done=True)
-    assert app.store.known_games("Matte mwa#EUW") == ["5"]
-    assert app.store.total() == 0 and reloads == [1]
+    assert app.modules["league"].store.known_games("Matte mwa#EUW") == ["5"]
+    assert app.modules["league"].store.total() == 0 and reloads == [1]
 
 
 def test_synchro_demande_aussi_les_parties_de_l_ami(app):
     sent = []
     app.server.send = sent.append
-    del app.sync_lcu                     # vraie méthode (neutralisée par la fixture)
+    league = app.modules["league"]
+    del league.sync_lcu                  # vraie méthode (neutralisée par la fixture)
     app.agent_connected = True
-    app.compare_rid = "Matte mwa#EUW"
-    app.sync_lcu()
+    league.compare_rid = "Matte mwa#EUW"
+    league.sync_lcu()
     assert [m["type"] for m in sent] == ["request_lcu_sync", "request_player_sync"]
     assert sent[1]["riotId"] == "Matte mwa#EUW" and sent[1]["known"] == []
 
