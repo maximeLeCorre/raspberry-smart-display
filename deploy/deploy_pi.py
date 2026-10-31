@@ -216,6 +216,18 @@ if [ -n "$WIFI_CON" ]; then
     echo "[pi] Wi-Fi : '$WIFI_CON' force en 2,4 GHz (reconnexion dans 20 s)."
   fi
 fi
+# Luminosité (pi_display/backlight.py) : le service (groupe video) écrit
+# brightness/bl_power, réservés à root par défaut.
+cat > /tmp/99-pi-display-backlight.rules <<'EOF'
+SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/chgrp video /sys%p/brightness /sys%p/bl_power", RUN+="/bin/chmod g+w /sys%p/brightness /sys%p/bl_power"
+EOF
+if ! cmp -s /tmp/99-pi-display-backlight.rules /etc/udev/rules.d/99-pi-display-backlight.rules; then
+  sudo_ mv /tmp/99-pi-display-backlight.rules /etc/udev/rules.d/99-pi-display-backlight.rules
+  sudo_ udevadm control --reload
+  sudo_ udevadm trigger --subsystem-match=backlight --action=add
+  echo "[pi] Luminosite : ecriture autorisee au groupe video."
+fi
+rm -f /tmp/99-pi-display-backlight.rules
 sudo_ mv /tmp/pi-netwatch.sh /usr/local/bin/pi-netwatch
 sudo_ chmod 755 /usr/local/bin/pi-netwatch
 sudo_ mv /tmp/pi-netwatch.service /etc/systemd/system/pi-netwatch.service

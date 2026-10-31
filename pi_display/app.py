@@ -23,6 +23,7 @@ import threading
 
 import pygame
 
+from backlight import Backlight
 from inputs import ACTION_BACK, ACTION_NEXT, InputManager
 from modules import MODULES
 from network import NetworkServer
@@ -78,6 +79,9 @@ class App:
         self.network_screen = DEFAULT_SCREEN
         # Agent (PC) connecté ? Utilisé par l'historique (nécessite le PC/LCU).
         self.agent_connected = False
+
+        # Veille douce de l'écran quand le PC est absent (cf. backlight.py).
+        self.backlight = Backlight(config.get("backlight", {}))
 
         self.running = False
         self.set_screen(DEFAULT_SCREEN)
@@ -213,6 +217,8 @@ class App:
     # --------------------------------------------------------------- boucles
     def _dispatch_touch(self, pos) -> None:
         """Traite un appui (souris ou tactile) à la position interne `pos`."""
+        if self.backlight.wake():
+            return                    # appui de réveil : pas un clic à l'aveugle
         action = self.current.handle_touch(pos)
         if action:
             self.last_key = f"tactile {pos} -> {action}"
@@ -255,7 +261,8 @@ class App:
                 action = self.action_queue.get_nowait()
             except queue.Empty:
                 break
-            self.do_action(action)
+            if not self.backlight.wake():
+                self.do_action(action)
 
     def _handle_network(self) -> None:
         while True:
@@ -339,6 +346,7 @@ class App:
                 for module in self.modules.values():
                     module.tick()     # tâches périodiques (ex. scan LCU)
                 self._drain_io()      # résultats des appels réseau asynchrones
+                self.backlight.tick(self.agent_connected)
 
                 dirty = self.current.draw(self.surface)
                 if self.debug:
@@ -350,6 +358,7 @@ class App:
             self.shutdown()
 
     def shutdown(self) -> None:
+        self.backlight.restore()
         self.server.stop()
         pygame.quit()
         print("[app] Arrêt.")
