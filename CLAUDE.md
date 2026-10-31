@@ -101,7 +101,7 @@ tuile Trains **remplace Actus** (liste via le bandeau) ; à droite de l'horloge 
 ## API Riot & pièges
 - **LCU** (`pc_agent/lcu.py`, agent, client ouvert) : phase, sélection, historique, **actions**
   (`post`, ex. `/lol-matchmaking/v1/ready-check/accept`). Auth = port+token du process
-  `LeagueClientUx.exe`, `verify=False`. Noms de champions via **Community Dragon** (⚠️ échec → réessai 60 s, jamais de table vide à vie ; noms vides du store réparés par `fill_champion_names`). ⚠️ PUUID
+  `LeagueClientUx.exe`, `verify=False`. Noms de champions via **Community Dragon** (⚠️ échec → réessai 60 s, jamais de table vide à vie ; noms vides du store réparés par `fill_champion_names`). ⚠️ Nom→id en partie : variantes **60xxx** de même nom (→ vrai champion prioritaire) et nom Live **localisé** (« Maître Yi ») → via `rawChampionName` (alias). ⚠️ PUUID
   LCU = **interne**, rejeté par l'API Web → l'agent envoie le **Riot ID**, le Pi résout le vrai
   PUUID (`resolve_puuid`). ⚠️ « ARAM Chaos » = gameMode interne **`KIWI`**.
 - **Live Client Data** (`pc_agent/riot_api.py`, `127.0.0.1:2999`) : **en partie uniquement**.
@@ -109,7 +109,7 @@ tuile Trains **remplace Actus** (liste via le bandeau) ; à droite de l'horloge 
   `champion-mastery-v4`, `match-v5`. ⚠️ `match-v5` **n'a pas les customs** (d'où la LCU). Tolérant aux erreurs.
 - **Icônes** : `champion-icons` (CDragon) = **les mêmes qu'en jeu** (HUD `*_square_0`, cadrage serré). Testé et rejeté par
   l'user : tuiles de splash (trop dézoomées) et skins joués. Cache disque **`icons.db`** (`icon_cache.py`, hors sauvegarde),
-  repris quand le patch CDragon change ; cache mémoire par écran `modules/league/icons.py`.
+  repris quand le patch CDragon change (relu 1×/h ; vide aussi le cache mémoire des écrans `modules/league/icons.py`).
 
 ## Agent (`pc_agent/main.py`, `sources/`)
 Chaque tick (`update_interval` 1–2 s) : 1ère `poll()` non-None gagne → `set_screen` (+ `data`).

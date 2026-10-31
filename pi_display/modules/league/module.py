@@ -19,8 +19,8 @@ from modules.league.lol_screen import LolScreen
 from modules.league.postgame_screen import PostGameScreen
 from modules.league.queue_screen import QueueScreen
 from modules.league.stats_screen import StatsScreen
-from riot_web import (Champions, RiotWeb, build_player_info, icon_bytes,
-                      normalize_riot_id, splash_bytes)
+from riot_web import (PATCH_TTL, Champions, RiotWeb, build_player_info, current_patch,
+                      icon_bytes, normalize_riot_id, splash_bytes)
 from store import Store
 
 
@@ -53,6 +53,9 @@ class LeagueModule(Module):
         self.store = Store()
         # Icônes sur disque (icons.db) : pas de re-téléchargement au redémarrage.
         self.icon_cache = IconCache()
+        # Patch relu chaque heure même si toutes les icônes sont déjà en mémoire
+        # (sinon un nouveau patch ne serait vu qu'au redémarrage).
+        self._patch_check = time.monotonic()
         # Bilan en mode « dernière partie » (fin de game) vs « revue » (clic).
         self._postgame_latest = False
         # Id de la partie la plus récente AVANT la partie en cours : sert à
@@ -81,6 +84,9 @@ class LeagueModule(Module):
 
     def tick(self) -> None:
         self._maybe_sync()
+        if time.monotonic() - self._patch_check >= PATCH_TTL:
+            self._patch_check = time.monotonic()
+            self.app.async_call(current_patch, lambda _: None)
 
     def on_agent_screen(self, screen: str, shown: bool) -> None:
         # Un écran poussé par l'agent (vraie partie) sort du mode « revue ».

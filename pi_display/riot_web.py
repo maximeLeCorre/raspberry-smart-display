@@ -247,6 +247,11 @@ def current_patch() -> str:
         return _patch["value"]
 
 
+def known_patch() -> str:
+    """Dernier patch lu par `current_patch`, sans réseau (boucle de rendu)."""
+    return _patch["value"]
+
+
 def _download_icon(champion_id: int) -> bytes | None:
     return _http_get(ICON_CDN_URL.format(id=champion_id), timeout=8)
 

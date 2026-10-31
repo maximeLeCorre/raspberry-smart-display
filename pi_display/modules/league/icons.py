@@ -3,7 +3,8 @@
 Icône = carré classique, comme en jeu (cf. `riot_web.icon_bytes`). Demandée au
 module (`request_icon`, en tâche de fond) une seule fois par champion, puis
 livrée par l'écran via `put` (`set_champion_icon`). En attendant, `get` renvoie
-None (placeholder à l'écran).
+None (placeholder à l'écran). Nouveau patch -> cache vidé : les images sont
+redemandées (et `icon_bytes` reprend celles du disque d'un ancien patch).
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ import io
 
 import pygame
 
+from riot_web import known_patch
+
 
 class ChampionIcons:
     def __init__(self, league, size: int):
@@ -20,8 +23,15 @@ class ChampionIcons:
         self.size = size
         self._cache: dict[int, pygame.Surface] = {}
         self._requested: set[int] = set()
+        self._patch = ""
 
     def get(self, champion_id) -> pygame.Surface | None:
+        patch = known_patch()
+        if patch != self._patch:
+            if self._patch:                   # vrai changement (pas la 1re lecture)
+                self._cache.clear()
+                self._requested.clear()
+            self._patch = patch
         cid = int(champion_id or 0)
         if cid in self._cache:
             return self._cache[cid]

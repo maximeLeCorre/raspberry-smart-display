@@ -45,3 +45,25 @@ def test_hors_ligne_le_cache_suffit(tmp_path, monkeypatch):
     patch["v"] = "16.22"                             # nouveau patch mais CDN injoignable
     assert riot_web.icon_bytes(21, cache) == b"img1"
     assert downloads == [21]
+
+
+def test_nouveau_patch_vide_le_cache_memoire_des_ecrans(monkeypatch):
+    from modules.league import icons
+
+    class League:
+        def __init__(self):
+            self.asked = []
+
+        def request_icon(self, cid):
+            self.asked.append(cid)
+
+    patch = {"v": ""}
+    monkeypatch.setattr(icons, "known_patch", lambda: patch["v"])
+    league = League()
+    cache = icons.ChampionIcons(league, 34)
+    cache.get(18)
+    patch["v"] = "16.21"                  # 1re lecture du patch : rien à vider
+    cache._cache[18] = object()
+    assert cache.get(18) is not None and league.asked == [18]
+    patch["v"] = "16.22"                  # nouveau patch : image redemandée
+    assert cache.get(18) is None and league.asked == [18, 18]

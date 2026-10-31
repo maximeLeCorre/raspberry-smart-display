@@ -79,8 +79,9 @@ def _riot_id(player: dict) -> tuple[str, str]:
 def summarize_full(data: dict, id_resolver=None) -> dict:
     """Résumé complet de la partie : scoreboard des 10 joueurs + événements.
 
-    `id_resolver` : fonction nom_de_champion -> championId (ex. la LCU), pour que
-                    le Pi affiche les icônes. Optionnel.
+    `id_resolver` : fonction (nom affiché, nom technique `rawChampionName`) ->
+                    championId (ex. la LCU), pour que le Pi affiche les icônes.
+                    Optionnel.
 
     Chaque joueur porte son **Riot ID** (`riotId` = 'Nom#TAG') : le Pi s'en sert
     pour enrichir son dossier au clic (il résout le PUUID et interroge l'API Web
@@ -110,7 +111,8 @@ def summarize_full(data: dict, id_resolver=None) -> dict:
             "name": name,
             "riotId": f"{name}#{tag}" if (name and tag) else "",
             "champion": champion,
-            "championId": (id_resolver(champion) if id_resolver else 0) or 0,
+            "championId": (id_resolver(champion, p.get("rawChampionName", ""))
+                           if id_resolver else 0) or 0,
             "position": p.get("position", ""),
             "team": team,
             "k": kills, "d": scores.get("deaths", 0), "a": scores.get("assists", 0),
