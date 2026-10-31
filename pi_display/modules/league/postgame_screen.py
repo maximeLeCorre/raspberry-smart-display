@@ -24,12 +24,11 @@ Données reçues (payload), tout via la LCU (aucune clé API Web) :
 
 from __future__ import annotations
 
-import base64
-import io
 
 import pygame
 
 from inputs import ACTION_BACK
+from modules.league.icons import ChampionIcons
 from screen import Screen
 
 # Métriques -> (clé dans payload.metrics, libellé de l'onglet). Doit rester
@@ -114,8 +113,7 @@ class PostGameScreen(Screen):
 
         self.data: dict = {}
         self.active = METRICS[0][0]           # onglet-métrique sélectionné
-        self._icon_cache: dict[int, pygame.Surface] = {}
-        self._requested: set[int] = set()
+        self.icons = ChampionIcons(self.league, ICON)
         self._last_signature = None
 
         # Rects des onglets (fixes) : (clé_métrique, rect).
@@ -129,18 +127,15 @@ class PostGameScreen(Screen):
     # --------------------------------------------------------------- réseau
     def enter(self) -> None:
         self._last_signature = None
-        self._requested.clear()
+        self.icons.forget_requests()
 
     def update_data(self, payload: dict) -> None:
         self.data = payload or {}
 
-    def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:
-        surface = self._decode_icon(icon_b64)
-        if surface is not None:
-            self._icon_cache[champion_id] = surface
+    def set_champion_icon(self, champion_id: int, skin: int, icon_b64: str | None) -> None:
+        if self.icons.put(champion_id, skin, icon_b64):
             self._last_signature = None
 
-    # --------------------------------------------------------------- entrées
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         if RETOUR_RECT.collidepoint(pos):
             # En mode « revue » (ouvert depuis l'historique), RETOUR y revient.
@@ -167,7 +162,7 @@ class PostGameScreen(Screen):
             str(self.data.get("me")),
             tuple((p.get("championId"), p.get("isSelf"), p.get("isFriend"),
                    (p.get("metrics") or {}).get(self.active, 0)) for p in players),
-            tuple(sorted(self._icon_cache.keys())),
+            self.icons.signature(),
         )
         if signature == self._last_signature:
             return []
@@ -237,7 +232,8 @@ class PostGameScreen(Screen):
 
             # Icône + nom du champion.
             surface.blit(self._get_icon(p.get("championId") or 0,
-                                        p.get("championName") or "?"),
+                                        p.get("championName") or "?",
+                                        p.get("skinId") or 0),
                          (12, cy - ICON // 2))
             name = _fit(p.get("championName") or p.get("name") or "?",
                         self.font_row, BAR_X - NAME_X - 6)
@@ -263,7 +259,8 @@ class PostGameScreen(Screen):
                          (self.width - 8, STRIP_TOP - 6), 1)
         cy = STRIP_TOP + 20
         surface.blit(self._get_icon(me.get("championId") or 0,
-                                    me.get("championName") or "?"),
+                                    me.get("championName") or "?",
+                                    me.get("skinId") or 0),
                      (12, cy - ICON // 2))
         k, d, a = (me.get("kda") or [0, 0, 0])[:3]
         name_surf = self.font_strip.render(me.get("championName") or "", True, YELLOW)
@@ -276,23 +273,8 @@ class PostGameScreen(Screen):
                                 cy - det_surf.get_height() // 2))
 
     # ----------------------------------------------------------- icônes
-    def _get_icon(self, champ_id: int, name: str) -> pygame.Surface:
-        if champ_id in self._icon_cache:
-            return self._icon_cache[champ_id]
-        if champ_id > 0 and champ_id not in self._requested:
-            self._requested.add(champ_id)
-            self.league.request_icon(champ_id)
-        return self._placeholder(name)
-
-    def _decode_icon(self, icon_b64) -> pygame.Surface | None:
-        if not icon_b64:
-            return None
-        try:
-            raw = base64.b64decode(icon_b64)
-            image = pygame.image.load(io.BytesIO(raw)).convert_alpha()
-            return pygame.transform.smoothscale(image, (ICON, ICON))
-        except Exception:
-            return None
+    def _get_icon(self, champ_id: int, name: str, skin: int = 0) -> pygame.Surface:
+        return self.icons.get(champ_id, skin) or self._placeholder(name)
 
     def _placeholder(self, name: str) -> pygame.Surface:
         surface = pygame.Surface((ICON, ICON))

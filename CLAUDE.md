@@ -1,8 +1,7 @@
 # CLAUDE.md — Guide du projet
 
-Lu au démarrage. **Garde ce fichier ≤ 150 lignes** (coût en tokens) : concis, exact,
-sans doublon. Dès que tu découvres un fait non évident (comportement d'API, décision de
-design, piège), mets à jour la section concernée. **Jamais de secret ici.**
+Lu au démarrage. **Garde ce fichier ≤ 150 lignes** (coût en tokens) : concis, exact, sans doublon. Dès que tu découvres
+un fait non évident (comportement d'API, décision de design, piège), mets à jour la section concernée. **Jamais de secret ici.**
 
 ## But
 Écran d'info tactile (Raspberry Pi 3 B+ + écran 5" 800×480) : accueil (heure, météo, trains, actus) + écrans selon
@@ -106,9 +105,11 @@ tuile Trains **remplace Actus** (liste via le bandeau) ; à droite de l'horloge 
   LCU = **interne**, rejeté par l'API Web → l'agent envoie le **Riot ID**, le Pi résout le vrai
   PUUID (`resolve_puuid`). ⚠️ « ARAM Chaos » = gameMode interne **`KIWI`**.
 - **Live Client Data** (`pc_agent/riot_api.py`, `127.0.0.1:2999`) : **en partie uniquement**.
-- **API Web** (`pi_display/riot_web.py`, Pi, stdlib urllib) : `account-v1`(→PUUID), `summoner-v4`,
-  `league-v4`, `champion-mastery-v4`, `match-v5`. ⚠️ `match-v5` **n'a pas les customs** (d'où la LCU
-  pour l'historique). CDN icônes/splash. Tolérant aux erreurs (renvoie None/partiel).
+- **API Web** (`pi_display/riot_web.py`, Pi, stdlib urllib) : `account-v1`(→PUUID), `summoner-v4`, `league-v4`,
+  `champion-mastery-v4`, `match-v5`. ⚠️ `match-v5` **n'a pas les customs** (d'où la LCU). Tolérant aux erreurs.
+- ⚠️ **Icônes** : `champion-icons` = skin **de base** (vieil art) → on montre la **tuile du skin joué** (`skin_asset_url`,
+  chroma → skin parent ; `modules/league/icons.py`) : Live `skinID`, LCU `selectedSkinId` ; historique LCU **sans skins**
+  → relevés en partie, table `skins` rattachée à l'arrivée de la partie (`_attach_live_skins`).
 
 ## Agent (`pc_agent/main.py`, `sources/`)
 Chaque tick (`update_interval` 1–2 s) : 1ère `poll()` non-None gagne → `set_screen` (+ `data`).
@@ -138,10 +139,9 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
 ## Fonds · Tests · Git · Déploiement
 - **Fonds** : PNG 800×480 dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres **dans le PNG** (code au pixel ;
   `default.png` = `tools/gen_default_bg.py` sur `default_base.png`). Code-drawn : `news`, `weather`, `transit`, `postgame`, `history`, `stats`, `server`.
-- **Tests** : **pytest** (`tests/`, `requirements-dev.txt`) → `.\.venv\Scripts\python -m pytest` **avant chaque déploiement**.
-  Headless (`conftest.py` : SDL dummy, store jetable, `SERVER_HOST` vide). Rendus visuels : scripts jetables `_`.
+- **Tests** : **pytest** (`tests/`) → `.\.venv\Scripts\python -m pytest` **avant chaque déploiement** ; headless (`conftest.py`). Rendus : scripts jetables `_`.
 - **Git** : repo privé `maximeLeCorre/raspberry-smart-display`, branche `main`. Commits **en français**
-  co-signés `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. **Pas de commit/push sans demande.**
+  co-signés `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. **Pas de commit/push sans demande.**
 - **Déploiement** : `deploy/deploy_pi.py` (~10 s ; clé SSH `~/.ssh/id_ed25519`, repli `PI_PASS` ; empreinte Pi épinglée
   `deploy/known_hosts`). Deps apt/pip réinstallées **seulement si leur liste change** (`--full` force). Archive
   `pi_display/` (hors `_*`/`__pycache__`/**`*.db`**) + `certs/` + `.env` ; service **systemd** `pi-display` (autostart, `kmsdrm`,

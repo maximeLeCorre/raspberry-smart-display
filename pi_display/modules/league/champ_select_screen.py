@@ -21,6 +21,7 @@ import io
 import pygame
 
 from inputs import ACTION_BACK
+from modules.league.icons import ChampionIcons
 from modules.league.names import display_name
 from screen import Screen
 
@@ -66,19 +67,18 @@ class ChampSelectScreen(Screen):
         self.bans: dict = {}
         self.selected_puuid: str | None = None
         self.player_info: dict[str, dict] = {}   # puuid -> détails
-        # Icônes reçues (championId -> surface). Persistant entre sessions :
-        # une icône ne change jamais, inutile de la redemander.
-        self._icon_cache: dict[int, pygame.Surface] = {}
-        self._requested: set[int] = set()         # icônes déjà demandées à l'agent
-        self._splash_cache: dict[int, pygame.Surface] = {}  # splash arts reçus
-        self._splash_requested: set[int] = set()
+        # Icônes et portraits par (championId, n° de skin choisi). Persistants
+        # entre sessions : une image ne change jamais, inutile de la redemander.
+        self.icons = ChampionIcons(self.league, ICON)
+        self._splash_cache: dict[tuple[int, int], pygame.Surface] = {}
+        self._splash_requested: set[tuple[int, int]] = set()
         self._rows: list[tuple[pygame.Rect, dict]] = []  # zones cliquables
         self._last_state = None
 
     def enter(self) -> None:
         self._last_state = None
         # Nouvelle session : on pourra re-demander les icônes encore manquantes.
-        self._requested.clear()
+        self.icons.forget_requests()
         self._splash_requested.clear()
 
     def update_data(self, payload: dict) -> None:
@@ -91,10 +91,10 @@ class ChampSelectScreen(Screen):
         if puuid == self.selected_puuid:
             self._last_state = None
 
-    def set_champion_splash(self, champion_id: int, splash_b64: str | None) -> None:
+    def set_champion_splash(self, champion_id: int, skin: int, splash_b64: str | None) -> None:
         surface = self._decode_splash(splash_b64)
         if surface is not None:
-            self._splash_cache[champion_id] = surface
+            self._splash_cache[(champion_id, skin)] = surface
             self._last_state = None
 
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
@@ -110,10 +110,11 @@ class ChampSelectScreen(Screen):
                 if rid and rid not in self.player_info:
                     self.league.request_player_info(rid, champ_id)
                 # Splash art du champion (si pas déjà reçu).
-                if champ_id and champ_id not in self._splash_cache \
-                        and champ_id not in self._splash_requested:
-                    self._splash_requested.add(champ_id)
-                    self.league.request_splash(champ_id)
+                key = (champ_id or 0, player.get("skinId") or 0)
+                if key[0] and key not in self._splash_cache \
+                        and key not in self._splash_requested:
+                    self._splash_requested.add(key)
+                    self.league.request_splash(*key)
                 return None
         return None
 
@@ -125,7 +126,7 @@ class ChampSelectScreen(Screen):
             self.timer.get("left"), self.timer.get("phase"),
             tuple(self.bans.get("myTeam", [])), tuple(self.bans.get("theirTeam", [])),
             sel, bool(self.player_info.get(sel)) if sel else None,
-            tuple(sorted(self._icon_cache.keys())),
+            self.icons.signature(),
             tuple(sorted(self._splash_cache.keys())),
         )
 
@@ -204,8 +205,7 @@ class ChampSelectScreen(Screen):
 
         # Splash art en bannière (haut du portrait), si reçu.
         content_top = panel.y + 14
-        champ_id = self._selected_champion_id()
-        splash = self._splash_cache.get(champ_id)
+        splash = self._splash_cache.get(self._selected_champion())
         if splash is not None:
             banner_h = 150
             prev = surface.get_clip()
@@ -244,11 +244,12 @@ class ChampSelectScreen(Screen):
         surface.blit(self.font_small.render("Clique un joueur pour ses infos", True,
                                             (130, 150, 185)), (x, panel.bottom - 34))
 
-    def _selected_champion_id(self) -> int:
+    def _selected_champion(self) -> tuple[int, int]:
+        """(championId, n° de skin) du joueur sélectionné, (0, 0) sinon."""
         for p in self.players:
             if (p.get("riotId") or "") == self.selected_puuid:
-                return p.get("championId", 0) or 0
-        return 0
+                return p.get("championId", 0) or 0, p.get("skinId", 0) or 0
+        return 0, 0
 
     def _info_lines(self, info: dict) -> list[tuple[str, tuple[int, int, int]]]:
         white = (235, 235, 240)
@@ -297,45 +298,23 @@ class ChampSelectScreen(Screen):
 
     # ----------------------------------------------------------- icônes
     def _get_icon(self, player: dict) -> pygame.Surface:
-        champ_id = player.get("championId") or 0
-        if champ_id in self._icon_cache:
-            return self._icon_cache[champ_id]
-
-        # Icône pas encore reçue : on la demande à l'agent (une seule fois) et
-        # on affiche un placeholder en attendant qu'elle arrive.
-        if champ_id > 0 and champ_id not in self._requested:
-            self._requested.add(champ_id)
-            self.league.request_icon(champ_id)
-        return self._placeholder_icon(player.get("championName") or "?")
+        # Skin choisi (LCU) : sa tuile ; en attendant l'image, un placeholder.
+        return (self.icons.get(player.get("championId"), player.get("skinId"))
+                or self._placeholder_icon(player.get("championName") or "?"))
 
     def _small_icon(self, champ_id, size: int) -> pygame.Surface:
         """Petite icône (pour les bans) depuis le cache, redimensionnée."""
-        champ_id = champ_id or 0
-        if champ_id in self._icon_cache:
-            return pygame.transform.smoothscale(self._icon_cache[champ_id], (size, size))
-        if champ_id > 0 and champ_id not in self._requested:
-            self._requested.add(champ_id)
-            self.league.request_icon(champ_id)
+        icon = self.icons.get(champ_id)
+        if icon is not None:
+            return pygame.transform.smoothscale(icon, (size, size))
         placeholder = pygame.Surface((size, size))
         placeholder.fill((45, 55, 80))
         return placeholder
 
-    def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:
-        """Reçoit une icône demandée à l'agent ; la met en cache et redessine."""
-        surface = self._decode_icon(icon_b64)
-        if surface is not None:
-            self._icon_cache[champion_id] = surface
+    def set_champion_icon(self, champion_id: int, skin: int, icon_b64: str | None) -> None:
+        """Reçoit une image demandée ; la met en cache et redessine."""
+        if self.icons.put(champion_id, skin, icon_b64):
             self._last_state = None
-
-    def _decode_icon(self, icon_b64) -> pygame.Surface | None:
-        if not icon_b64:
-            return None
-        try:
-            raw = base64.b64decode(icon_b64)
-            image = pygame.image.load(io.BytesIO(raw)).convert_alpha()
-            return pygame.transform.smoothscale(image, (ICON, ICON))
-        except Exception:
-            return None
 
     def _decode_splash(self, splash_b64) -> pygame.Surface | None:
         if not splash_b64:
@@ -360,7 +339,7 @@ class ChampSelectScreen(Screen):
     @staticmethod
     def _players_signature(players: list[dict]):
         return tuple(
-            (p.get("riotId"), p.get("championId"), p.get("gameName"),
+            (p.get("riotId"), p.get("championId"), p.get("skinId"), p.get("gameName"),
              p.get("position"))
             for p in players
         )
