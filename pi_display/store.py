@@ -9,10 +9,6 @@ Table `participations` : une ligne par (partie, joueur) tirée des bilans 10
 joueurs — de NOS parties et de celles d'un ami suivi (`[lol] compare`). Elle
 permet de comparer « moi seul », « l'ami seul » et « nous deux, même équipe ».
 
-Table `skins` : skin joué par chaque joueur d'une partie (la LCU ne le donne
-pas) ; relevé par le Pi pendant la partie (Live Client) puis rattaché à la
-partie à son arrivée. Absent = skin de base (parties antérieures).
-
 Thread-safe (un verrou) car les écritures arrivent depuis la boucle réseau et les
 lectures depuis la boucle de rendu.
 """
@@ -67,13 +63,6 @@ CREATE TABLE IF NOT EXISTS participations (
     PRIMARY KEY (game_id, riot_key)
 );
 CREATE INDEX IF NOT EXISTS idx_part_key ON participations(riot_key);
-CREATE TABLE IF NOT EXISTS skins (
-    game_id       TEXT,
-    riot_key      TEXT,
-    skin          INTEGER,
-    is_self       INTEGER,
-    PRIMARY KEY (game_id, riot_key)
-);
 """
 
 # Agrégats d'un groupe de participations (alias `p`).
@@ -277,9 +266,7 @@ class Store:
               limit: int = 10, offset: int = 0) -> list[dict]:
         """Lignes de liste (résumé) pour l'écran, triées récent→ancien."""
         sql = ("SELECT game_id, champion_id, champion_name, win, kills, deaths, "
-               "assists, cs, queue_label, duration, game_creation, "
-               "(SELECT skin FROM skins s WHERE s.game_id = matches.game_id "
-               "AND s.is_self = 1) FROM matches")
+               "assists, cs, queue_label, duration, game_creation FROM matches")
         if where_sql:
             sql += " WHERE " + where_sql
         sql += " ORDER BY game_creation DESC LIMIT ? OFFSET ?"
@@ -288,7 +275,7 @@ class Store:
         return [{
             "gameId": r[0], "championId": r[1], "championName": r[2],
             "win": bool(r[3]), "kda": [r[4], r[5], r[6]], "cs": r[7],
-            "queue": r[8], "duration": r[9], "when": _when(r[10]), "skinId": r[11] or 0,
+            "queue": r[8], "duration": r[9], "when": _when(r[10]),
         } for r in rows]
 
     def known_games(self, riot_id: str, limit: int = 300) -> list[str]:
@@ -330,36 +317,14 @@ class Store:
                         args).fetchall()]
         return out
 
-    def set_skins(self, game_id, rows: list[tuple[str, int, bool]]) -> None:
-        """Skins joués dans une partie : [(riot_key, n° de skin, est_moi)]."""
-        with self._lock:
-            self._conn.executemany(
-                "INSERT OR REPLACE INTO skins VALUES (?, ?, ?, ?)",
-                [(str(game_id), key, int(skin), int(bool(me))) for key, skin, me in rows])
-            self._conn.commit()
-
     def detail(self, game_id) -> dict | None:
-        """Bilan stocké, avec le skin joué de chacun (`skinId`) s'il est connu."""
         with self._lock:
             row = self._conn.execute(
                 "SELECT detail_json FROM matches WHERE game_id = ?",
                 (str(game_id),)).fetchone()
-            skins = self._conn.execute(
-                "SELECT riot_key, skin, is_self FROM skins WHERE game_id = ?",
-                (str(game_id),)).fetchall()
         if not row or not row[0]:
             return None
         try:
-            detail = json.loads(row[0])
+            return json.loads(row[0])
         except ValueError:
             return None
-        if not skins or not isinstance(detail, dict):
-            return detail
-        by_key = {k: skin for k, skin, _ in skins}
-        mine = next((skin for _, skin, me in skins if me), 0)
-        for p in detail.get("players", []):
-            if isinstance(p, dict):
-                p["skinId"] = mine if p.get("isSelf") else by_key.get(riot_key(p.get("riotId")), 0)
-        if isinstance(detail.get("me"), dict):
-            detail["me"]["skinId"] = mine
-        return detail

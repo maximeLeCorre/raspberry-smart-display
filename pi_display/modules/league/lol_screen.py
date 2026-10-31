@@ -101,10 +101,9 @@ class LolScreen(Screen):
     def update_data(self, payload: dict) -> None:
         self.data = payload or {}
         self._recv_at = time.monotonic()
-        self.league.note_live_players(self.data.get("players"))
 
-    def set_champion_icon(self, champion_id: int, skin: int, icon_b64: str | None) -> None:
-        if self.icons.put(champion_id, skin, icon_b64):
+    def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:
+        if self.icons.put(champion_id, icon_b64):
             self._last_signature = None
 
     def set_player_info(self, puuid: str, info: dict) -> None:
@@ -337,8 +336,7 @@ class LolScreen(Screen):
 
     # ----------------------------------------------------------- icônes
     def _get_icon(self, player: dict) -> pygame.Surface:
-        # Skin joué (Live Client) : sa tuile, comme dans le jeu.
-        return (self.icons.get(player.get("championId"), player.get("skinId"))
+        return (self.icons.get(player.get("championId"))
                 or self._placeholder_icon(player.get("champion") or "?"))
 
     def _placeholder_icon(self, champion_name: str) -> pygame.Surface:

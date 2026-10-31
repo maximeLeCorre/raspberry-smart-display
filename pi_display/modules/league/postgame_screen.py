@@ -132,8 +132,8 @@ class PostGameScreen(Screen):
     def update_data(self, payload: dict) -> None:
         self.data = payload or {}
 
-    def set_champion_icon(self, champion_id: int, skin: int, icon_b64: str | None) -> None:
-        if self.icons.put(champion_id, skin, icon_b64):
+    def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:
+        if self.icons.put(champion_id, icon_b64):
             self._last_signature = None
 
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
@@ -232,8 +232,7 @@ class PostGameScreen(Screen):
 
             # Icône + nom du champion.
             surface.blit(self._get_icon(p.get("championId") or 0,
-                                        p.get("championName") or "?",
-                                        p.get("skinId") or 0),
+                                        p.get("championName") or "?"),
                          (12, cy - ICON // 2))
             name = _fit(p.get("championName") or p.get("name") or "?",
                         self.font_row, BAR_X - NAME_X - 6)
@@ -259,8 +258,7 @@ class PostGameScreen(Screen):
                          (self.width - 8, STRIP_TOP - 6), 1)
         cy = STRIP_TOP + 20
         surface.blit(self._get_icon(me.get("championId") or 0,
-                                    me.get("championName") or "?",
-                                    me.get("skinId") or 0),
+                                    me.get("championName") or "?"),
                      (12, cy - ICON // 2))
         k, d, a = (me.get("kda") or [0, 0, 0])[:3]
         name_surf = self.font_strip.render(me.get("championName") or "", True, YELLOW)
@@ -273,8 +271,8 @@ class PostGameScreen(Screen):
                                 cy - det_surf.get_height() // 2))
 
     # ----------------------------------------------------------- icônes
-    def _get_icon(self, champ_id: int, name: str, skin: int = 0) -> pygame.Surface:
-        return self.icons.get(champ_id, skin) or self._placeholder(name)
+    def _get_icon(self, champ_id: int, name: str) -> pygame.Surface:
+        return self.icons.get(champ_id) or self._placeholder(name)
 
     def _placeholder(self, name: str) -> pygame.Surface:
         surface = pygame.Surface((ICON, ICON))
