@@ -70,6 +70,7 @@ class MatchHistoryScreen(Screen):
 
     def __init__(self, app):
         super().__init__(app)
+        self.league = app.modules["league"]
         self.font_btn = pygame.font.Font(None, 26)
         self.font_row = pygame.font.Font(None, 28)
         self.font_meta = pygame.font.Font(None, 24)
@@ -100,7 +101,7 @@ class MatchHistoryScreen(Screen):
         self.page = 0
         self.syncing = self.app.agent_connected
         self._reload_page()
-        self.app.sync_lcu()          # reprise (sans effet si PC déconnecté)
+        self.league.sync_lcu()          # reprise (sans effet si PC déconnecté)
 
     def reload(self) -> None:
         """Re-lecture du store (après une synchro)."""
@@ -109,7 +110,7 @@ class MatchHistoryScreen(Screen):
 
     def _reload_page(self) -> None:
         where, params = FILTERS[self.filter_idx][1], FILTERS[self.filter_idx][2]
-        rows = self.app.store.query(where, params, PER_PAGE + 1, self.page * PER_PAGE)
+        rows = self.league.store.query(where, params, PER_PAGE + 1, self.page * PER_PAGE)
         self.has_more = len(rows) > PER_PAGE
         self.games = rows[:PER_PAGE]
         self._last_signature = None
@@ -129,7 +130,7 @@ class MatchHistoryScreen(Screen):
         if RETOUR_RECT.collidepoint(pos):
             return ACTION_BACK
         if STATS_RECT.collidepoint(pos) and "stats" in self.app.screens:
-            self.app.open_stats()
+            self.league.open_stats()
             return None
         for i, rect in enumerate(self._filter_rects):
             if rect.collidepoint(pos):
@@ -148,7 +149,7 @@ class MatchHistoryScreen(Screen):
             return None
         for rect, game_id in self._rows:
             if rect.collidepoint(pos):
-                self.app.open_postgame_review(game_id)
+                self.league.open_postgame_review(game_id)
                 return None
         return None
 
@@ -178,7 +179,7 @@ class MatchHistoryScreen(Screen):
         if not self.games:
             if self.syncing:
                 msg = "Synchronisation…"
-            elif self.app.store.total() == 0:
+            elif self.league.store.total() == 0:
                 msg = "Aucune partie stockée — connecte le PC pour synchroniser."
             elif self.page > 0:
                 msg = "Fin de l'historique."
@@ -254,7 +255,7 @@ class MatchHistoryScreen(Screen):
             return self._icon_cache[champ_id]
         if champ_id > 0 and champ_id not in self._requested:
             self._requested.add(champ_id)
-            self.app.request_icon(champ_id)
+            self.league.request_icon(champ_id)
         return self._placeholder(name)
 
     def _decode_icon(self, icon_b64) -> pygame.Surface | None:

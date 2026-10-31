@@ -54,6 +54,7 @@ class ChampSelectScreen(Screen):
 
     def __init__(self, app):
         super().__init__(app)
+        self.league = app.modules["league"]
         self.font_title = pygame.font.Font(None, 48)
         self.font_name = pygame.font.Font(None, 30)
         self.font_small = pygame.font.Font(None, 23)
@@ -107,12 +108,12 @@ class ChampSelectScreen(Screen):
                 self._last_state = None
                 # Détails joueur (si pas déjà en cache). Le Pi résout/enrichit.
                 if rid and rid not in self.player_info:
-                    self.app.request_player_info(rid, champ_id)
+                    self.league.request_player_info(rid, champ_id)
                 # Splash art du champion (si pas déjà reçu).
                 if champ_id and champ_id not in self._splash_cache \
                         and champ_id not in self._splash_requested:
                     self._splash_requested.add(champ_id)
-                    self.app.request_splash(champ_id)
+                    self.league.request_splash(champ_id)
                 return None
         return None
 
@@ -304,7 +305,7 @@ class ChampSelectScreen(Screen):
         # on affiche un placeholder en attendant qu'elle arrive.
         if champ_id > 0 and champ_id not in self._requested:
             self._requested.add(champ_id)
-            self.app.request_icon(champ_id)
+            self.league.request_icon(champ_id)
         return self._placeholder_icon(player.get("championName") or "?")
 
     def _small_icon(self, champ_id, size: int) -> pygame.Surface:
@@ -314,7 +315,7 @@ class ChampSelectScreen(Screen):
             return pygame.transform.smoothscale(self._icon_cache[champ_id], (size, size))
         if champ_id > 0 and champ_id not in self._requested:
             self._requested.add(champ_id)
-            self.app.request_icon(champ_id)
+            self.league.request_icon(champ_id)
         placeholder = pygame.Surface((size, size))
         placeholder.fill((45, 55, 80))
         return placeholder

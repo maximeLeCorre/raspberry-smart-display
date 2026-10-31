@@ -91,6 +91,7 @@ class StatsScreen(Screen):
 
     def __init__(self, app):
         super().__init__(app)
+        self.league = app.modules["league"]
         self.font_btn = pygame.font.Font(None, 26)
         self.font_head = pygame.font.Font(None, 28)
         self.font_sub = pygame.font.Font(None, 20)
@@ -120,7 +121,7 @@ class StatsScreen(Screen):
 
     @property
     def friend_name(self) -> str:
-        return self.app.compare_rid.split("#", 1)[0] or "Ami"
+        return self.league.compare_rid.split("#", 1)[0] or "Ami"
 
     def reload(self) -> None:
         """Relit le store (ouverture, changement de filtre, fin de synchro)."""
@@ -128,8 +129,8 @@ class StatsScreen(Screen):
         per_where, per_params = period.where(self.start, self.end)
         where = " AND ".join(f"({w})" for w in (mode_where, per_where) if w)
         params = (*mode_params, *per_params)
-        me, other = self.app.summoner_rid, self.app.compare_rid
-        self.data = (self.app.store.compare(me, other, where, params)
+        me, other = self.league.summoner_rid, self.league.compare_rid
+        self.data = (self.league.store.compare(me, other, where, params)
                      if "#" in me and "#" in other else None)
         self._dirty = True
 
@@ -151,7 +152,7 @@ class StatsScreen(Screen):
         today = self._today()
         start, end = self.start, self.end
         if start is None or end is None:      # « toutes dates » → bornes réelles
-            oldest = self.app.store.oldest_creation()
+            oldest = self.league.store.oldest_creation()
             start = datetime.fromtimestamp(oldest / 1000).date() if oldest else today
             end = today
         cur = start if which == "Du" else end
@@ -196,7 +197,7 @@ class StatsScreen(Screen):
             self._dirty = True
             return None
         if RETOUR_RECT.collidepoint(pos):
-            self.app.open_history()
+            self.league.open_history()
             return None
         for i, rect in enumerate(self._filter_rects):
             if rect.collidepoint(pos):
@@ -268,7 +269,7 @@ class StatsScreen(Screen):
             active = (self.start, self.end) == period.preset(days, today)
             self._button(surface, rect, label, active=active)
 
-        oldest = self.app.store.oldest_creation()
+        oldest = self.league.store.oldest_creation()
         shown = {"Du": self.start or (datetime.fromtimestamp(oldest / 1000).date()
                                       if oldest else None),
                  "Au": self.end or today}

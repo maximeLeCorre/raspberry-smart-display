@@ -15,15 +15,15 @@ l'activité League of Legends du PC Windows. Tout se teste aussi **sur le PC** (
 - **`pc_agent/`** (Windows) = **purement local, SANS clé**. Lit les API **locales** Riot
   (LCU = phase/sélection/historique ; Live Client Data = partie en cours) et pousse
   écran + données au Pi.
-- **Historique** : stocké **sur le Pi en SQLite** (`store.py`), consultable **PC éteint**.
-  Alimenté par la **LCU** via l'agent (§ History).
+- **Historique** : stocké **sur le Pi en SQLite** (`store.py`), consultable **PC éteint**, alimenté par la **LCU** via l'agent (§ History).
 
 ### Modularité
-- **module** = un jeu/domaine (`league`, futur `valorant`…), activable en config.
-- **écran** (`Screen`) = une vue d'un module. 2 moitiés : écrans Pi (`modules/<nom>/`) +
-  **Source** agent (`sources/<nom>.py`).
+- **module** = un jeu/domaine (`league`, futur `valorant`…), activable en config ; **écran** (`Screen`) = une vue
+  d'un module. 2 moitiés : écrans Pi (`modules/<nom>/`) + **Source** agent (`sources/<nom>.py`).
 - Modules actifs = **le Pi** (`config.toml [modules]`), annoncés par `hello`. Système
-  (horloge, écran `default`) toujours actif. `app.py`/`main.py` sont agnostiques du jeu.
+  (horloge, écran `default`) toujours actif. `app.py`/`main.py` sont **agnostiques du jeu** : la logique d'un jeu vit
+  dans son instance `Module(app)` (`app.modules[nom]`, créée avant ses écrans) via les crochets `on_connected`/
+  `on_disconnected`/`on_agent_screen`/`on_message`/`tick` ; League = `modules/league/module.py` (store, synchro, bilan, Jouer).
 - Ajouter : écrans + `Module` (`modules/__init__.py`) [+ `Source` (`sources/__init__.py`) pour un
   jeu ; un **domaine Pi-only** comme `server` n'a **pas de Source**] + activer en config.
 
@@ -56,7 +56,7 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
 - Interne (serveur Pi) : `_connected`/`_disconnected` (**seulement si le client COURANT part** : après veille,
   l'ancien lien tombe après la reconnexion). Déconnexion → `default`. Heartbeat agent (`set_screen` répété) = no-op.
 - NB : dossiers/icônes/splash ne sont **pas** des messages réseau — le Pi les fait lui-même
-  (`App.request_player_info/request_icon/request_splash` → `riot_web`/CDN, en async).
+  (`LeagueModule.request_player_info/request_icon/request_splash` → `riot_web`/CDN, en async).
 
 ## Écrans (`pi_display/`)
 - `screen.py` : base `Screen` (attr `cycle`), fond PNG chargé 1×, redessin par **dirty rects**.
@@ -77,12 +77,12 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
 
 ### History (`history`, code-drawn) + Store SQLite
 - Liste lue depuis **`store.py`** (SQLite `matches.db`, *.db gitignoré). Filtres SQL : **ARAM Chaos (défaut)** /
-  Classé / Normale / ARAM ; ◀/▶. Clic → `App.open_postgame_review(gameId)` (revue, RETOUR → liste).
+  Classé / Normale / ARAM ; ◀/▶. Clic → `LeagueModule.open_postgame_review(gameId)` (revue, RETOUR → liste).
 - **Toutes les parties viennent de la LCU** (via agent) : résumé **+ bilan 10 joueurs** (PC éteint OK).
 - **STATS** (`stats`, bouton de l'historique) : toi seul / ami seul / **ensemble = même équipe** (`[lol] compare`) ; bouton **Période** (`period.py`, dates incluses sur `game_creation` ms).
   Table `participations` (1 ligne/joueur/partie, rétro-remplie des bilans) ; parties de l'ami lues par
   l'agent (`/products/lol/{puuid}/matches`, puuid via liste d'amis), **hors historique affiché**.
-- **Synchro** (`App.sync_lcu` → `request_lcu_sync{since}` → agent `iter_lcu_sync` → lots
+- **Synchro** (`LeagueModule.sync_lcu` → `request_lcu_sync{since}` → agent `iter_lcu_sync` → lots
   `store_matches`) : à l'**ouverture de l'historique**, à la **connexion de l'agent**, en **fin
   de partie** (immédiate + re-synchros 8/20 s) et par **scan périodique** (`_maybe_sync`,
   `[lol] sync_minutes`, défaut 3 min). Bilan « dernière partie » affiché si **plus récent que

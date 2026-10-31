@@ -23,6 +23,7 @@ os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
 os.environ["SERVER_HOST"] = ""
 os.environ["IDFM_API_KEY"] = ""          # écran « Trains » sans appel réseau
+os.environ["RIOT_API_KEY"] = ""          # API Web Riot sans clé réelle
 
 
 @pytest.fixture
