@@ -11,6 +11,7 @@ import base64
 import time
 
 from config import load_riot_key
+from icon_cache import IconCache
 from modules.base import Module
 from modules.league.champ_select_screen import ChampSelectScreen
 from modules.league.history_screen import MatchHistoryScreen
@@ -19,8 +20,8 @@ from modules.league.postgame_screen import PostGameScreen
 from modules.league.queue_screen import QueueScreen
 from modules.league.stats_screen import StatsScreen
 from riot_web import (Champions, RiotWeb, build_player_info, icon_bytes,
-                      normalize_riot_id, skin_tile_bytes, splash_bytes)
-from store import Store, riot_key
+                      normalize_riot_id, splash_bytes)
+from store import Store
 
 
 class LeagueModule(Module):
@@ -50,6 +51,8 @@ class LeagueModule(Module):
         }
         # Base locale des parties (historique consultable PC éteint).
         self.store = Store()
+        # Icônes sur disque (icons.db) : pas de re-téléchargement au redémarrage.
+        self.icon_cache = IconCache()
         # Bilan en mode « dernière partie » (fin de game) vs « revue » (clic).
         self._postgame_latest = False
         # Id de la partie la plus récente AVANT la partie en cours : sert à
@@ -63,12 +66,6 @@ class LeagueModule(Module):
         # d'indexation. `_last_sync` = time.monotonic() du dernier scan.
         self._sync_interval = max(0, int(lol_cfg.get("sync_minutes", 3) or 0)) * 60
         self._last_sync = 0.0
-        # Skins vus pendant la partie en cours (la LCU ne les donne pas) :
-        # {riot_key: (skin, est_moi)}, rattachés à la partie quand elle arrive
-        # dans le store (plus récente que `_live_baseline`, même champion que moi).
-        self._live_skins: dict[str, tuple[int, bool]] = {}
-        self._live_champion = 0
-        self._live_baseline = None
         self._repair_champion_names()
 
     def _current(self) -> str | None:
@@ -88,9 +85,6 @@ class LeagueModule(Module):
     def on_agent_screen(self, screen: str, shown: bool) -> None:
         # Un écran poussé par l'agent (vraie partie) sort du mode « revue ».
         self.postgame_return = None
-        if screen == "lol":              # nouvelle partie : relevé des skins
-            self._live_skins, self._live_champion = {}, 0
-            self._live_baseline = self.store.newest_id()
         # Fin de partie : on tente une synchro immédiate (+ re-synchros
         # différées : la LCU met parfois quelques secondes à indexer).
         # Le scan périodique reste le filet. `_postgame_baseline` =
@@ -156,38 +150,36 @@ class LeagueModule(Module):
         self.app.async_call(lambda: build_player_info(self.riot, self.champions, rid, cid),
                             deliver)
 
-    def request_icon(self, champion_id, skin=0) -> None:
-        """Image d'un champion en tâche de fond : tuile du skin joué (skin > 0,
-        Community Dragon), à défaut l'icône carrée classique. Livrée aux écrans
-        par `set_champion_icon(championId, skin, b64)`."""
-        cid, skin = int(champion_id or 0), int(skin or 0)
+    def request_icon(self, champion_id) -> None:
+        """Icône de champion (cache disque, sinon CDN), en tâche de fond."""
+        cid = int(champion_id or 0)
         if cid <= 0:
             return
 
         def fetch():
-            raw = skin_tile_bytes(cid, skin) or icon_bytes(cid)
+            raw = icon_bytes(cid, self.icon_cache)
             return base64.b64encode(raw).decode("ascii") if raw else None
 
         def deliver(b64):
             for screen in self.app.screens.values():
                 if hasattr(screen, "set_champion_icon"):
-                    screen.set_champion_icon(cid, skin, b64)
+                    screen.set_champion_icon(cid, b64)
         self.app.async_call(fetch, deliver)
 
-    def request_splash(self, champion_id, skin=0) -> None:
-        """Art de chargement (portrait) du skin choisi, en tâche de fond."""
-        cid, skin = int(champion_id or 0), int(skin or 0)
+    def request_splash(self, champion_id) -> None:
+        """Splash art depuis Data Dragon, en tâche de fond."""
+        cid = int(champion_id or 0)
         if cid <= 0:
             return
 
         def fetch():
-            raw = splash_bytes(self.champions, cid, skin)
+            raw = splash_bytes(self.champions, cid)
             return base64.b64encode(raw).decode("ascii") if raw else None
 
         def deliver(b64):
             target = self.app.screens.get("champselect")
             if target is not None and hasattr(target, "set_champion_splash"):
-                target.set_champion_splash(cid, skin, b64)
+                target.set_champion_splash(cid, b64)
         self.app.async_call(fetch, deliver)
 
     # ---------------------------------------------------------------- synchro
@@ -249,32 +241,8 @@ class LeagueModule(Module):
                 self.app.screens[name].reload()
         self.app.async_call(lambda: self.store.fill_champion_names(self.champions.name), done)
 
-    def note_live_players(self, players: list) -> None:
-        """Partie en cours (Live Client, ~1/s) : retient le skin de chacun."""
-        for p in players or []:
-            key = riot_key(p.get("riotId"))
-            if key:
-                self._live_skins[key] = (int(p.get("skinId") or 0), bool(p.get("isSelf")))
-            if p.get("isSelf"):
-                self._live_champion = int(p.get("championId") or 0)
-
-    def _attach_live_skins(self) -> None:
-        """Rattache les skins relevés à la partie qui vient d'arriver dans le
-        store (la plus récente, postérieure au début du relevé, avec mon champion)."""
-        if not self._live_skins:
-            return
-        newest = self.store.newest_id()
-        if not newest or newest == self._live_baseline:
-            return
-        detail = self.store.detail(newest) or {}
-        if (detail.get("me") or {}).get("championId") != self._live_champion:
-            return
-        self.store.set_skins(newest, [(k, skin, me) for k, (skin, me) in self._live_skins.items()])
-        self._live_skins = {}
-
     def _on_sync_done(self) -> None:
         """Fin d'une synchro : rafraîchit l'écran courant si besoin."""
-        self._attach_live_skins()
         self._repair_champion_names()
         name = self._current()
         if name == "history":

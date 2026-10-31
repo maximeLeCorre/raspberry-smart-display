@@ -66,19 +66,3 @@ def test_cache_des_parties_borne(monkeypatch):
         riot.match(f"EUW_{i}")
     assert len(riot._match_cache) == riot_web.MATCH_CACHE_SIZE
     assert "EUW_0" not in riot._match_cache
-
-
-def test_tuile_du_skin_joue_chroma_compris():
-    from riot_web import CDRAGON_ASSETS, skin_asset_url
-    detail = {"id": 21, "skins": [
-        {"id": 21000, "tilePath": "/lol-game-data/assets/ASSETS/Characters/MissFortune/"
-                                  "Skins/Base/Images/missfortune_splash_tile_0.jpg"},
-        {"id": 21007, "tilePath": "/lol-game-data/assets/ASSETS/Characters/MissFortune/"
-                                  "Skins/Skin07/Images/missfortune_splash_tile_7.jpg",
-         "chromas": [{"id": 21014, "tilePath": "/lol-game-data/assets/v1/champion-chroma-images/21/21014.png"}]},
-    ]}
-    tile7 = CDRAGON_ASSETS + "assets/characters/missfortune/skins/skin07/images/missfortune_splash_tile_7.jpg"
-    assert skin_asset_url(detail, 7) == tile7
-    assert skin_asset_url(detail, 14) == tile7         # chroma -> art du skin parent
-    assert skin_asset_url(detail, 99) is None
-    assert skin_asset_url(detail, 7, "loadScreenPath") is None   # champ absent

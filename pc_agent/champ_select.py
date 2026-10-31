@@ -24,13 +24,6 @@ POSITIONS = {
 }
 
 
-def _skin_num(selected_skin_id, champ_id) -> int:
-    """N° de skin dans le champion (0 = base) ; 0 si le skin ne correspond pas
-    au champion affiché (intention de pick, skin pas encore choisi)."""
-    sid = int(selected_skin_id or 0)
-    return sid % 1000 if champ_id and sid // 1000 == champ_id else 0
-
-
 def build_champ_select_payload(lcu: LcuClient) -> dict | None:
     """Résumé de la sélection pour NOTRE équipe (les 5, dont nous).
 
@@ -63,8 +56,6 @@ def build_champ_select_payload(lcu: LcuClient) -> dict | None:
             "riotId": riot_id,
             "championId": champ_id,
             "championName": lcu.champion_name(champ_id),
-            # Skin choisi : `selectedSkinId` = championId*1000 + n° (chroma inclus).
-            "skinId": _skin_num(cell.get("selectedSkinId"), champ_id),
             "position": POSITIONS.get((cell.get("assignedPosition") or "").lower(),
                                       cell.get("assignedPosition", "")),
             "gameName": game_name,

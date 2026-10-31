@@ -7,6 +7,7 @@ import pytest
 import app as app_module
 from modules.league import module as league_module
 from config import load_config
+from icon_cache import IconCache
 from store import Store
 
 
@@ -14,6 +15,7 @@ from store import Store
 def app(tmp_path, free_port, monkeypatch):
     # Base des parties jetable (jamais le matches.db réel) ; synchro neutralisée.
     monkeypatch.setattr(league_module, "Store", lambda: Store(tmp_path / "t.db"))
+    monkeypatch.setattr(league_module, "IconCache", lambda: IconCache(tmp_path / "i.db"))
     cfg = load_config(app_module.__file__.replace("app.py", "config.toml"))
     cfg.setdefault("server", {})["host"] = ""
     cfg.setdefault("weather", {})["enabled"] = False

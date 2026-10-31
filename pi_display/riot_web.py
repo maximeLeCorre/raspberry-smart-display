@@ -34,14 +34,9 @@ ICON_CDN_URL = (
     "global/default/v1/champion-icons/{id}.png"
 )
 LOADING_ART_URL = "https://ddragon.leagueoflegends.com/cdn/img/champion/loading/{alias}_0.jpg"
-# Détail d'un champion (skins + chromas, chemins d'images du client) et racine
-# des assets du client sur Community Dragon (chemins en minuscules).
-CHAMPION_DETAIL_URL = (
-    "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/"
-    "global/default/v1/champions/{id}.json"
-)
-CDRAGON_ASSETS = ("https://raw.communitydragon.org/latest/plugins/"
-                  "rcp-be-lol-game-data/global/default/")
+# Version du contenu servi par Community Dragon (« 16.21.… ») : patch des icônes.
+CONTENT_METADATA_URL = "https://raw.communitydragon.org/latest/content-metadata.json"
+PATCH_TTL = 3600.0     # le patch change toutes les ~2 semaines : relu 1×/heure
 
 # ⚠️ L'API Riot est derrière Cloudflare : le User-Agent par défaut d'urllib
 # (`Python-urllib/x`) est bloqué (HTTP 403, Cloudflare « error code: 1010 »). On
@@ -231,70 +226,49 @@ class RiotWeb:
 
 
 # ----------------------------------------------------------- CDN images
-def icon_bytes(champion_id: int) -> bytes | None:
-    """Icône carrée d'un champion (PNG) via Community Dragon."""
-    if not champion_id or champion_id <= 0:
-        return None
+_patch = {"value": "", "at": float("-inf")}
+# Les icônes d'une partie sont demandées ensemble (workers) : les autres attendent
+# la 1re lecture du patch, sinon elles seraient stockées sans patch (re-téléchargées).
+_patch_lock = threading.Lock()
+
+
+def current_patch() -> str:
+    """Patch actuel (« 16.21 ») d'après Community Dragon, relu au plus 1×/heure ;
+    '' si inconnu (réseau)."""
+    with _patch_lock:
+        if time.monotonic() - _patch["at"] >= PATCH_TTL:
+            _patch["at"] = time.monotonic()
+            try:
+                version = json.loads(_http_get(CONTENT_METADATA_URL) or b"{}").get("version", "")
+            except ValueError:
+                version = ""
+            if version:
+                _patch["value"] = ".".join(version.split(".")[:2])
+        return _patch["value"]
+
+
+def _download_icon(champion_id: int) -> bytes | None:
     return _http_get(ICON_CDN_URL.format(id=champion_id), timeout=8)
 
 
-# Détails de champion déjà téléchargés (~60 Ko chacun) ; seuls les succès sont
-# gardés (un échec réseau sera retenté à la prochaine demande).
-_champion_details: dict[int, dict] = {}
-
-
-def _champion_detail(champion_id: int) -> dict | None:
-    if champion_id not in _champion_details:
-        raw = _http_get(CHAMPION_DETAIL_URL.format(id=champion_id), timeout=8)
-        try:
-            data = json.loads(raw) if raw else None
-        except ValueError:
-            data = None
-        if not isinstance(data, dict):
-            return None
-        _champion_details[champion_id] = data
-    return _champion_details[champion_id]
-
-
-def skin_asset_url(detail: dict, skin_num: int, field: str = "tilePath") -> str | None:
-    """URL d'une image du skin n° `skin_num` : `tilePath` = tuile (recadrage
-    carré du splash), `loadScreenPath` = portrait de l'écran de chargement.
-
-    ⚠️ Les icônes carrées (`champion-icons`) ne montrent que le skin de base, à
-    l'illustration souvent ancienne : en jeu, on voit le skin joué. Un chroma
-    (ex. « Arcade (rubis) ») prend l'image de son skin parent (la sienne n'est
-    qu'une vignette du modèle recoloré)."""
-    target = int(detail.get("id") or 0) * 1000 + skin_num
-    for skin in detail.get("skins") or []:
-        ids = [skin.get("id")] + [c.get("id") for c in skin.get("chromas") or []]
-        if target in ids:
-            path = skin.get(field) or ""
-            prefix = "/lol-game-data/assets/"
-            if path.startswith(prefix):
-                return CDRAGON_ASSETS + path[len(prefix):].lower()
-            return None
-    return None
-
-
-def _skin_asset_bytes(champion_id: int, skin_num: int, field: str) -> bytes | None:
-    if not champion_id or champion_id <= 0 or skin_num <= 0:
+def icon_bytes(champion_id: int, cache=None) -> bytes | None:
+    """Icône carrée d'un champion (PNG, Community Dragon) : la même qu'en jeu
+    (le HUD utilise ce visuel, skin de base). `cache` (`IconCache`) : servie depuis
+    le disque si téléchargée au patch actuel (ou patch inconnu : hors ligne)."""
+    if not champion_id or champion_id <= 0:
         return None
-    detail = _champion_detail(champion_id)
-    url = skin_asset_url(detail, skin_num, field) if detail else None
-    return _http_get(url, timeout=8) if url else None
+    hit = cache.get(champion_id) if cache is not None else None
+    patch = current_patch()
+    if hit and (not patch or hit[1] == patch):
+        return hit[0]
+    raw = _download_icon(champion_id)
+    if raw and cache is not None:
+        cache.put(champion_id, patch, raw)
+    return raw or (hit[0] if hit else None)
 
 
-def skin_tile_bytes(champion_id: int, skin_num: int) -> bytes | None:
-    """Tuile (JPEG carré) du skin joué, ou None (skin de base, inconnu, réseau...)."""
-    return _skin_asset_bytes(champion_id, skin_num, "tilePath")
-
-
-def splash_bytes(champions: Champions, champion_id: int, skin_num: int = 0) -> bytes | None:
-    """Art de chargement (portrait) du skin, à défaut celui du skin de base
-    (Data Dragon, par alias de champion)."""
-    raw = _skin_asset_bytes(champion_id, skin_num, "loadScreenPath")
-    if raw:
-        return raw
+def splash_bytes(champions: Champions, champion_id: int) -> bytes | None:
+    """Art de chargement (portrait) via Data Dragon, par alias de champion."""
     alias = champions.alias(champion_id)
     if not alias:
         return None

@@ -111,8 +111,6 @@ def summarize_full(data: dict, id_resolver=None) -> dict:
             "riotId": f"{name}#{tag}" if (name and tag) else "",
             "champion": champion,
             "championId": (id_resolver(champion) if id_resolver else 0) or 0,
-            # Skin joué (n° dans le champion ; chroma inclus) : le Pi affiche son art.
-            "skinId": int(p.get("skinID", 0) or 0),
             "position": p.get("position", ""),
             "team": team,
             "k": kills, "d": scores.get("deaths", 0), "a": scores.get("assists", 0),

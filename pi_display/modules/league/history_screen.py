@@ -117,8 +117,8 @@ class MatchHistoryScreen(Screen):
         self._last_signature = None
         self.icons.forget_requests()
 
-    def set_champion_icon(self, champion_id: int, skin: int, icon_b64: str | None) -> None:
-        if self.icons.put(champion_id, skin, icon_b64):
+    def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:
+        if self.icons.put(champion_id, icon_b64):
             self._last_signature = None
 
     # --------------------------------------------------------------- entrées
@@ -209,8 +209,7 @@ class MatchHistoryScreen(Screen):
         if i > 0:
             pygame.draw.line(surface, (34, 44, 70), (12, top), (self.width - 12, top), 1)
 
-        surface.blit(self._get_icon(g.get("championId") or 0, g.get("championName") or "?",
-                                    g.get("skinId") or 0),
+        surface.blit(self._get_icon(g.get("championId") or 0, g.get("championName") or "?"),
                      (12, cy - ICON // 2))
         name = _fit(g.get("championName") or "?", self.font_row, 150)
         surface.blit(self.font_row.render(name, True, WHITE),
@@ -247,8 +246,8 @@ class MatchHistoryScreen(Screen):
         surface.blit(page_txt, page_txt.get_rect(center=(self.width // 2, PREV_RECT.centery)))
 
     # ----------------------------------------------------------- icônes
-    def _get_icon(self, champ_id: int, name: str, skin: int = 0) -> pygame.Surface:
-        return self.icons.get(champ_id, skin) or self._placeholder(name)
+    def _get_icon(self, champ_id: int, name: str) -> pygame.Surface:
+        return self.icons.get(champ_id) or self._placeholder(name)
 
     def _placeholder(self, name: str) -> pygame.Surface:
         surface = pygame.Surface((ICON, ICON))

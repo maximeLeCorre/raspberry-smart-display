@@ -107,9 +107,9 @@ tuile Trains **remplace Actus** (liste via le bandeau) ; à droite de l'horloge 
 - **Live Client Data** (`pc_agent/riot_api.py`, `127.0.0.1:2999`) : **en partie uniquement**.
 - **API Web** (`pi_display/riot_web.py`, Pi, stdlib urllib) : `account-v1`(→PUUID), `summoner-v4`, `league-v4`,
   `champion-mastery-v4`, `match-v5`. ⚠️ `match-v5` **n'a pas les customs** (d'où la LCU). Tolérant aux erreurs.
-- ⚠️ **Icônes** : `champion-icons` = skin **de base** (vieil art) → on montre la **tuile du skin joué** (`skin_asset_url`,
-  chroma → skin parent ; `modules/league/icons.py`) : Live `skinID`, LCU `selectedSkinId` ; historique LCU **sans skins**
-  → relevés en partie, table `skins` rattachée à l'arrivée de la partie (`_attach_live_skins`).
+- **Icônes** : `champion-icons` (CDragon) = **les mêmes qu'en jeu** (HUD `*_square_0`, cadrage serré). Testé et rejeté par
+  l'user : tuiles de splash (trop dézoomées) et skins joués. Cache disque **`icons.db`** (`icon_cache.py`, hors sauvegarde),
+  repris quand le patch CDragon change ; cache mémoire par écran `modules/league/icons.py`.
 
 ## Agent (`pc_agent/main.py`, `sources/`)
 Chaque tick (`update_interval` 1–2 s) : 1ère `poll()` non-None gagne → `set_screen` (+ `data`).
