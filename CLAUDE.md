@@ -98,7 +98,7 @@ Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` T
 ### Trains (`transit`, Pi-only) — API **PRIM** IDFM, clé `IDFM_API_KEY` (.env), en-tête `apikey`
 `transit_feed.py` : `stop-monitoring` (ZdA `[transit] stop_area`, Chaville RD = 43241) + `general-message` par ligne /5 min, SIRI Lite. ⚠️ **Quota 1 000 req/jour PAR endpoint** (RAZ minuit UTC) → rythme des départs calé sur `x-ratelimit-remaining-day` (`next_delay`), nuit 15 min, 429 = pause jusqu'au `retry-after`.
 ⚠️ **2 lignes** : L (C01740) **et U** (C01741) → `[transit.lines]` ; 2 colonnes par direction (`paris_destinations`), états **écrits** ;
-tuile Trains **remplace Actus** (liste via le bandeau) ; à droite de l'horloge : **arrivée en gare** du prochain St-Lazare (`home_*`).
+**pas de tuile** (place libre, Actus via le bandeau) : on ouvre l'écran en touchant, à droite de l'horloge, l'**arrivée en gare** du prochain St-Lazare (`home_*`).
 
 ## API Riot & pièges
 - **LCU** (`pc_agent/lcu.py`, agent, client ouvert) : phase, sélection, historique, **actions**

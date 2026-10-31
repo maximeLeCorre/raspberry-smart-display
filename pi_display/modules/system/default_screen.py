@@ -23,8 +23,7 @@ import pygame
 
 from screen import ASSETS_DIR, Screen
 
-from modules.transit.transit_screen import (LINE_COLORS, arrival_label, minutes_label,
-                                            next_arrival)
+from modules.transit.transit_screen import LINE_COLORS, arrival_label, next_arrival
 
 from .news_screen import wrap_text
 from .rss_feed import get_feed
@@ -57,7 +56,7 @@ DOCK = pygame.Rect(240, 360, 552, 112)
 TILE_GAP = 8
 TILE_PAD = 8                 # marge intérieure du dock
 PRIMARY_WEIGHT = 1.3         # la tuile Jouer est plus large
-TILE_WEIGHTS = {"play": PRIMARY_WEIGHT, "trains": 1.2}   # Trains : « Versailles 12 min »
+TILE_WEIGHTS = {"play": PRIMARY_WEIGHT}
 TILE_SUB_LINES = 3           # lignes max du sous-titre d'une tuile
 
 # Libellés de la tuile Jouer quand l'agent propose un écran à rejoindre.
@@ -224,11 +223,9 @@ class DefaultScreen(Screen):
             ids += ["play", "history"]
         if "server" in screens:
             ids.append("server")
-        # Trains (s'il est actif) prend la place d'Actus : la liste des actus
-        # reste accessible via le bandeau France Info (détail → RETOUR → liste).
-        if "transit" in screens:
-            ids.append("trains")
-        elif "news" in screens:
+        # Module Trains actif : sa place reste libre (écran ouvert par le prochain
+        # train à côté de l'horloge) et Actus ne revient pas (liste via le bandeau).
+        if "transit" not in screens and "news" in screens:
             ids.append("news")
         if not ids:
             return []
@@ -471,34 +468,10 @@ class DefaultScreen(Screen):
             return ("Historique", f"{n} partie{'s' if n > 1 else ''}", DIM, False, True)
         if tid == "server":
             return self._server_tile_state()
-        if tid == "trains":
-            return self._trains_tile_state()
         if tid == "news":
             n = len(self.feed.articles()) if self.feed else 0
             return ("Actus", f"{n} articles" if n else "France Info", DIM, False, True)
         return ("", "", DIM, False, False)
-
-    def _trains_tile_state(self) -> tuple:
-        """Prochain départ dans chaque sens (« Paris 4 min ») + perturbation écrite."""
-        scr = self.app.screens.get("transit")
-        feed = getattr(scr, "feed", None)
-        if feed is None:
-            return ("Trains", "non configuré", FAINT, False, True)
-        snap = feed.snapshot()
-        if not snap["updated"]:
-            return ("Trains", "indisponible" if snap["error"] else "chargement…",
-                    RED if snap["error"] else FAINT, False, True)
-        labels = list(self.app.config.get("transit", {}).get(
-            "tile_labels", ["Paris", "Autre sens"]))
-        now = time.time()
-        lines = []
-        for label, to_paris in ((labels[0], True), (labels[-1], False)):
-            dep = next((d for d in snap["departures"]
-                        if d.to_paris == to_paris and not d.cancelled), None)
-            lines.append(f"{label} {minutes_label(dep, now)}" if dep else f"{label} —")
-        if any(m.is_disruption for m in snap["messages"]):
-            return ("Trains", "\n".join(lines + ["perturbation"]), ORANGE, False, True)
-        return ("Trains", "\n".join(lines), DIM, False, True)
 
     def _server_tile_state(self) -> tuple:
         srv = self.app.screens.get("server")
@@ -561,6 +534,10 @@ class DefaultScreen(Screen):
         if NEWS_STRIP.collidepoint(pos):
             self._open_news(self._news_article)
             return None
+        if self._train_feed is not None and TRAIN_BOX.collidepoint(pos):
+            self.app.manual_screen = "transit"        # prochain train -> écran Trains
+            self.app.set_screen("transit")
+            return None
         for tid, rect in self._tiles:
             if rect.collidepoint(pos):
                 self._activate(tid)
@@ -578,9 +555,6 @@ class DefaultScreen(Screen):
         elif tid == "server":
             self.app.manual_screen = "server"
             self.app.set_screen("server")
-        elif tid == "trains":
-            self.app.manual_screen = "transit"
-            self.app.set_screen("transit")
         elif tid == "news":
             self._open_news(None)
 

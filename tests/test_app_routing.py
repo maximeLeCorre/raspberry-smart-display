@@ -100,3 +100,17 @@ def test_deconnexion_revient_au_defaut(app):
     net(app, type="_disconnected")
     assert app.current.name == "default"
     assert app.agent_connected is False
+
+
+def test_trains_ouverts_par_le_prochain_train_pas_par_une_tuile(app):
+    from modules.system.default_screen import TRAIN_BOX
+
+    class Feed:
+        def snapshot(self):
+            return {"updated": 0, "error": "", "departures": [], "messages": []}
+
+    app.screens["transit"].feed = Feed()
+    app.screens["default"].enter()
+    assert "trains" not in [tid for tid, _rect in app.screens["default"]._tiles]
+    app.current.handle_touch(TRAIN_BOX.center)
+    assert app.current.name == "transit" and app.manual_screen == "transit"
