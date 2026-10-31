@@ -139,7 +139,7 @@ def msg_store_player_games(riot_id: str, games: list, done: bool = True) -> dict
 
 
 def msg_lcu_timeline(game_id, payload: dict | None) -> dict:
-    """Courbes (1 point/minute) d'une partie terminée, récupérées à la demande."""
+    """Timeline (1 point/minute) d'une partie terminée, récupérée à la demande."""
     return {"type": "lcu_timeline", "gameId": game_id, "payload": payload}
 
 

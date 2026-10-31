@@ -153,7 +153,7 @@ def build_lcu_detail(lcu: LcuClient, game_id) -> dict | None:
 
 
 def build_lcu_timeline(lcu: LcuClient, game_id) -> dict | None:
-    """Courbes d'une partie terminée (LCU, 1 point par minute ; marche aussi en
+    """Timeline d'une partie terminée (LCU, 1 point par minute ; marche aussi en
     ARAM Chaos/custom, absentes de `match-v5`). Même format que le relevé en
     direct du Pi : `players` (ordre participantId) + `frames`
     [{t (s), gold, cs, level, kills}] aux listes alignées sur `players`.

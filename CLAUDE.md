@@ -21,7 +21,7 @@ l'activité League of Legends du PC Windows. Tout se teste aussi **sur le PC** (
 - Modules actifs = **le Pi** (`config.toml [modules]`), annoncés par `hello`. Système
   (horloge, écran `default`) toujours actif. `app.py`/`main.py` sont **agnostiques du jeu** : la logique d'un jeu vit
   dans son instance `Module(app)` (`app.modules[nom]`, créée avant ses écrans) via les crochets `on_connected`/
-  `on_disconnected`/`on_agent_screen`/`on_message`/`tick` ; League = `modules/league/module.py` (store, synchro, bilan, Jouer).
+  `on_disconnected`/`on_agent_screen`/`route_screen`/`on_message`/`tick` ; League = `modules/league/module.py` (store, synchro, bilan, Jouer).
 - Ajouter : écrans + `Module` (`modules/__init__.py`) [+ `Source` (`sources/__init__.py`) pour un
   jeu ; un **domaine Pi-only** comme `server` n'a **pas de Source**] + activer en config.
 
@@ -65,9 +65,9 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
   ~50 j réels) ; `pi_health.py` = /proc local, seuils `[pi_health]` (CPU soutenu). Tout marche PC éteint.
 - **league/** : `queue` (ready-check, **bouton Accepter** → `lcu_action`), `champselect` (clic → dossier + splash), `lol`, `postgame`, `history`.
 - `LolScreen` : **timers d'objectifs** (Faille only) + **dossier adverse au clic** (`riotId`) ; compteurs extrapolés (agent ~1/s).
-- **`curves`** (bouton COURBES de `lol`/`postgame`) : or/CS/niveau/kills, vues Équipes/Écart/Joueurs. Direct = relevé mémoire /10 s,
-  or **estimé** (`priceTotal` des objets ; ⚠️ `price` Live = dernière étape). Après : timeline **LCU** (1 pt/min, or exact) → table
-  `timelines`, demandée **une à la fois** ; ⚠️ `match-v5` n'a **pas** l'ARAM Chaos (403).
+- **`counters`** (**défaut en jeu** via `route_screen` ; TABLEAU → `lol`, ÉCARTS ← `lol`/`postgame`) : compteurs ton équipe/adversaires + **écart** écrit (or/kills/CS/niveau moyen) et tendance
+  1 min (courbes testées, **rejetées** par l'user). Direct = message courant + relevé /10 s, or **estimé** (`priceTotal` ; ⚠️ `price` Live =
+  dernière étape). Après : timeline **LCU** (1 pt/min, or exact) → table `timelines`, une à la fois ; ⚠️ `match-v5` sans ARAM Chaos (403).
 
 ### PostGame (`postgame`, code-drawn)
 Barres horizontales des 10 joueurs ; onglets = métrique (`dmg/taken/gold/cs/vision/heal`),
@@ -117,7 +117,7 @@ tuile Trains **remplace Actus** (liste via le bandeau) ; à droite de l'horloge 
 Chaque tick (`update_interval` 1–2 s) : 1ère `poll()` non-None gagne → `set_screen` (+ `data`).
 `LeagueSource` mappe `gameflow_phase` → `queue`/`champselect`/`lol`/`postgame` (payload None).
 `handle_request` répond au Pi : `request_lcu_sync` (synchro en **thread**, `store_matches` par
-lots), `request_lcu_detail`, `request_lcu_timeline` (courbes), `lcu_action`. `summarize_full` (partie) porte `game_mode`/
+lots), `request_lcu_detail`, `request_lcu_timeline` (écarts), `lcu_action`. `summarize_full` (partie) porte `game_mode`/
 `objectives`/`riotId`. **Agent sans clé ni `RiotWeb`.** Simu (`simulator.py`) = données locales fictives ; l'enrichissement/historique dépendent du Pi (clé/compte réels).
 
 ### Bouton « Jouer une ARAM Chaos » (défaut) → action `play`

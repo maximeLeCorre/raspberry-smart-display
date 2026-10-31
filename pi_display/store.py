@@ -9,7 +9,7 @@ Table `participations` : une ligne par (partie, joueur) tirée des bilans 10
 joueurs — de NOS parties et de celles d'un ami suivi (`[lol] compare`). Elle
 permet de comparer « moi seul », « l'ami seul » et « nous deux, même équipe ».
 
-Table `timelines` : courbes d'une partie (1 point/minute : or total exact, CS,
+Table `timelines` : timeline d'une partie (1 point/minute : or total exact, CS,
 niveau, kills des 10 joueurs), tirées de la LCU après la partie (~6 Ko).
 
 Thread-safe (un verrou) car les écritures arrivent depuis la boucle réseau et les
@@ -340,7 +340,7 @@ class Store:
             return None
 
     def without_timeline(self, game_ids) -> list[str]:
-        """Parmi ces parties (stockées), celles dont on n'a pas encore les courbes."""
+        """Parmi ces parties (stockées), celles dont on n'a pas encore la timeline."""
         ids = [str(g) for g in game_ids if g]
         if not ids:
             return []

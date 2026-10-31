@@ -33,6 +33,11 @@ class Module:
         """L'agent demande un NOUVEL écran (heartbeat exclu) ; `shown` = l'App
         l'a affiché (pas de verrou manuel)."""
 
+    def route_screen(self, screen: str) -> str:
+        """Écran à afficher quand l'agent demande `screen` (ou qu'on le rejoint
+        depuis l'accueil) : permet à un module d'ouvrir une autre vue par défaut."""
+        return screen
+
     def on_message(self, msg: dict) -> bool:
         """Message réseau non générique ; True = traité (arrête la recherche)."""
         return False
