@@ -15,6 +15,10 @@ Le contrôle d'un service (start/stop/restart) passe par `run_action`, exécuté
 hors boucle de rendu par `App.async_call`. systemd + `sudo` (règle NOPASSWD
 limitée à `systemctl` côté serveur).
 
+Un service avec `minecraft_port` est aussi interrogé en « Server List Ping »
+(`minecraft_ping.py`, sans SSH) toutes les `players_seconds` : joueurs connectés
+lus par `players(unit)`.
+
 Connexion **persistante** réutilisée (paramiko), reconnexion automatique. La clé
 privée vit sur le Pi (`certs/`, copiée par deploy) ; l'empreinte du serveur est
 épinglée au 1er contact (TOFU) dans un known_hosts dédié.
@@ -27,6 +31,8 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
+
+from . import minecraft_ping
 
 try:
     import paramiko
@@ -59,7 +65,8 @@ class ServerLink:
         self.services = [
             {"label": s.get("label") or s.get("unit", "service"),
              "unit": str(s.get("unit", "")).strip(),
-             "use_sudo": bool(s.get("use_sudo", True))}
+             "use_sudo": bool(s.get("use_sudo", True)),
+             "minecraft_port": int(s.get("minecraft_port", 0) or 0)}
             for s in cfg.get("services", []) if str(s.get("unit", "")).strip()
         ]
 
@@ -70,6 +77,9 @@ class ServerLink:
         self._prev_cpu: tuple[int, int] | None = None   # (total, idle) du dernier poll
         self._snapshot: dict = {"online": False, "error": "", "services": {}}
         self.backup = None                       # ServerBackup (cf. get_link)
+        self.players_seconds = max(10, int(cfg.get("players_seconds", 30) or 30))
+        self._players: dict[str, dict] = {}      # unit -> statut Minecraft (ou error)
+        self._players_ts = 0.0
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
     def start(self) -> None:
@@ -85,6 +95,12 @@ class ServerLink:
         """Copie de l'historique : [(ts, cpu %, ram %)], du plus ancien au plus récent."""
         with self._snap_lock:
             return list(self._history)
+
+    def players(self, unit: str) -> dict | None:
+        """Dernier statut Minecraft du service : {online, max, names, version}
+        ou {error}, None si jamais interrogé (ou pas de `minecraft_port`)."""
+        with self._snap_lock:
+            return self._players.get(unit)
 
     # ------------------------------------------------------------ commande SSH
     def _build_metrics_cmd(self) -> str:
@@ -187,7 +203,21 @@ class ServerLink:
     def _loop(self) -> None:
         while True:
             self._poll_once()
+            if time.monotonic() - self._players_ts >= self.players_seconds:
+                self._players_ts = time.monotonic()
+                self._poll_players()
             time.sleep(self.poll_seconds)
+
+    def _poll_players(self) -> None:
+        for svc in self.services:
+            if not svc["minecraft_port"]:
+                continue
+            try:
+                res = minecraft_ping.ping(self.host, svc["minecraft_port"])
+            except Exception as exc:     # serveur arrêté / en démarrage : pas d'erreur bloquante
+                res = {"error": str(exc) or exc.__class__.__name__}
+            with self._snap_lock:
+                self._players[svc["unit"]] = res
 
     def _poll_once(self) -> None:
         res = self._exec(self._metrics_cmd)

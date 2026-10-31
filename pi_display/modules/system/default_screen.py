@@ -516,7 +516,12 @@ class DefaultScreen(Screen):
             word = {"active": "actif", "inactive": "arrêté", "failed": "en échec"}.get(
                 status, status or "…")
             # Libellé et état sur deux lignes : l'état est écrit, pas seulement coloré.
-            return ("Serveur", f"{service['label']}\n{word}", color, False, True)
+            sub = f"{service['label']}\n{word}"
+            players = link.players(service["unit"]) if service.get("minecraft_port") else None
+            if status == "active" and players and "error" not in players:
+                n = players["online"]
+                sub += "\n" + (f"{n} joueur{'s' if n > 1 else ''}" if n else "personne")
+            return ("Serveur", sub, color, False, True)
         cpu = snap.get("cpu_pct")
         return ("Serveur", f"CPU {cpu:.0f} %" if cpu is not None else "en ligne",
                 GREEN, False, True)

@@ -118,6 +118,9 @@ keep_days = 14
 label = "Minecraft"
 unit = "minecraft.service"
 use_sudo = true
+# Joueurs connectés lus par « Server List Ping » (TCP, sans SSH) toutes les
+# [server] players_seconds (30 s par défaut). 0 / absent = pas de liste.
+minecraft_port = 25565
 
 [transit]
 # Écran « Trains » : le Pi interroge lui-même l'API PRIM d'Île-de-France Mobilités.
