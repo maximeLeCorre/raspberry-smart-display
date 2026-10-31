@@ -12,12 +12,11 @@ RETOUR (« ARAM Chaos » par défaut). En bas : flèches ◀/▶.
 
 from __future__ import annotations
 
-import base64
-import io
 
 import pygame
 
 from inputs import ACTION_BACK
+from modules.league.icons import ChampionIcons
 from screen import Screen
 
 # Filtres : (libellé, clause WHERE SQL sur le store, params).
@@ -82,8 +81,7 @@ class MatchHistoryScreen(Screen):
         self.page = 0
         self.syncing = False
         self.has_more = False
-        self._icon_cache: dict[int, pygame.Surface] = {}
-        self._requested: set[int] = set()
+        self.icons = ChampionIcons(self.league, ICON)
         self._rows: list[tuple[pygame.Rect, object]] = []
         self._last_signature = None
 
@@ -117,12 +115,10 @@ class MatchHistoryScreen(Screen):
 
     def enter(self) -> None:
         self._last_signature = None
-        self._requested.clear()
+        self.icons.forget_requests()
 
-    def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:
-        surface = self._decode_icon(icon_b64)
-        if surface is not None:
-            self._icon_cache[champion_id] = surface
+    def set_champion_icon(self, champion_id: int, skin: int, icon_b64: str | None) -> None:
+        if self.icons.put(champion_id, skin, icon_b64):
             self._last_signature = None
 
     # --------------------------------------------------------------- entrées
@@ -158,7 +154,7 @@ class MatchHistoryScreen(Screen):
         signature = (
             self.filter_idx, self.page, self.syncing, self.has_more,
             tuple((g.get("gameId"), g.get("championId"), g.get("win")) for g in self.games),
-            tuple(sorted(self._icon_cache.keys())),
+            self.icons.signature(),
         )
         if signature == self._last_signature:
             return []
@@ -213,7 +209,8 @@ class MatchHistoryScreen(Screen):
         if i > 0:
             pygame.draw.line(surface, (34, 44, 70), (12, top), (self.width - 12, top), 1)
 
-        surface.blit(self._get_icon(g.get("championId") or 0, g.get("championName") or "?"),
+        surface.blit(self._get_icon(g.get("championId") or 0, g.get("championName") or "?",
+                                    g.get("skinId") or 0),
                      (12, cy - ICON // 2))
         name = _fit(g.get("championName") or "?", self.font_row, 150)
         surface.blit(self.font_row.render(name, True, WHITE),
@@ -250,23 +247,8 @@ class MatchHistoryScreen(Screen):
         surface.blit(page_txt, page_txt.get_rect(center=(self.width // 2, PREV_RECT.centery)))
 
     # ----------------------------------------------------------- icônes
-    def _get_icon(self, champ_id: int, name: str) -> pygame.Surface:
-        if champ_id in self._icon_cache:
-            return self._icon_cache[champ_id]
-        if champ_id > 0 and champ_id not in self._requested:
-            self._requested.add(champ_id)
-            self.league.request_icon(champ_id)
-        return self._placeholder(name)
-
-    def _decode_icon(self, icon_b64) -> pygame.Surface | None:
-        if not icon_b64:
-            return None
-        try:
-            raw = base64.b64decode(icon_b64)
-            image = pygame.image.load(io.BytesIO(raw)).convert_alpha()
-            return pygame.transform.smoothscale(image, (ICON, ICON))
-        except Exception:
-            return None
+    def _get_icon(self, champ_id: int, name: str, skin: int = 0) -> pygame.Surface:
+        return self.icons.get(champ_id, skin) or self._placeholder(name)
 
     def _placeholder(self, name: str) -> pygame.Surface:
         surface = pygame.Surface((ICON, ICON))

@@ -25,14 +25,13 @@ Dossier reçu au clic (message player_info) : même format qu'en sélection.
 
 from __future__ import annotations
 
-import base64
-import io
 import time
 
 import pygame
 
 from inputs import ACTION_BACK
 from modules.league.names import display_name
+from modules.league.icons import ChampionIcons
 from screen import Screen
 
 # Zones alignées sur les cadres du fond (lol.png) : bandeau haut (0-48),
@@ -87,8 +86,7 @@ class LolScreen(Screen):
 
         self.data: dict = {}
         self._recv_at: float | None = None       # horloge locale à la réception
-        self._icon_cache: dict[int, pygame.Surface] = {}
-        self._requested: set[int] = set()
+        self.icons = ChampionIcons(self.league, ICON)
         self.selected_puuid: str | None = None
         self.player_info: dict[str, dict] = {}    # puuid -> dossier
         self._requested_info: set[str] = set()
@@ -97,17 +95,16 @@ class LolScreen(Screen):
 
     def enter(self) -> None:
         self._last_signature = None
-        self._requested.clear()
+        self.icons.forget_requests()
         self.selected_puuid = None
 
     def update_data(self, payload: dict) -> None:
         self.data = payload or {}
         self._recv_at = time.monotonic()
+        self.league.note_live_players(self.data.get("players"))
 
-    def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:
-        surface = self._decode_icon(icon_b64)
-        if surface is not None:
-            self._icon_cache[champion_id] = surface
+    def set_champion_icon(self, champion_id: int, skin: int, icon_b64: str | None) -> None:
+        if self.icons.put(champion_id, skin, icon_b64):
             self._last_signature = None
 
     def set_player_info(self, puuid: str, info: dict) -> None:
@@ -340,23 +337,9 @@ class LolScreen(Screen):
 
     # ----------------------------------------------------------- icônes
     def _get_icon(self, player: dict) -> pygame.Surface:
-        champ_id = player.get("championId") or 0
-        if champ_id in self._icon_cache:
-            return self._icon_cache[champ_id]
-        if champ_id > 0 and champ_id not in self._requested:
-            self._requested.add(champ_id)
-            self.league.request_icon(champ_id)
-        return self._placeholder_icon(player.get("champion") or "?")
-
-    def _decode_icon(self, icon_b64) -> pygame.Surface | None:
-        if not icon_b64:
-            return None
-        try:
-            raw = base64.b64decode(icon_b64)
-            image = pygame.image.load(io.BytesIO(raw)).convert_alpha()
-            return pygame.transform.smoothscale(image, (ICON, ICON))
-        except Exception:
-            return None
+        # Skin joué (Live Client) : sa tuile, comme dans le jeu.
+        return (self.icons.get(player.get("championId"), player.get("skinId"))
+                or self._placeholder_icon(player.get("champion") or "?"))
 
     def _placeholder_icon(self, champion_name: str) -> pygame.Surface:
         surface = pygame.Surface((ICON, ICON))
@@ -381,5 +364,5 @@ class LolScreen(Screen):
             tuple((o.get("key"), o.get("at"), o.get("detail"))
                   for o in self._objectives()),
             sel, bool(self.player_info.get(sel)) if sel else None,
-            tuple(sorted(self._icon_cache.keys())),
+            self.icons.signature(),
         )
