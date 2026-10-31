@@ -45,7 +45,11 @@ class App:
         # rendu : un worker produit un résultat, livré au thread principal.
         self._io_results: "queue.Queue[tuple]" = queue.Queue()
 
-        pygame.init()
+        # Affichage + polices seulement : `pygame.init()` ouvrirait aussi le
+        # mixer (ALSA), jamais utilisé -> des milliers d'« underrun » par heure
+        # dans le journal du Pi (usure de la carte SD).
+        pygame.display.init()
+        pygame.font.init()
         pygame.display.set_caption("Pi Display (simulateur écran 5\")")
         self._init_display(monitor)
         self.clock = pygame.time.Clock()
