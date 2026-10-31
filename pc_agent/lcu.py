@@ -76,7 +76,7 @@ class LcuClient:
         self.session = requests.Session()
         self.session.verify = False
         self._champions: dict[int, str] | None = None      # cache id -> nom
-        self._champion_ids: dict[str, int] | None = None   # cache nom (minuscule) -> id
+        self._champion_ids: dict[str, int] | None = None   # cache nom/alias (minuscule) -> id
         self._champion_alias: dict[int, str] | None = None  # cache id -> alias (ex. "MissFortune")
         self._summary_retry_at = 0.0   # échec de chargement -> nouvel essai après ce délai
 
@@ -177,13 +177,20 @@ class LcuClient:
             self._load_champion_summary()
         return (self._champions or {}).get(champion_id, "")
 
-    def champion_id_by_name(self, name: str) -> int:
-        """Id d'un champion depuis son nom affiché (0 si inconnu)."""
-        if not name:
+    def champion_id_by_name(self, name: str, raw_name: str = "") -> int:
+        """Id d'un champion (0 si inconnu), de préférence depuis le nom technique
+        du Live Client (`rawChampionName` = « game_character_displayname_MasterYi »
+        -> alias, indépendant de la langue), sinon depuis le nom affiché.
+
+        ⚠️ Le nom affiché du Live Client est **localisé** (« Maître Yi ») alors que
+        la table des champions est en anglais (« Master Yi »)."""
+        if not (name or raw_name):
             return 0
         if self._summary_due():
             self._load_champion_summary()
-        return (self._champion_ids or {}).get(name.lower(), 0)
+        ids = self._champion_ids or {}
+        alias = (raw_name or "").rsplit("_", 1)[-1]
+        return ids.get(alias.lower(), 0) or ids.get((name or "").lower(), 0)
 
     def champion_alias(self, champion_id: int) -> str:
         """Alias d'un champion (ex. 'MissFortune'), pour les URL d'art."""
@@ -214,11 +221,16 @@ class LcuClient:
             data = resp.json()
         except ValueError:
             return
-        for champ in data:
+        # ⚠️ La table contient aussi des variantes de mode de jeu (ids 60xxx, alias
+        # « Jade_Tristana ») au MÊME nom que le vrai champion : par id croissant +
+        # setdefault, le nom désigne toujours le vrai (sinon icônes de la variante).
+        for champ in sorted(data, key=lambda c: c.get("id") or 0):
             cid = champ.get("id")
             name = champ.get("name", "")
+            alias = champ.get("alias", "")
             if isinstance(cid, int) and cid > 0:
                 self._champions[cid] = name
-                self._champion_alias[cid] = champ.get("alias", "")
-                if name:
-                    self._champion_ids[name.lower()] = cid
+                self._champion_alias[cid] = alias
+                for key in (name, alias):
+                    if key:
+                        self._champion_ids.setdefault(key.lower(), cid)
