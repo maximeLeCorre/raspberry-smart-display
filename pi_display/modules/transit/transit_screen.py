@@ -1,6 +1,6 @@
 """Écran « Trains » (code-drawn) : prochains départs d'une gare, par direction.
 
-Ouvert depuis la tuile Trains de l'accueil. Deux colonnes (vers Paris / sens
+Ouvert en touchant le prochain train (à droite de l'horloge, accueil). Deux colonnes (vers Paris / sens
 opposé) de prochains départs : minutes restantes, heure, destination, mission,
 voie et état. En bas, l'info trafic de la ligne (toucher = message suivant).
 
