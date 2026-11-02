@@ -23,6 +23,10 @@ class Source:
         """
         return None
 
+    def start(self, wake) -> None:
+        """Démarre une écoute temps réel facultative : appeler `wake()` à chaque
+        changement réveille la boucle de l'agent (sinon : rythme `update_interval`)."""
+
     def handle_request(self, message: dict, sender) -> bool:
         """Traite une requête du Pi (infos joueur, icône, splash...).
         Renvoie True si le message a été pris en charge."""

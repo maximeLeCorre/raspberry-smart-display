@@ -114,8 +114,8 @@ Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` T
   repris quand le patch CDragon change (relu 1×/h ; vide aussi le cache mémoire des écrans `modules/league/icons.py`).
 
 ## Agent (`pc_agent/main.py`, `sources/`)
-Chaque tick (`update_interval` 1–2 s) : 1ère `poll()` non-None gagne → `set_screen` (+ `data`).
-`LeagueSource` mappe `gameflow_phase` → `queue`/`champselect`/`lol`/`postgame` (payload None).
+Chaque tick (`update_interval` 1–2 s, **ou réveil immédiat** par un événement : `Source.start(wake)`) : 1ère `poll()` non-None gagne → `set_screen` (+ `data`, **renvoyé seulement s'il change** ; RAZ au `hello`).
+**Événements LCU** (`lcu_events.py`, WAMP sur `wss://127.0.0.1:<port>`) : abonnement **ciblé** (phase, ready-check, file, sélection ; pas le flux `OnJsonApiEvent` complet) qui ne fait que réveiller la boucle ; WS tombé = repli sur le rythme normal. Live Client Data n'a **pas** d'événements (reste à ~1 s). `LeagueSource` mappe `gameflow_phase` → `queue`/`champselect`/`lol`/`postgame` (payload None).
 `handle_request` répond au Pi : `request_lcu_sync` (synchro en **thread**, `store_matches` par
 lots), `request_lcu_detail`, `request_lcu_timeline` (écarts), `lcu_action`. `summarize_full` (partie) porte `game_mode`/
 `objectives`/`riotId`. **Agent sans clé ni `RiotWeb`.** Simu (`simulator.py`) = données locales fictives ; l'enrichissement/historique dépendent du Pi (clé/compte réels).

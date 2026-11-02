@@ -18,6 +18,7 @@ import psutil
 
 from champ_select import build_champ_select_payload
 from lcu import LcuClient, find_lcu_credentials
+from lcu_events import LcuEventListener
 from riot_client import RiotClient
 from phases import (build_lcu_detail, build_lcu_timeline, build_queue_payload,
                     find_friend_puuid, iter_lcu_sync, iter_player_sync)
@@ -92,6 +93,9 @@ class LeagueSource(Source):
             return None
         # Le Pi enrichit les dossiers au clic via le `riotId` de chaque joueur.
         return summarize_full(data, self.lcu.champion_id_by_name)
+
+    def start(self, wake) -> None:
+        LcuEventListener(wake).start()
 
     def poll(self):
         phase = self.lcu.gameflow_phase()
