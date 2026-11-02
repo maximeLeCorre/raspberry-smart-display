@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import os
 import ssl
+import threading
 import time
 import tomllib
 import traceback
@@ -34,6 +35,9 @@ DEFAULT_SCREEN = "default"
 # Intervalle du heartbeat (s) : ré-affirme l'écran courant pour prouver le lien
 # et forcer la reconnexion après une coupure (veille). Cf. run_real.
 HEARTBEAT_SECONDS = 10
+# Un changement LCU arrive en rafale (plusieurs événements) : après un réveil on
+# attend ce délai pour les regrouper en un seul tour (≤ ~20 lectures REST/s).
+COALESCE_SECONDS = 0.05
 
 
 def load_auth_token() -> str:
@@ -96,6 +100,12 @@ def run_real(url: str, config: dict, auth_token: str = "", ssl_context=None) -> 
     # sont réellement interrogées (selon ce que le Pi annonce via 'hello').
     sources = {name: cls(config) for name, cls in SOURCES.items()}
     state = {"enabled": None}  # None = tout activé tant que le Pi n'a rien dit
+    # Réveil immédiat de la boucle (événement temps réel d'une Source) au lieu
+    # d'attendre `interval` : écran de ready-check/sélection en ~50 ms.
+    wake = threading.Event()
+    # Dernier payload envoyé : un `data` identique n'est pas renvoyé. Remis à
+    # None quand le Pi (re)dit `hello` ou qu'un envoi échoue (Pi à resservir).
+    sent = {"payload": None}
 
     def is_enabled(name: str) -> bool:
         return state["enabled"] is None or name in state["enabled"]
@@ -103,6 +113,8 @@ def run_real(url: str, config: dict, auth_token: str = "", ssl_context=None) -> 
     def handle(message: dict):
         if message.get("type") == "hello":
             state["enabled"] = set(message.get("modules", []))
+            sent["payload"] = None
+            wake.set()
             print(f"[agent] Modules actifs (annoncés par le Pi) : {sorted(state['enabled'])}")
             return
         for name, src in sources.items():
@@ -110,6 +122,8 @@ def run_real(url: str, config: dict, auth_token: str = "", ssl_context=None) -> 
                 return
 
     sender.start_receiver(handle)
+    for src in sources.values():
+        src.start(wake.set)
 
     last_screen = None
     last_beat = 0.0
@@ -118,6 +132,7 @@ def run_real(url: str, config: dict, auth_token: str = "", ssl_context=None) -> 
         while True:
             # Une réponse LCU inattendue ne doit jamais tuer l'agent (lancé caché,
             # rien ne le relancerait) : on journalise et on retente au tick suivant.
+            wake.clear()   # un événement arrivé pendant ce tour en relance un autre
             try:
                 result = None
                 for name, src in sources.items():
@@ -137,8 +152,10 @@ def run_real(url: str, config: dict, auth_token: str = "", ssl_context=None) -> 
                 if last_screen != screen:
                     sender.send_safe(msg_set_screen(screen))
                     last_screen = screen
-                if payload is not None:
-                    sender.send_safe(msg_data(screen, payload))
+                    sent["payload"] = None
+                if payload is not None and (screen, payload) != sent["payload"]:
+                    ok = sender.send_safe(msg_data(screen, payload))
+                    sent["payload"] = (screen, payload) if ok else None
             else:
                 if last_screen != DEFAULT_SCREEN:
                     sender.send_safe(msg_set_screen(DEFAULT_SCREEN))
@@ -154,7 +171,8 @@ def run_real(url: str, config: dict, auth_token: str = "", ssl_context=None) -> 
                 sender.send_safe(msg_set_screen(last_screen or DEFAULT_SCREEN))
                 last_beat = now
 
-            time.sleep(interval)
+            if wake.wait(interval):
+                time.sleep(COALESCE_SECONDS)
     except KeyboardInterrupt:
         print("\n[agent] Arrêt demandé.")
     finally:
