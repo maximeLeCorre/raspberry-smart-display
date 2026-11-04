@@ -1,0 +1,25 @@
+# Projet XcodeGen : sert UNIQUEMENT à la vérification de compilation sur GitHub
+# Actions (.github/workflows/watch_app.yml). Sur le Mac, le projet est créé à la
+# main depuis le modèle Xcode (voir README.md).
+name: LolRemote
+options:
+  deploymentTarget:
+    watchOS: "10.0"
+targets:
+  LolRemote:
+    type: application
+    platform: watchOS
+    sources: [LolRemote]
+    info:
+      path: build/Info.plist
+      properties:
+        CFBundleDisplayName: LolRemote
+        WKApplication: true
+        WKWatchOnly: true
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Connexion au Pi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fr.maxime.lolremote
+        SWIFT_VERSION: "5.0"

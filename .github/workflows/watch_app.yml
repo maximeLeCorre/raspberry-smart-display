@@ -1,0 +1,27 @@
+# Vérifie que l'app Apple Watch compile (simulateur, sans signature) : le code
+# est écrit sous Windows puis copié à la main sur un Mac.
+name: watch_app
+
+on:
+  push:
+    paths: ["watch_app/**", ".github/workflows/watch_app.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: XcodeGen
+        run: brew install xcodegen
+      - name: Génération du projet
+        working-directory: watch_app
+        run: xcodegen generate
+      - name: Compilation (simulateur watchOS)
+        working-directory: watch_app
+        run: |
+          xcodebuild -project LolRemote.xcodeproj -scheme LolRemote \
+            -destination 'generic/platform=watchOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 60
+          exit ${PIPESTATUS[0]}
