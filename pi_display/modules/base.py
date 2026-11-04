@@ -44,3 +44,13 @@ class Module:
 
     def tick(self) -> None:
         """Appelé à chaque frame (tâches périodiques légères)."""
+
+    def remote_view(self) -> dict:
+        """Part de ce module dans l'état de l'API télécommande (`remote_api.py`) ;
+        n'y mettre que ce qui sert à distance (chaque changement = une version)."""
+        return {}
+
+    def on_remote_action(self, body: dict) -> tuple[int, dict] | None:
+        """Action reçue par l'API télécommande : (statut HTTP, réponse) si ce
+        module la gère, sinon None."""
+        return None

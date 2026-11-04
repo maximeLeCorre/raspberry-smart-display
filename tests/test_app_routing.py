@@ -19,6 +19,7 @@ def app(tmp_path, free_port, monkeypatch):
     cfg = load_config(app_module.__file__.replace("app.py", "config.toml"))
     cfg.setdefault("server", {})["host"] = ""
     cfg.setdefault("weather", {})["enabled"] = False
+    cfg["remote"] = {"enabled": False}      # pas de port HTTP réel
     a = app_module.App(cfg, fullscreen=False, scale=1, monitor=None, debug=False,
                        host="127.0.0.1", port=free_port)
     a.modules["league"].sync_lcu = lambda: None

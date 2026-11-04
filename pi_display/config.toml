@@ -17,6 +17,13 @@ tls = false
 cert_file = "certs/pi-display.crt"   # chemins relatifs à la racine du dépôt
 key_file = "certs/pi-display.key"    # (clé privée, reste sur le Pi)
 
+[remote]
+# API HTTP « télécommande » (montre, curl) : état du ready-check / de la
+# sélection + actions (accepter, banc ARAM). Jeton REMOTE_API_TOKEN (.env) ;
+# vide = accès ouvert au réseau local. Voir remote_api.py.
+enabled = true
+port = 8766
+
 [display]
 width = 800        # résolution interne de rendu (ne pas changer : écran 5")
 height = 480

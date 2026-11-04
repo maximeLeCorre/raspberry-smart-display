@@ -45,8 +45,9 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
 - **Sécurité** (2 couches activables) : TLS `wss://` (cert auto-signé du Pi épinglé par
   l'agent, `check_hostname=False`) et/ou **jeton** `DISPLAY_AUTH_TOKEN` (.env racine, 1er
   message `auth` de l'agent). `tls=false`/jeton vide = clair/ouvert (test local).
+- **API télécommande** (`remote_api.py`, `[remote]` port 8766, HTTP/1.1 keep-alive, `Bearer REMOTE_API_TOKEN`) pour la **montre** : `GET /state?v=N` = **long polling** (répond au 1er changement) ; `POST /action` (accept/decline/swap{championId}/reroll) remise à la boucle, **vérifiée sur l'état courant** (périmé → 409). Crochets `Module.remote_view`/`on_remote_action`.
 - **Pi → agent** : `hello{modules}`, `request_lcu_sync{since}`, `request_player_sync{riotId,known}`, `request_lcu_detail{gameId}`, `request_lcu_timeline{gameId}`,
-  `lcu_action{action…}` (accepter un ready-check ; ou `play{queueId,invite}` = bouton « Jouer », § Bouton Jouer).
+  `lcu_action{action…}` (accept/decline/reroll/`swap{championId}` banc ARAM ; `play{queueId,invite}` = § Bouton Jouer).
 - **agent → Pi** : `auth{token}`, `set_screen{screen}`, `data{screen,payload}`
   (queue/champselect/lol ; joueur = `riotId` Nom#TAG ; `default`/`playStatus` = étape du bouton
   Jouer), `store_matches{games,done}`, `store_player_games{riotId,games,done}` (ami), `lcu_detail{gameId,payload}`, `lcu_timeline{gameId,payload}`.
@@ -123,7 +124,7 @@ lots), `request_lcu_detail`, `request_lcu_timeline` (écarts), `lcu_action`. `su
 ### Bouton « Jouer une ARAM Chaos » (défaut) → action `play`
 `LeagueSource._play` (thread) : lance le client si fermé, crée le lobby (`[lol] lobby_queue`,
 2400=KIWI) si pas déjà le bon, invite `[lol] lobby_invite` s'il est en ligne — **toute étape déjà
-faite est sautée** ; pousse `playStatus` au Pi (bandeau, clic neutralisé pendant). ⚠️ **Lancer
+faite est sautée** ; pousse `playStatus` au Pi (bandeau ; ré-appui pendant = **Annuler** → `play_cancel`, les attentes lèvent `PlayCancelled`). ⚠️ **Lancer
 League** : `--launch-product` peu fiable → **API Riot Client** (`riot_client.py`, POST
 `product-launcher`, auth lockfile), **réessais** (1er POST souvent ignoré) jusqu'au process League ;
 lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ Jamais `taskkill /F` League
@@ -133,8 +134,7 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
 - `pi_display/config.toml` : réseau, FPS, GPIO, `[rss]`, `[modules]`, **`[riot] platform/regional`**,
   **`[lol] summoner`/`friends`/`lobby_queue`/`lobby_invite`** (bouton Jouer).
 - `pc_agent/config.toml` : IP/port du Pi, `update_interval`, process LoL, `[lol] launch_exe`/`launch_args` (Riot Client, pour le bouton Jouer). **Pas de clé.**
-- **`.env`** (racine, **ignoré**, modèle `.env.example`) : `RIOT_API_KEY`, `DISPLAY_AUTH_TOKEN`, `SERVER_HOST`, `IDFM_API_KEY` ;
-  ⚠️ c'est le `.env` **du Pi** qui compte (Pi autonome) : `deploy_pi.py` y copie ces 4 clés.
+- **`.env`** (racine, **ignoré**, modèle `.env.example`) : `RIOT_API_KEY`, `DISPLAY_AUTH_TOKEN`, `SERVER_HOST`, `IDFM_API_KEY`, `REMOTE_API_TOKEN` ; ⚠️ c'est le `.env` **du Pi** qui compte : `deploy_pi.py` y copie ces 5 clés.
 
 ## Fonds · Tests · Git · Déploiement
 - **Fonds** : PNG 800×480 dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres **dans le PNG** (code au pixel ;
