@@ -27,13 +27,14 @@ from backlight import Backlight
 from inputs import ACTION_BACK, ACTION_NEXT, InputManager
 from modules import MODULES
 from network import NetworkServer
+from remote_api import RemoteServer, RemoteState
 
 DEFAULT_SCREEN = "default"
 
 
 class App:
     def __init__(self, config, *, fullscreen, scale, monitor, debug, host, port,
-                 auth_token="", ssl_context=None):
+                 auth_token="", ssl_context=None, remote_token=""):
         self.config = config
         self.width = config["display"]["width"]
         self.height = config["display"]["height"]
@@ -66,6 +67,8 @@ class App:
                                     auth_token=auth_token, ssl_context=ssl_context)
         self.server.start()
         self.inputs = InputManager(config, self.action_queue, debug)
+        # Dernier payload `data` de l'agent par écran (vue de l'API télécommande).
+        self.agent_data: dict[str, dict] = {}
 
         # Écrans disponibles, construits depuis les modules activés en config.
         self._build_screens(config.get("modules", {}))
@@ -83,8 +86,22 @@ class App:
         # Veille douce de l'écran quand le PC est absent (cf. backlight.py).
         self.backlight = Backlight(config.get("backlight", {}))
 
+        # API télécommande (montre…) : état publié + actions remises à la boucle.
+        self.remote_state = RemoteState()
+        self.remote = None
+        remote_cfg = config.get("remote", {})
+        if remote_cfg.get("enabled", False):
+            try:
+                self.remote = RemoteServer(host, remote_cfg.get("port", 8766),
+                                           self.remote_state, self.net_queue,
+                                           token=remote_token)
+                self.remote.start()
+            except OSError as exc:
+                print(f"[remote] API HTTP non démarrée : {exc}")
+
         self.running = False
         self.set_screen(DEFAULT_SCREEN)
+        self._publish_remote()
 
     def _build_screens(self, modules_cfg: dict) -> None:
         self.screens = {}
@@ -265,12 +282,31 @@ class App:
                 self.do_action(action)
 
     def _handle_network(self) -> None:
+        changed = False
         while True:
             try:
                 msg = self.net_queue.get_nowait()
             except queue.Empty:
                 break
             self._on_network(msg)
+            changed = True
+        if changed:
+            self._publish_remote()
+
+    def _publish_remote(self) -> None:
+        snapshot = {"agent": self.agent_connected, "screen": self.network_screen}
+        for module in self.modules.values():
+            snapshot.update(module.remote_view())
+        self.remote_state.publish(snapshot)
+
+    def _on_remote_action(self, request) -> None:
+        if not self.agent_connected:
+            return request.reply(503, {"ok": False, "error": "PC non connecté"})
+        for module in self.modules.values():
+            answer = module.on_remote_action(request.body)
+            if answer is not None:
+                return request.reply(*answer)
+        request.reply(400, {"ok": False, "error": "action inconnue"})
 
     def _on_network(self, msg: dict) -> None:
         msg_type = msg.get("type")
@@ -287,6 +323,7 @@ class App:
             self.manual_screen = None
             self.agent_connected = False
             self.network_screen = DEFAULT_SCREEN
+            self.agent_data.clear()
             for module in self.modules.values():
                 module.on_disconnected()
             self.set_screen(DEFAULT_SCREEN)
@@ -314,7 +351,11 @@ class App:
             screen = msg.get("screen")
             payload = msg.get("payload", {})
             if screen in self.screens:
+                self.agent_data[screen] = payload
                 self.screens[screen].update_data(payload)
+
+        elif msg_type == "_remote_action":
+            self._on_remote_action(msg["request"])
 
         else:
             # Messages propres à un jeu (store, bilans…) : au module concerné.
@@ -360,5 +401,7 @@ class App:
     def shutdown(self) -> None:
         self.backlight.restore()
         self.server.stop()
+        if self.remote is not None:
+            self.remote.stop()
         pygame.quit()
         print("[app] Arrêt.")

@@ -419,6 +419,55 @@ class LeagueModule(Module):
             if newest and newest != self._postgame_baseline:
                 self._load_detail(newest)
 
+    # ------------------------------------------------- télécommande (montre)
+    def remote_view(self) -> dict:
+        """Ready-check et sélection (banc ARAM) pour l'API télécommande. Rien en
+        partie : le tableau changerait chaque seconde pour rien."""
+        screen, data = self.app.network_screen, self.app.agent_data
+        if screen == "queue":
+            return {"queue": data.get("queue") or {}}
+        if screen == "champselect":
+            cs = data.get("champselect") or {}
+            me = next((p for p in cs.get("players", []) if p.get("isSelf")), {})
+            return {"champselect": {
+                "me": {"championId": me.get("championId", 0),
+                       "championName": me.get("championName", "")},
+                "bench": cs.get("bench", []),
+                "rerolls": cs.get("rerolls", 0),
+                "timer": cs.get("timer", {}),
+            }}
+        return {}
+
+    def on_remote_action(self, body: dict) -> tuple[int, dict] | None:
+        """Actions à distance, **vérifiées sur l'état courant** : une liste vue
+        sur la montre peut être périmée (champion pris entre-temps) → 409."""
+        action = body.get("action")
+        screen, data = self.app.network_screen, self.app.agent_data
+        if action in ("accept", "decline"):
+            queue = data.get("queue") or {}
+            if screen != "queue" or queue.get("state") != "readycheck":
+                return 409, {"ok": False, "error": "aucun ready-check en cours"}
+            self.lcu_action(action)
+            return 200, {"ok": True}
+        if action in ("swap", "reroll"):
+            if screen != "champselect":
+                return 409, {"ok": False, "error": "pas en sélection"}
+            cs = data.get("champselect") or {}
+            if action == "reroll":
+                if not cs.get("rerolls"):
+                    return 409, {"ok": False, "error": "plus de relance"}
+                self.lcu_action("reroll")
+                return 200, {"ok": True}
+            try:
+                cid = int(body.get("championId") or 0)
+            except (TypeError, ValueError):
+                cid = 0
+            if cid not in {c.get("championId") for c in cs.get("bench", [])}:
+                return 409, {"ok": False, "error": "champion plus sur le banc"}
+            self.app.server.send({"type": "lcu_action", "action": "swap", "championId": cid})
+            return 200, {"ok": True}
+        return None
+
     # --------------------------------------------------------- actions client
     def lcu_action(self, action: str) -> None:
         """Envoie une commande au client via l'agent (ex. accepter un ready-check)."""
@@ -433,6 +482,11 @@ class LeagueModule(Module):
             return
         self.app.server.send({"type": "lcu_action", "action": "play",
                               "queueId": self.lobby_queue, "invite": self.lobby_invite})
+
+    def play_cancel(self) -> None:
+        """Ré-appui sur « Jouer » pendant l'enchaînement : l'agent arrête ses
+        demandes (lancement en boucle, attente du client…)."""
+        self.app.server.send({"type": "lcu_action", "action": "play_cancel"})
 
     # ------------------------------------------------------------- navigation
     def open_history(self) -> None:

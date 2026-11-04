@@ -197,6 +197,7 @@ class DefaultScreen(Screen):
         self.font_train = (pygame.font.Font(str(DATE_FONT), 30) if DATE_FONT.exists()
                            else pygame.font.Font(None, 44))
         self._play_status = ""          # message d'étape du flux « jouer »
+        self._play_busy = False         # étape en cours (annulable), pas le message final
         # Tuiles calculées à l'entrée : les écrans des autres modules ne sont
         # pas encore tous construits quand celui-ci l'est.
         self._tiles: list[tuple[str, pygame.Rect]] = []
@@ -244,12 +245,14 @@ class DefaultScreen(Screen):
         self._train_feed = getattr(self.app.screens.get("transit"), "feed", None)
         self._reset_keys()
         self._play_status = ""
+        self._play_busy = False
         self._history_ts = 0.0
 
     def update_data(self, payload: dict) -> None:
         """L'agent pousse un message d'étape du flux « jouer » (vide = terminé)."""
         if "playStatus" in payload:
             self._play_status = str(payload.get("playStatus") or "")
+            self._play_busy = bool(payload.get("playBusy")) and bool(self._play_status)
 
     # ------------------------------------------------------------------ rendu
     def draw(self, surface: pygame.Surface) -> list[pygame.Rect]:
@@ -455,6 +458,9 @@ class DefaultScreen(Screen):
             joinable = self.app.joinable_screen()
             if joinable:
                 return ("Rejoindre", JOIN_LABELS.get(joinable, "LoL"), GREEN, True, True)
+            if self._play_status and self._play_busy:
+                # Ré-appui = annuler (ex. mise à jour impossible qui boucle).
+                return ("Annuler", self._play_status, GREEN, True, True)
             if self._play_status:
                 return ("En cours…", self._play_status, GREEN, True, False)
             if self.app.agent_connected:
@@ -548,6 +554,9 @@ class DefaultScreen(Screen):
         if tid == "play":
             if self.app.joinable_screen():
                 self.app.join_screen()
+            elif self._play_status and self._play_busy:
+                self.app.modules["league"].play_cancel()
+                self._play_status, self._play_busy = "Annulation…", False
             elif not self._play_status:
                 self.app.modules["league"].play()       # ignoré si l'agent est déconnecté
         elif tid == "history":

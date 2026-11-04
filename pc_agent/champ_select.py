@@ -65,9 +65,16 @@ def build_champ_select_payload(lcu: LcuClient) -> dict | None:
 
     timer = session.get("timer", {}) or {}
     bans = session.get("bans", {}) or {}
+    # Banc ARAM (champions échangeables) : `benchChampions` (récent) ou
+    # `benchChampionIds` (ancien format).
+    bench_ids = ([c.get("championId") for c in session.get("benchChampions") or []]
+                 or list(session.get("benchChampionIds") or []))
     return {
         "phase": "champselect",
         "players": players,
+        "bench": [{"championId": cid, "championName": lcu.champion_name(cid)}
+                  for cid in bench_ids if cid],
+        "rerolls": session.get("rerollsRemaining", 0) or 0,
         "timer": {
             "phase": SELECT_PHASES.get(timer.get("phase", ""), ""),
             "left": round((timer.get("adjustedTimeLeftInPhase", 0) or 0) / 1000),

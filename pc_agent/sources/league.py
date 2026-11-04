@@ -31,6 +31,7 @@ from sources.base import Source
 LCU_ACTIONS = {
     "accept": "/lol-matchmaking/v1/ready-check/accept",
     "decline": "/lol-matchmaking/v1/ready-check/decline",
+    "reroll": "/lol-champ-select/v1/session/my-selection/reroll",
 }
 
 # Démarrage à froid du client (Riot Client -> maj -> League -> login -> menu) :
@@ -41,6 +42,10 @@ LAUNCH_TIMEOUT = 240.0
 
 # Processus League (bootstrapper + client) : présence = League démarre/est ouverte.
 LEAGUE_PROCESSES = ("leagueclient.exe", "leagueclientux.exe")
+
+
+class PlayCancelled(Exception):
+    """Le bouton « Jouer » a été ré-appuyé pendant l'enchaînement."""
 
 
 def league_process_running() -> bool:
@@ -69,6 +74,7 @@ class LeagueSource(Source):
         self._syncing = False       # une synchro d'historique à la fois
         self._player_syncing = False  # idem pour l'historique de l'ami comparé
         self._playing = False       # un enchaînement « jouer » à la fois
+        self._cancel = threading.Event()  # ré-appui sur « Jouer » = annuler
         lol_cfg = config.get("lol", {})
         self._launch_exe = (lol_cfg.get("launch_exe") or "").strip()
         self._launch_args = list(lol_cfg.get("launch_args", []))
@@ -132,6 +138,11 @@ class LeagueSource(Source):
             return True
         if msg_type == "lcu_action":
             action = message.get("action")
+            if action == "play_cancel":
+                if self._playing:
+                    print("[league] Annulation du lancement demandée.")
+                    self._cancel.set()
+                return True
             if action == "play":
                 # Enchaînement potentiellement long (démarrage du client) : en
                 # thread, pour ne pas bloquer le récepteur.
@@ -141,6 +152,8 @@ class LeagueSource(Source):
                                            message.get("invite"))).start()
                 return True
             path = LCU_ACTIONS.get(action)
+            if action == "swap":   # banc ARAM : prendre ce champion
+                path = f"/lol-champ-select/v1/session/bench/swap/{int(message.get('championId') or 0)}"
             if path:
                 ok = self.lcu.post(path)
                 print(f"[league] Action LCU '{action}' -> {'OK' if ok else 'échec'}")
@@ -154,10 +167,12 @@ class LeagueSource(Source):
         présent/invité. Chaque étape déjà faite est sautée (idempotent). Pousse un
         message d'étape au Pi (`playStatus`) : confirmation + avancement."""
         self._playing = True
+        self._cancel.clear()
 
-        def status(text: str) -> None:
+        def status(text: str, busy: bool = True) -> None:
+            # `playBusy` : le Pi propose « Annuler » (pas sur le message final).
             print(f"[league] {text}")
-            sender.send_safe(msg_data("default", {"playStatus": text}))
+            sender.send_safe(msg_data("default", {"playStatus": text, "playBusy": busy}))
 
         status("Instruction reçue…")
         final = "Lobby ARAM Chaos prêt"
@@ -180,11 +195,19 @@ class LeagueSource(Source):
             if name:
                 status(f"Invitation de {name}…")
                 final = self._invite_if_needed(name)
+        except PlayCancelled:
+            # On arrête seulement NOS demandes : jamais tuer League (Vanguard).
+            final = "Lancement annulé"
         finally:
-            status(final)
+            status(final, busy=False)
             time.sleep(4)          # laisse le message final lisible sur le Pi
             sender.send_safe(msg_data("default", {"playStatus": ""}))
             self._playing = False
+
+    def _pause(self, seconds: float) -> None:
+        """Attente de l'enchaînement « jouer », interrompue par une annulation."""
+        if self._cancel.wait(seconds):
+            raise PlayCancelled
 
     def _ensure_lobby(self, queue_id) -> bool:
         """Crée le lobby si ce n'est pas déjà le bon. Plusieurs essais : juste
@@ -198,7 +221,7 @@ class LeagueSource(Source):
             if self.lcu.post("/lol-lobby/v2/lobby", {"queueId": queue_id}):
                 print(f"[league] Lobby ARAM Chaos (queueId={queue_id}) créé.")
                 return True
-            time.sleep(3)
+            self._pause(3)
         print(f"[league] Lobby ARAM Chaos (queueId={queue_id}) -> échec (plusieurs essais).")
         return False
 
@@ -229,7 +252,7 @@ class LeagueSource(Source):
                     print(f"[league] Lancement de League demandé (essai {posted}).")
                 else:
                     print("[league] Le Riot Client n'a pas accepté le lancement.")
-            time.sleep(4)
+            self._pause(4)
         print("[league] League ne démarre pas (process zombie ou Vanguard ?).")
         return False
 
@@ -254,7 +277,7 @@ class LeagueSource(Source):
         while time.monotonic() < deadline:
             if self.riot.is_logged_in():
                 return True
-            time.sleep(2)
+            self._pause(2)
         return False
 
     def _wait_ready(self, timeout: float) -> bool:
@@ -264,7 +287,7 @@ class LeagueSource(Source):
             summ = self.lcu.current_summoner()
             if summ and summ.get("summonerId"):
                 return True
-            time.sleep(2)
+            self._pause(2)
         return False
 
     def _current_queue(self):

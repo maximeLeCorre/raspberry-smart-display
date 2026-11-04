@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 
 from config import (build_server_ssl, is_raspberry_pi, load_auth_token,
-                    load_config)
+                    load_config, load_remote_token)
 
 CONFIG_PATH = Path(__file__).resolve().parent / "config.toml"
 
@@ -71,6 +71,7 @@ def main():
         host=host,
         port=port,
         auth_token=load_auth_token(),
+        remote_token=load_remote_token(),
         ssl_context=build_server_ssl(config),
     )
     app.run()

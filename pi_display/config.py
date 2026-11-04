@@ -92,6 +92,17 @@ def load_idfm_key() -> str:
     return (os.getenv("IDFM_API_KEY") or "").strip()
 
 
+def load_remote_token() -> str:
+    """Jeton de l'API télécommande (REMOTE_API_TOKEN), .env du Pi. Distinct du
+    jeton de l'agent : la montre ne peut pas se faire passer pour l'agent."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(ENV_PATH)
+    except ImportError:
+        pass
+    return (os.getenv("REMOTE_API_TOKEN") or "").strip()
+
+
 def build_server_ssl(config: dict) -> ssl.SSLContext | None:
     """Contexte TLS côté serveur (Pi), ou None si TLS désactivé.
 
