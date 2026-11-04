@@ -40,3 +40,7 @@ deploy/known_hosts
 
 # --- Scripts/rendus jetables (préfixe _, exclus aussi du déploiement) ---
 pi_display/_*
+
+# App montre : projet généré par XcodeGen (CI uniquement)
+watch_app/build/
+watch_app/*.xcodeproj/
