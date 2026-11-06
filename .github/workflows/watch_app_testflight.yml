@@ -10,15 +10,16 @@ jobs:
   testflight:
     runs-on: macos-26
     timeout-minutes: 30
-    env:
-      SIGN_DIR: ${{ runner.temp }}/signing
-      KEYCHAIN: ${{ runner.temp }}/lolremote.keychain-db
     steps:
       - uses: actions/checkout@v4
       - name: Secrets de signature
         env:
           WATCH_SIGNING: ${{ secrets.WATCH_SIGNING }}
         run: |
+          # (contexte `runner` interdit dans le `env:` du job → variables posées ici)
+          SIGN_DIR="$RUNNER_TEMP/signing"
+          echo "SIGN_DIR=$SIGN_DIR" >> "$GITHUB_ENV"
+          echo "KEYCHAIN=$RUNNER_TEMP/lolremote.keychain-db" >> "$GITHUB_ENV"
           test -n "$WATCH_SIGNING" || { echo "::error::secret WATCH_SIGNING absent (voir watch_app/README.md)"; exit 1; }
           mkdir -p "$SIGN_DIR"
           echo "$WATCH_SIGNING" | base64 --decode | tar -xz -C "$SIGN_DIR"
