@@ -62,7 +62,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project LolRemote.xcodeproj -scheme LolRemote -configuration Release \
-            -destination 'generic/platform=watchOS' \
+            -destination 'generic/platform=iOS' \
             -archivePath build/LolRemote.xcarchive \
             DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN" \

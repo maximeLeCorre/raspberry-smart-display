@@ -40,7 +40,7 @@ jobs:
             return 1
           }
           mkdir -p build
-          archive 'generic/platform=watchOS' || archive 'generic/platform=iOS'
+          archive 'generic/platform=iOS'   # destination de la coquille ; la montre suit
           plutil -p build/LolRemote.xcarchive/Info.plist
           find build/LolRemote.xcarchive/Products -maxdepth 5 | head -n 40
           # Attendu : ApplicationProperties (= archive d'app) et la montre dans Watch/.
