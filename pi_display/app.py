@@ -94,7 +94,8 @@ class App:
             try:
                 self.remote = RemoteServer(host, remote_cfg.get("port", 8766),
                                            self.remote_state, self.net_queue,
-                                           token=remote_token)
+                                           token=remote_token,
+                                           assets=self._remote_asset)
                 self.remote.start()
             except OSError as exc:
                 print(f"[remote] API HTTP non démarrée : {exc}")
@@ -298,6 +299,11 @@ class App:
         for module in self.modules.values():
             snapshot.update(module.remote_view())
         self.remote_state.publish(snapshot)
+
+    def _remote_asset(self, module: str, name: str):
+        """Fichier d'un module pour l'API (thread HTTP : cf. `Module.remote_asset`)."""
+        owner = self.modules.get(module)
+        return owner.remote_asset(name) if owner is not None else None
 
     def _on_remote_action(self, request) -> None:
         if not self.agent_connected:

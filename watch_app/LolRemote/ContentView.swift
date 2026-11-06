@@ -90,31 +90,67 @@ struct ChampSelectView: View {
     @EnvironmentObject var client: RemoteClient
     let select: ChampSelect?
 
+    private let columns = [GridItem(.adaptive(minimum: 52), spacing: 6)]
+
     var body: some View {
-        List {
-            Section {
-                Text(select?.me?.championName.isEmpty == false ? select!.me!.championName : "…")
-                    .font(.headline)
-                if let timer = select?.timer {
-                    Text("\(timer.phase ?? "") \(timer.left ?? 0) s")
-                        .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    ChampIcon(championId: select?.me?.championId ?? 0, size: 44)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(select?.me?.championName.isEmpty == false ? select!.me!.championName : "…")
+                            .font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+                        if let timer = select?.timer {
+                            Text("\(timer.phase ?? "") \(timer.left ?? 0) s")
+                                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
                 }
                 if let rerolls = select?.rerolls, rerolls > 0 {
                     Button("Relancer (\(rerolls))") { client.send(["action": "reroll"]) }
                 }
-            }
-            Section("Banc") {
+                Text("Banc").font(.footnote).foregroundStyle(.secondary)
                 let bench = select?.bench ?? []
                 if bench.isEmpty {
                     Text("(vide)").foregroundStyle(.secondary)
                 }
-                ForEach(bench) { champ in
-                    Button(champ.label) {
-                        client.send(["action": "swap", "championId": champ.championId])
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(bench) { champ in
+                        Button {
+                            client.send(["action": "swap", "championId": champ.championId])
+                        } label: {
+                            VStack(spacing: 2) {
+                                ChampIcon(championId: champ.championId, size: 48)
+                                Text(champ.label)   // nom toujours écrit (pas que l'image)
+                                    .font(.system(size: 10)).lineLimit(1).minimumScaleFactor(0.6)
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
         }
         .disabled(client.busy)
+        .opacity(client.busy ? 0.6 : 1)
+    }
+}
+
+/// Icône carrée du champion (servie par le Pi) ; case grise en attendant.
+struct ChampIcon: View {
+    @EnvironmentObject var icons: IconStore
+    let championId: Int
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let image = icons.images[championId] {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Color.gray.opacity(0.3)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .task(id: championId) { icons.load(championId) }
     }
 }

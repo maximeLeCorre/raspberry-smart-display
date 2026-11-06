@@ -1,7 +1,16 @@
 // Client de l'API télécommande du Pi (pi_display/remote_api.py).
-// GET /state en long polling (le Pi répond au 1er changement) + POST /action.
+// GET /state en long polling (le Pi répond au 1er changement) + POST /action ;
+// icônes de champions : GET /asset/league/icon/<id> (IconStore).
 import Foundation
+import UIKit
 import WatchKit
+
+/// Requête vers le Pi, avec le jeton.
+func apiRequest(_ path: String) -> URLRequest {
+    var req = URLRequest(url: URL(string: Secrets.baseURL + path)!)
+    req.setValue("Bearer \(Secrets.token)", forHTTPHeaderField: "Authorization")
+    return req
+}
 
 struct QueueInfo: Decodable {
     let state: String?          // "readycheck" | "searching"
@@ -73,18 +82,12 @@ final class RemoteClient: ObservableObject {
         start()
     }
 
-    private func request(_ path: String) -> URLRequest {
-        var req = URLRequest(url: URL(string: Secrets.baseURL + path)!)
-        req.setValue("Bearer \(Secrets.token)", forHTTPHeaderField: "Authorization")
-        return req
-    }
-
     private func loop() async {
         var version: Int?
         while !Task.isCancelled {
             let path = "/state?wait=25" + (version.map { "&v=\($0)" } ?? "")
             do {
-                let (data, response) = try await session.data(for: request(path))
+                let (data, response) = try await session.data(for: apiRequest(path))
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard code == 200 else {
                     connected = false
@@ -122,7 +125,7 @@ final class RemoteClient: ObservableObject {
         Task {
             busy = true
             defer { busy = false }
-            var req = request("/action")
+            var req = apiRequest("/action")
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -141,6 +144,34 @@ final class RemoteClient: ObservableObject {
                 message = "Pi injoignable"
                 WKInterfaceDevice.current().play(.failure)
             }
+        }
+    }
+}
+
+/// Icônes de champions, téléchargées une fois chacune. Le Pi envoie
+/// `Cache-Control: max-age` : le cache disque d'URLSession les garde entre
+/// deux lancements (pas de nouveau téléchargement au champ select suivant).
+@MainActor
+final class IconStore: ObservableObject {
+    @Published private(set) var images: [Int: UIImage] = [:]
+    private var pending = Set<Int>()
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 10
+        config.urlCache = URLCache(memoryCapacity: 4 << 20, diskCapacity: 32 << 20)
+        return URLSession(configuration: config)
+    }()
+
+    func load(_ championId: Int) {
+        guard championId > 0, images[championId] == nil, !pending.contains(championId) else { return }
+        pending.insert(championId)
+        Task {
+            defer { pending.remove(championId) }
+            let req = apiRequest("/asset/league/icon/\(championId)")
+            guard let result = try? await session.data(for: req),
+                  (result.1 as? HTTPURLResponse)?.statusCode == 200,
+                  let image = UIImage(data: result.0) else { return }
+            images[championId] = image
         }
     }
 }

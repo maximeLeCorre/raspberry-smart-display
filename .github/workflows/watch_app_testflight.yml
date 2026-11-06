@@ -1,0 +1,99 @@
+# Compile, signe et envoie l'app montre sur TestFlight. Lancement MANUEL
+# (Actions → watch_app_testflight → Run workflow). Tout le nécessaire tient dans
+# UN secret, WATCH_SIGNING (archive produite par watch_app/signing.py).
+name: watch_app_testflight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  testflight:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      SIGN_DIR: ${{ runner.temp }}/signing
+      KEYCHAIN: ${{ runner.temp }}/lolremote.keychain-db
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secrets de signature
+        env:
+          WATCH_SIGNING: ${{ secrets.WATCH_SIGNING }}
+        run: |
+          test -n "$WATCH_SIGNING" || { echo "::error::secret WATCH_SIGNING absent (voir watch_app/README.md)"; exit 1; }
+          mkdir -p "$SIGN_DIR"
+          echo "$WATCH_SIGNING" | base64 --decode | tar -xz -C "$SIGN_DIR"
+          # signing.env : TEAM_ID, KEY_ID, ISSUER_ID, P12_PASSWORD, REMOTE_API_TOKEN, PI_URL
+          while IFS='=' read -r key value; do
+            [ -n "$key" ] || continue
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done < "$SIGN_DIR/signing.env"
+      - name: Trousseau + profils
+        run: |
+          KC_PASSWORD=$(uuidgen)
+          security create-keychain -p "$KC_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASSWORD" "$KEYCHAIN"
+          security import "$SIGN_DIR/dist.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KC_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KEYCHAIN"
+          for dir in "$HOME/Library/MobileDevice/Provisioning Profiles" \
+                     "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$dir"
+            for profile in "$SIGN_DIR"/*.mobileprovision; do
+              uuid=$(security cms -D -i "$profile" | plutil -extract UUID raw -)
+              cp "$profile" "$dir/$uuid.mobileprovision"
+            done
+          done
+      - name: Jeton du Pi dans Secrets.swift
+        run: |
+          cat > watch_app/LolRemote/Secrets.swift <<EOF
+          enum Secrets {
+              static let baseURL = "$PI_URL"
+              static let token = "$REMOTE_API_TOKEN"
+          }
+          EOF
+      - name: XcodeGen
+        run: brew install xcodegen && cd watch_app && xcodegen generate && xcodebuild -version
+      - name: Archive signée
+        working-directory: watch_app
+        run: |
+          set -o pipefail
+          xcodebuild -project LolRemote.xcodeproj -scheme LolRemote -configuration Release \
+            -destination 'generic/platform=watchOS' \
+            -archivePath build/LolRemote.xcarchive \
+            DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN" \
+            archive | tail -n 80
+      - name: Envoi sur TestFlight
+        working-directory: watch_app
+        run: |
+          set -o pipefail
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict>
+              <key>fr.maxime.lolremote</key><string>LolRemote App Store</string>
+              <key>fr.maxime.lolremote.watchkitapp</key><string>LolRemote Watch App Store</string>
+            </dict>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath build/LolRemote.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist -exportPath build/export \
+            -authenticationKeyPath "$SIGN_DIR/AuthKey.p8" \
+            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" \
+            | tail -n 80
+          echo "Build ${{ github.run_number }} envoyée : TestFlight la traite (~10-30 min)."
+      - name: Nettoyage
+        if: always()
+        run: |
+          security delete-keychain "$KEYCHAIN" || true
+          rm -rf "$SIGN_DIR"

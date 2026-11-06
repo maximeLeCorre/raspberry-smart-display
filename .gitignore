@@ -44,3 +44,6 @@ pi_display/_*
 # App montre : projet généré par XcodeGen (CI uniquement)
 watch_app/build/
 watch_app/*.xcodeproj/
+
+# App montre : signature TestFlight (clé privée, secret) — watch_app/signing.py
+watch_app/signing/

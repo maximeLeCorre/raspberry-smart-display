@@ -1,12 +1,45 @@
-# Projet XcodeGen : sert UNIQUEMENT à la vérification de compilation sur GitHub
-# Actions (.github/workflows/watch_app.yml). Sur le Mac, le projet est créé à la
-# main depuis le modèle Xcode (voir README.md).
+# Projet XcodeGen, généré par la CI (.github/workflows/watch_app*.yml) : aucun Mac.
+# Une app « montre seule » doit être emballée dans une coquille iOS vide
+# (watchapp2-container) : une archive watchOS nue n'est pas envoyable sur
+# App Store Connect/TestFlight (bug Xcode 15→26, forums Apple 738218/817223).
 name: LolRemote
 options:
   deploymentTarget:
+    iOS: "17.0"
     watchOS: "10.0"
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"   # remplacé par le n° de run de la CI TestFlight
+    SWIFT_VERSION: "5.0"
 targets:
+  # Coquille iOS (sans code) : c'est elle qu'on archive et qu'App Store Connect voit.
   LolRemote:
+    type: application.watchapp2-container
+    platform: iOS
+    info:
+      path: build/Container-Info.plist
+      properties:
+        CFBundleDisplayName: LolRemote
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fr.maxime.lolremote
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: LolRemote App Store
+    dependencies:
+      - target: LolRemoteWatch
+        embed: true
+        copy:
+          destination: productsDirectory
+          subpath: $(CONTENTS_FOLDER_PATH)/Watch
+  # La vraie app (montre seule, sans app iPhone).
+  LolRemoteWatch:
     type: application
     platform: watchOS
     sources: [LolRemote]
@@ -14,12 +47,22 @@ targets:
       path: build/Info.plist
       properties:
         CFBundleDisplayName: LolRemote
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         WKApplication: true
         WKWatchOnly: true
+        ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Connexion au Pi
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: fr.maxime.lolremote
-        SWIFT_VERSION: "5.0"
+        PRODUCT_NAME: LolRemote
+        PRODUCT_BUNDLE_IDENTIFIER: fr.maxime.lolremote.watchkitapp
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SKIP_INSTALL: true
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: LolRemote Watch App Store

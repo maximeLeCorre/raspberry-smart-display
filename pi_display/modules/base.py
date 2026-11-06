@@ -50,6 +50,12 @@ class Module:
         n'y mettre que ce qui sert à distance (chaque changement = une version)."""
         return {}
 
+    def remote_asset(self, name: str) -> tuple[bytes, str] | None:
+        """Fichier servi par l'API (`/asset/<module>/<name>`) : (octets, type
+        MIME) ou None. ⚠️ Appelé dans un thread HTTP : rien de l'App, que du
+        thread-safe (cache disque, téléchargement)."""
+        return None
+
     def on_remote_action(self, body: dict) -> tuple[int, dict] | None:
         """Action reçue par l'API télécommande : (statut HTTP, réponse) si ce
         module la gère, sinon None."""

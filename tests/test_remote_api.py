@@ -125,3 +125,18 @@ def test_banc_aram(app):
     assert call(app, "POST", "/action", {"action": "swap", "championId": 22})[0] == 200
     assert {"type": "lcu_action", "action": "swap", "championId": 22} in app.sent
     assert call(app, "POST", "/action", {"action": "reroll"})[0] == 200
+
+
+def test_icone_de_champion(app, monkeypatch):
+    png = b"\x89PNG-factice"
+    monkeypatch.setattr(league_module, "icon_bytes",
+                        lambda cid, cache: png if cid == 22 else None)
+    url = f"http://127.0.0.1:{app.remote.port}/asset/league/icon/22"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {TOKEN}"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        assert resp.read() == png and resp.headers["Content-Type"] == "image/png"
+        assert "max-age" in resp.headers["Cache-Control"]
+    assert call(app, "GET", "/asset/league/icon/99")[0] == 404
+    assert call(app, "GET", "/asset/league/icon/abc")[0] == 404
+    assert call(app, "GET", "/asset/inconnu/icon/22")[0] == 404
+    assert call(app, "GET", "/asset/league/icon/22", token="faux")[0] == 401

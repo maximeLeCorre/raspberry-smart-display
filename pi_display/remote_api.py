@@ -6,6 +6,9 @@ vide = accès ouvert, comme le WebSocket en test local) :
                                        la réponse **attend** le prochain
                                        changement (long polling, ≤ `wait` s)
     POST /action  {"action": ...}      action d'un module (accept, swap…)
+    GET  /asset/<module>/<nom>         fichier d'un module (icône de champion :
+                                       /asset/league/icon/<id>), servi DANS le
+                                       thread HTTP (fournisseur thread-safe)
 
 Le serveur tourne dans ses propres threads (un par requête) et ne touche jamais
 l'état de l'App : la boucle principale **publie** un instantané (`RemoteState`),
@@ -24,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 MAX_WAIT = 30.0          # long polling : attente max d'une requête (s)
 ACTION_TIMEOUT = 2.0     # délai max pour que la boucle traite une action (s)
 MAX_BODY = 4096
+ASSET_MAX_AGE = 86400    # la montre garde les icônes en cache (s)
 
 
 class RemoteState:
@@ -72,8 +76,9 @@ class RemoteServer:
     """Serveur HTTP/1.1 (keep-alive) en thread démon."""
 
     def __init__(self, host: str, port: int, state: RemoteState, event_queue,
-                 token: str = ""):
+                 token: str = "", assets=None):
         self.state = state
+        self.assets = assets      # (module, nom) -> (octets, type MIME) | None
         self.event_queue = event_queue
         self.token = token or ""
         self._httpd = ThreadingHTTPServer((host, port), self._handler_class())
@@ -108,6 +113,14 @@ class RemoteServer:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def _send_bytes(self, data: bytes, content_type: str) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", f"private, max-age={ASSET_MAX_AGE}")
+                self.end_headers()
+                self.wfile.write(data)
+
             def _authorized(self) -> bool:
                 if not server.token:
                     return True
@@ -119,6 +132,8 @@ class RemoteServer:
 
             def do_GET(self):
                 url = urlparse(self.path)
+                if url.path.startswith("/asset/"):
+                    return self._asset(url.path[len("/asset/"):])
                 if url.path != "/state":
                     return self._send(404, {"ok": False, "error": "route inconnue"})
                 if not self._authorized():
@@ -131,6 +146,15 @@ class RemoteServer:
                     return self._send(400, {"ok": False, "error": "paramètre invalide"})
                 version, snapshot = server.state.wait(known, wait)
                 self._send(200, {"v": version, **snapshot})
+
+            def _asset(self, path: str) -> None:
+                if not self._authorized():
+                    return
+                module, _, name = path.partition("/")
+                found = server.assets(module, name) if server.assets and name else None
+                if not found:
+                    return self._send(404, {"ok": False, "error": "fichier introuvable"})
+                self._send_bytes(*found)
 
             def do_POST(self):
                 if urlparse(self.path).path != "/action":

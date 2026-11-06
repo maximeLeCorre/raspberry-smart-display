@@ -45,7 +45,7 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
 - **Sécurité** (2 couches activables) : TLS `wss://` (cert auto-signé du Pi épinglé par
   l'agent, `check_hostname=False`) et/ou **jeton** `DISPLAY_AUTH_TOKEN` (.env racine, 1er
   message `auth` de l'agent). `tls=false`/jeton vide = clair/ouvert (test local).
-- **API télécommande** (`remote_api.py`, `[remote]` port 8766, HTTP/1.1 keep-alive, `Bearer REMOTE_API_TOKEN`) pour la **montre** : `GET /state?v=N` = **long polling** (répond au 1er changement) ; `POST /action` (accept/decline/swap{championId}/reroll) remise à la boucle, **vérifiée sur l'état courant** (périmé → 409). Crochets `Module.remote_view`/`on_remote_action`.
+- **API télécommande** (`remote_api.py`, `[remote]` port 8766, HTTP/1.1 keep-alive, `Bearer REMOTE_API_TOKEN`) pour la **montre** : `GET /state?v=N` = **long polling** (répond au 1er changement) ; `POST /action` (accept/decline/swap{championId}/reroll) remise à la boucle, **vérifiée sur l'état courant** (périmé → 409) ; `GET /asset/league/icon/<id>` = icône (servie dans le thread HTTP → `Module.remote_asset` thread-safe). Crochets `Module.remote_view`/`on_remote_action`. Client = **`watch_app/`** (SwiftUI, **sans Mac** : CI GitHub + TestFlight, secret unique `WATCH_SIGNING` via `watch_app/signing.py` ; ⚠️ montre seule = coquille iOS `watchapp2-container` obligatoire, cf. `watch_app/README.md`).
 - **Pi → agent** : `hello{modules}`, `request_lcu_sync{since}`, `request_player_sync{riotId,known}`, `request_lcu_detail{gameId}`, `request_lcu_timeline{gameId}`,
   `lcu_action{action…}` (accept/decline/reroll/`swap{championId}` banc ARAM ; `play{queueId,invite}` = § Bouton Jouer).
 - **agent → Pi** : `auth{token}`, `set_screen{screen}`, `data{screen,payload}`
@@ -140,7 +140,7 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
 - **Fonds** : PNG 800×480 dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres **dans le PNG** (code au pixel ;
   `default.png` = `tools/gen_default_bg.py` sur `default_base.png`). Code-drawn : `news`, `weather`, `transit`, `postgame`, `history`, `stats`, `server`.
 - **Tests** : **pytest** (`tests/`) → `.\.venv\Scripts\python -m pytest` **avant chaque déploiement** ; headless (`conftest.py`). Rendus : scripts jetables `_`.
-- **Git** : repo privé `maximeLeCorre/raspberry-smart-display`, branche `main`. Commits **en français**
+- **Git** : repo **public** `maximeLeCorre/raspberry-smart-display` (rien de sensible commité), branche `main`. Commits **en français**
   co-signés `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. **Pas de commit/push sans demande.**
 - **Déploiement** : `deploy/deploy_pi.py` (~10 s ; clé SSH `~/.ssh/id_ed25519`, repli `PI_PASS` ; empreinte Pi épinglée
   `deploy/known_hosts`). Deps apt/pip réinstallées **seulement si leur liste change** (`--full` force). Archive
