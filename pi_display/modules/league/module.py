@@ -438,6 +438,14 @@ class LeagueModule(Module):
             }}
         return {}
 
+    def remote_asset(self, name: str) -> tuple[bytes, str] | None:
+        """`icon/<championId>` : icône carrée (cache disque `icons.db`, sinon CDN)."""
+        kind, _, ident = name.partition("/")
+        if kind != "icon" or not ident.isdigit():
+            return None
+        raw = icon_bytes(int(ident), self.icon_cache)
+        return (raw, "image/png") if raw else None
+
     def on_remote_action(self, body: dict) -> tuple[int, dict] | None:
         """Actions à distance, **vérifiées sur l'état courant** : une liste vue
         sur la montre peut être périmée (champion pris entre-temps) → 409."""

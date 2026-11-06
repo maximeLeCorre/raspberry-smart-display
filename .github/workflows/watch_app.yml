@@ -1,27 +1,41 @@
-# Vérifie que l'app Apple Watch compile (simulateur, sans signature) : le code
-# est écrit sous Windows puis copié à la main sur un Mac.
+# Vérifie que l'app Apple Watch compile (simulateur, sans signature) et que son
+# archive est bien une « iOS App Archive » (coquille + montre), seule forme
+# envoyable sur TestFlight. Le code est écrit sous Windows : aucun Mac.
 name: watch_app
 
 on:
   push:
-    paths: ["watch_app/**", ".github/workflows/watch_app.yml"]
+    paths: ["watch_app/**", ".github/workflows/watch_app*.yml"]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-15
-    timeout-minutes: 20
+    runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: XcodeGen
         run: brew install xcodegen
       - name: Génération du projet
         working-directory: watch_app
-        run: xcodegen generate
+        run: xcodegen generate && xcodebuild -version && xcodebuild -list
       - name: Compilation (simulateur watchOS)
         working-directory: watch_app
         run: |
-          xcodebuild -project LolRemote.xcodeproj -scheme LolRemote \
+          set -o pipefail
+          xcodebuild -project LolRemote.xcodeproj -scheme LolRemoteWatch \
             -destination 'generic/platform=watchOS Simulator' \
             CODE_SIGNING_ALLOWED=NO build | tail -n 60
-          exit ${PIPESTATUS[0]}
+      - name: Archive non signée (structure TestFlight)
+        working-directory: watch_app
+        run: |
+          set -o pipefail
+          xcodebuild -project LolRemote.xcodeproj -scheme LolRemote \
+            -destination 'generic/platform=watchOS' \
+            -archivePath build/LolRemote.xcarchive \
+            CODE_SIGNING_ALLOWED=NO archive | tail -n 60
+          plutil -p build/LolRemote.xcarchive/Info.plist
+          find build/LolRemote.xcarchive/Products -maxdepth 5 | head -n 40
+          # Attendu : ApplicationProperties (= archive d'app) et la montre dans Watch/.
+          plutil -extract ApplicationProperties.ApplicationPath raw build/LolRemote.xcarchive/Info.plist
+          test -d build/LolRemote.xcarchive/Products/Applications/LolRemote.app/Watch/LolRemote.app

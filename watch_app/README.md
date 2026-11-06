@@ -1,26 +1,34 @@
 # LolRemote — app Apple Watch (accepter la partie, banc ARAM)
 
-Parle à l'API télécommande du Pi (`pi_display/remote_api.py`). Le code est écrit
-ici et vérifié par GitHub Actions ; sur le Mac on ne clone rien, on copie les
-4 fichiers de `LolRemote/`.
+Parle à l'API télécommande du Pi (`pi_display/remote_api.py`). **Aucun Mac** :
+GitHub Actions compile (`watch_app.yml`, à chaque push) puis signe et envoie sur
+TestFlight (`watch_app_testflight.yml`, lancement manuel). Compte Apple
+Developer **payant** requis (TestFlight).
 
-## Une seule fois
-1. Xcode → Réglages → Comptes : ajouter son **Apple ID perso** (équipe gratuite).
-2. Brancher l'iPhone, « Faire confiance » ; activer le **mode développeur** sur
-   l'iPhone puis la montre (Réglages → Confidentialité et sécurité).
-3. Xcode → New Project → **watchOS → App** ; nom `LolRemote`, interface SwiftUI,
-   **Watch App** seule (sans app iPhone).
-4. Remplacer `LolRemoteApp.swift` et `ContentView.swift` du modèle ; ajouter
-   `RemoteClient.swift` et `Secrets.swift` (File → New → File → Swift File).
-5. Dans `Secrets.swift` : coller le jeton (`REMOTE_API_TOKEN` du `.env`).
-6. Cible → onglet **Info**, ajouter :
-   - `App Transport Security Settings` → `Allows Local Networking` = YES
-   - `Privacy - Local Network Usage Description` = « Connexion au Pi »
-7. **Signing & Capabilities** : choisir son équipe.
+Structure imposée par Apple : coquille iOS vide `LolRemote`
+(`fr.maxime.lolremote`) qui embarque l'app montre seule `LolRemoteWatch`
+(`fr.maxime.lolremote.watchkitapp`). Icône : `gen_icon.py`.
 
-## À chaque installation (l'app expire au bout de 7 jours)
-Destination = la montre → ▶ Run. 1re fois lente (préparation de la montre).
-Au 1er lancement : accepter l'accès au **réseau local**.
+## Une seule fois (depuis le PC Windows)
+1. **Clé d'API** : appstoreconnect.apple.com → Utilisateurs et accès →
+   Intégrations → API App Store Connect → Clés d'équipe → « + », accès
+   **Admin**. Noter l'**ID de clé** et l'**ID de l'émetteur**, télécharger
+   `AuthKey_XXXX.p8` (téléchargeable **une seule fois**).
+2. **Signature** (identifiants d'app, certificat, profils → secret unique) :
+   `.\.venv\Scripts\python watch_app\signing.py --key-id … --issuer-id … --key …\AuthKey_XXXX.p8`
+   (lit `REMOTE_API_TOKEN` du `.env` ; tout reste dans `watch_app/signing/`, gitignoré).
+3. **Secret GitHub** : dépôt → Settings → Secrets and variables → Actions →
+   New repository secret, nom `WATCH_SIGNING`, coller (déjà dans le presse-papiers).
+4. **Fiche de l'app** : App Store Connect → Apps → « + » Nouvelle app,
+   plateforme **iOS**, identifiant de lot `fr.maxime.lolremote`, nom unique
+   sur l'App Store (ex. « LolRemote Maxime »), SKU libre.
+5. Lancer **Actions → watch_app_testflight → Run workflow**.
+6. App Store Connect → l'app → **TestFlight** → Test interne → créer un groupe,
+   s'y ajouter. Sur l'iPhone : app **TestFlight** → installer ; l'app arrive sur
+   la montre (sinon : app TestFlight de la montre).
 
-Conseil : montre → Réglages → Général → Revenir au cadran → LolRemote → 1 h
-(l'app reste au premier plan pendant la session).
+## Ensuite
+- Nouvelle version = relancer le workflow (build valable **90 jours**).
+- Profils ou certificat expirés (1 an) / IP du Pi changée (`PI_URL` dans
+  `signing.py`) : relancer `signing.py`, remplacer le secret.
+- Au 1er lancement : accepter l'accès au **réseau local**.
