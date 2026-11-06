@@ -12,6 +12,18 @@ settings:
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"   # remplacé par le n° de run de la CI TestFlight
     SWIFT_VERSION: "5.0"
+schemes:
+  # Xcode ne crée pas de schéma automatique pour une coquille : déclaré ici.
+  LolRemote:
+    build:
+      targets:
+        LolRemote: all
+    archive:
+      config: Release
+  LolRemoteWatch:
+    build:
+      targets:
+        LolRemoteWatch: all
 targets:
   # Coquille iOS (sans code) : c'est elle qu'on archive et qu'App Store Connect voit.
   LolRemote:
