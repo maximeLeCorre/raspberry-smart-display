@@ -99,44 +99,42 @@ final class SoundStore {
     }
 }
 
-/// Retour d'un kill : vibrations DOUCES jusqu'au triple (une de plus par kill de la
-/// série), FORTES au quadra et au penta ; + le son `killN` s'il est sur la montre.
-/// Seul le kill LE PLUS RÉCENT compte, sans jamais couper un son : un kill arrivé
-/// dans les 0,35 s remplace le précédent (double juste après le simple → seulement
-/// le double) ; pendant un son, les kills suivants attendent sa fin et seul le
-/// dernier est joué (1 → 3 pendant le son du 1 : le 2 est sauté).
+/// Retour d'un kill (réglages : SettingsView) : vibrations de la force choisie,
+/// une de plus par kill de la série jusqu'au triple, au plus fort au quadra et au
+/// penta ; + le son `killN` s'il est sur la montre. Joué AUSSITÔT ; pendant un son,
+/// les kills suivants attendent sa fin (jamais coupé) et seul le dernier est joué
+/// (1 → 3 pendant le son du 1 : le 2 est sauté).
 @MainActor
 final class KillFeedback: NSObject, AVAudioPlayerDelegate {
     static let shared = KillFeedback()
     private var player: AVAudioPlayer?
     private var pending: Int?                  // dernier kill en attente de la fin du son
-    private var generation = 0                 // regroupe les kills très rapprochés
-    private let gather: TimeInterval = 0.35
 
-    static func play(streak: Int) { shared.queue(max(1, min(streak, 5))) }
-
-    private func queue(_ level: Int) {
-        generation += 1
-        let mine = generation
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: UInt64(gather * 1_000_000_000))
-            guard mine == generation else { return }     // un kill plus récent est arrivé
-            if player?.isPlaying == true {
-                pending = level                          // joué à la fin du son en cours
-            } else {
-                perform(level)
-            }
+    static func play(streak: Int) {
+        let level = max(1, min(streak, 5))
+        if shared.player?.isPlaying == true {
+            shared.pending = level                       // joué à la fin du son en cours
+        } else {
+            shared.perform(level)
         }
     }
 
+    /// Bouton « Tester » des réglages : coupe un éventuel test en cours.
+    static func preview(_ level: Int) {
+        shared.pending = nil
+        shared.player?.stop()
+        shared.perform(level)
+    }
+
     private func perform(_ level: Int) {
-        playSound(level)
+        if KillSettings.soundOn { playSound(level) }
         let strong = level >= 4
-        let pulses = strong ? level - 2 : level           // 1, 2, 3 douces ; 2 / 3 fortes
+        let haptic: WKHapticType = strong ? .notification : KillSettings.haptic
+        let pulses = (strong ? level - 2 : level) * KillSettings.repeats   // 1, 2, 3 ; 2 / 3 fortes
         Task { @MainActor in
             for i in 0..<pulses {
-                if i > 0 { try? await Task.sleep(nanoseconds: strong ? 450_000_000 : 300_000_000) }
-                WKInterfaceDevice.current().play(strong ? .notification : .click)
+                if i > 0 { try? await Task.sleep(nanoseconds: strong ? 400_000_000 : 250_000_000) }
+                WKInterfaceDevice.current().play(haptic)
             }
         }
     }
@@ -146,6 +144,7 @@ final class KillFeedback: NSObject, AVAudioPlayerDelegate {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         try? AVAudioSession.sharedInstance().setActive(true)
         player = try? AVAudioPlayer(contentsOf: url)
+        player?.volume = KillSettings.volume
         player?.delegate = self
         player?.play()
     }

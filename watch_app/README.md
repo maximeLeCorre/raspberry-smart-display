@@ -31,7 +31,8 @@ Structure imposée par Apple : coquille iOS vide `LolRemote`
 `kill1` … `kill5` (.mp3/.m4a/.wav/.caf, quelques secondes) dans `pi_display/sounds/`
 (**gitignoré** : extraits sans licence, jamais dans ce dépôt public), puis
 redéployer le Pi. La montre les télécharge une fois et les garde (nouvelle build
-inutile pour en changer). Sans fichier : vibrations seules (douces jusqu'au
+inutile pour en changer). Trop faibles ? Originaux dans `sounds/originals/`, puis
+`pi_display/tools/boost_sounds.py` (WAV normalisés et poussés). Sans fichier : vibrations seules (douces jusqu'au
 triple, fortes au quadra/penta).
 
 ## Ensuite
