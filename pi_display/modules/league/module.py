@@ -14,7 +14,11 @@ de `Module` ; les écrans League passent par `app.modules["league"]`.
 from __future__ import annotations
 
 import base64
+import io
+import threading
 import time
+
+import pygame
 
 from config import load_riot_key
 from icon_cache import IconCache
@@ -72,6 +76,8 @@ class LeagueModule(Module):
         self.store = Store()
         # Icônes sur disque (icons.db) : pas de re-téléchargement au redémarrage.
         self.icon_cache = IconCache()
+        self._remote_icons: dict[int, bytes] = {}   # icônes réduites pour la montre
+        self._remote_icons_lock = threading.Lock()
         # Patch relu chaque heure même si toutes les icônes sont déjà en mémoire
         # (sinon un nouveau patch ne serait vu qu'au redémarrage).
         self._patch_check = time.monotonic()
@@ -439,12 +445,21 @@ class LeagueModule(Module):
         return {}
 
     def remote_asset(self, name: str) -> tuple[bytes, str] | None:
-        """`icon/<championId>` : icône carrée (cache disque `icons.db`, sinon CDN)."""
+        """`icon/<championId>` : icône carrée (cache disque `icons.db`, sinon CDN),
+        **réduite** pour la montre (~4 Ko au lieu de ~30 : le lien montre ↔ iPhone
+        en Bluetooth est lent). Le verrou sérialise aussi pygame (thread HTTP)."""
         kind, _, ident = name.partition("/")
         if kind != "icon" or not ident.isdigit():
             return None
-        raw = icon_bytes(int(ident), self.icon_cache)
-        return (raw, "image/png") if raw else None
+        cid = int(ident)
+        small = self._remote_icons.get(cid)
+        if small is None:
+            raw = icon_bytes(cid, self.icon_cache)   # hors verrou : téléchargements en parallèle
+            if not raw:
+                return None
+            with self._remote_icons_lock:
+                small = self._remote_icons[cid] = _shrink_icon(raw)
+        return small, "image/jpeg"
 
     def on_remote_action(self, body: dict) -> tuple[int, dict] | None:
         """Actions à distance, **vérifiées sur l'état courant** : une liste vue
@@ -554,3 +569,15 @@ class LeagueModule(Module):
             self._show_postgame({})      # « en attente du bilan… »
             if self.app.agent_connected and game_id:
                 self.app.server.send({"type": "request_lcu_detail", "gameId": game_id})
+
+
+REMOTE_ICON_SIZE = 96    # px : 48 pt × 2 (écran Retina de la montre)
+
+
+def _shrink_icon(raw: bytes) -> bytes:
+    """PNG du CDN → JPEG 96 px (pas besoin d'écran pygame : pur calcul)."""
+    surface = pygame.image.load(io.BytesIO(raw), "icon.png")
+    small = pygame.transform.smoothscale(surface, (REMOTE_ICON_SIZE, REMOTE_ICON_SIZE))
+    out = io.BytesIO()
+    pygame.image.save(small, out, "icon.jpg")
+    return out.getvalue()

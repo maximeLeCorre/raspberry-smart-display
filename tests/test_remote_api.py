@@ -89,6 +89,7 @@ def test_long_polling_ready_check_puis_accepter(app):
     time.sleep(0.1)
     status, state = call(app, "GET", "/state?wait=0")
     assert status == 200 and state["agent"] and state["screen"] == "default"
+    assert abs(state["t"] - time.time()) < 5          # horodatage de la version
 
     def later():
         time.sleep(0.2)
@@ -128,14 +129,22 @@ def test_banc_aram(app):
 
 
 def test_icone_de_champion(app, monkeypatch):
-    png = b"\x89PNG-factice"
+    import io
+    import pygame
+    big = pygame.Surface((120, 120))
+    big.fill((200, 170, 110))
+    buf = io.BytesIO()
+    pygame.image.save(big, buf, "x.png")
     monkeypatch.setattr(league_module, "icon_bytes",
-                        lambda cid, cache: png if cid == 22 else None)
+                        lambda cid, cache: buf.getvalue() if cid == 22 else None)
     url = f"http://127.0.0.1:{app.remote.port}/asset/league/icon/22"
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {TOKEN}"})
     with urllib.request.urlopen(req, timeout=5) as resp:
-        assert resp.read() == png and resp.headers["Content-Type"] == "image/png"
+        data = resp.read()
+        assert resp.headers["Content-Type"] == "image/jpeg"
         assert "max-age" in resp.headers["Cache-Control"]
+    small = pygame.image.load(io.BytesIO(data), "x.jpg")
+    assert small.get_size() == (league_module.REMOTE_ICON_SIZE,) * 2   # réduite pour la montre
     assert call(app, "GET", "/asset/league/icon/99")[0] == 404
     assert call(app, "GET", "/asset/league/icon/abc")[0] == 404
     assert call(app, "GET", "/asset/inconnu/icon/22")[0] == 404

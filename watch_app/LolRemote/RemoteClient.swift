@@ -41,6 +41,7 @@ struct ChampSelect: Decodable {
 
 struct RemoteState: Decodable {
     let v: Int
+    let t: Double?              // horodatage Pi de la version (mesure de latence)
     let agent: Bool?
     let screen: String?
     let queue: QueueInfo?
@@ -58,6 +59,13 @@ final class RemoteClient: ObservableObject {
     @Published var connected = false
     @Published var message: String?     // erreur ou refus d'action, affiché en bas
     @Published var busy = false         // action en cours d'envoi
+    /// Affichage optimiste : l'appui se voit tout de suite, sans attendre l'aller-retour
+    /// (annulé si le Pi refuse ; remplacé par l'état réel dès qu'il arrive).
+    @Published var pendingResponse: String?   // "Accepted" | "Declined"
+    @Published var pendingChamp: Champ?       // champion demandé au banc
+    /// Mesures affichées sur l'écran d'accueil (ms) : Pi → montre, et action → réponse.
+    @Published var latencyMs: Int?
+    @Published var actionMs: Int?
 
     private var task: Task<Void, Never>?
     private let session: URLSession = {
@@ -99,6 +107,16 @@ final class RemoteClient: ObservableObject {
                 if !connected { message = nil }
                 connected = true
                 if new.v != version {
+                    if version != nil, let t = new.t {   // réveil du long polling = vrai changement
+                        latencyMs = max(0, Int((Date().timeIntervalSince1970 - t) * 1000))
+                    }
+                    if new.queue?.response != state?.queue?.response || new.screen != "queue" {
+                        pendingResponse = nil
+                    }
+                    if new.champselect?.me?.championId != state?.champselect?.me?.championId
+                        || new.screen != "champselect" {
+                        pendingChamp = nil
+                    }
                     notify(old: state, new: new)
                     state = new
                     version = new.v
@@ -121,10 +139,22 @@ final class RemoteClient: ObservableObject {
         }
     }
 
+    func accept(_ yes: Bool) {
+        pendingResponse = yes ? "Accepted" : "Declined"
+        send(["action": yes ? "accept" : "decline"])
+    }
+
+    func swap(_ champ: Champ) {
+        pendingChamp = champ
+        send(["action": "swap", "championId": champ.championId])
+    }
+
     func send(_ body: [String: Any]) {
+        WKInterfaceDevice.current().play(.click)   // retour immédiat au doigt
         Task {
             busy = true
             defer { busy = false }
+            let start = Date()
             var req = apiRequest("/action")
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -132,15 +162,20 @@ final class RemoteClient: ObservableObject {
             do {
                 let (data, response) = try await session.data(for: req)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                actionMs = Int(Date().timeIntervalSince(start) * 1000)
                 if code == 200 {
                     message = nil
                     WKInterfaceDevice.current().play(.success)
                 } else {
                     let result = try? JSONDecoder().decode(ActionResult.self, from: data)
                     message = result?.error ?? "Erreur \(code)"
+                    pendingResponse = nil
+                    pendingChamp = nil
                     WKInterfaceDevice.current().play(.failure)
                 }
             } catch {
+                pendingResponse = nil
+                pendingChamp = nil
                 message = "Pi injoignable"
                 WKInterfaceDevice.current().play(.failure)
             }

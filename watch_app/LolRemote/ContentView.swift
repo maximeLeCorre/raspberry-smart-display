@@ -33,6 +33,7 @@ struct ContentView: View {
 }
 
 struct IdleView: View {
+    @EnvironmentObject var client: RemoteClient
     let state: RemoteState
 
     private var label: String {
@@ -47,6 +48,12 @@ struct IdleView: View {
         VStack(spacing: 6) {
             Text(state.agent == true ? "PC connecté" : "PC hors ligne").font(.headline)
             if state.agent == true { Text(label).foregroundStyle(.secondary) }
+            // Mesures (diagnostic de lenteur) : Pi → montre et aller-retour d'une action.
+            if client.latencyMs != nil || client.actionMs != nil {
+                Text([client.latencyMs.map { "réseau \($0) ms" }, client.actionMs.map { "action \($0) ms" }]
+                        .compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+            }
         }
     }
 }
@@ -60,14 +67,14 @@ struct QueueView: View {
             VStack(spacing: 8) {
                 Text("Partie trouvée !").font(.headline)
                 Text("\(queue?.remaining ?? 0) s").font(.title2).monospacedDigit()
-                switch queue?.response {
+                switch client.pendingResponse ?? queue?.response {
                 case "Accepted": Text("✓ Acceptée").font(.headline)
                 case "Declined": Text("✗ Refusée").font(.headline)
                 default:
                     HStack {
-                        Button("Accepter") { client.send(["action": "accept"]) }
+                        Button("Accepter") { client.accept(true) }
                             .tint(.green)
-                        Button("Refuser") { client.send(["action": "decline"]) }
+                        Button("Refuser") { client.accept(false) }
                             .tint(.red)
                     }
                     .buttonStyle(.borderedProminent)
@@ -90,15 +97,20 @@ struct ChampSelectView: View {
     @EnvironmentObject var client: RemoteClient
     let select: ChampSelect?
 
+    @EnvironmentObject var icons: IconStore
     private let columns = [GridItem(.adaptive(minimum: 52), spacing: 6)]
+
+    /// Champion affiché : la demande en cours d'abord (optimiste), sinon le réel.
+    private var me: Champ? { client.pendingChamp ?? select?.me }
+    private var iconIds: [Int] { [select?.me?.championId ?? 0] + (select?.bench ?? []).map(\.championId) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    ChampIcon(championId: select?.me?.championId ?? 0, size: 44)
+                    ChampIcon(championId: me?.championId ?? 0, size: 44)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(select?.me?.championName.isEmpty == false ? select!.me!.championName : "…")
+                        Text(me.flatMap { $0.championId > 0 ? $0.label : nil } ?? "…")
                             .font(.headline).lineLimit(1).minimumScaleFactor(0.7)
                         if let timer = select?.timer {
                             Text("\(timer.phase ?? "") \(timer.left ?? 0) s")
@@ -117,7 +129,7 @@ struct ChampSelectView: View {
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(bench) { champ in
                         Button {
-                            client.send(["action": "swap", "championId": champ.championId])
+                            client.swap(champ)
                         } label: {
                             VStack(spacing: 2) {
                                 ChampIcon(championId: champ.championId, size: 48)
@@ -131,7 +143,8 @@ struct ChampSelectView: View {
             }
         }
         .disabled(client.busy)
-        .opacity(client.busy ? 0.6 : 1)
+        // Toutes les icônes demandées d'un coup (pas au fil du défilement).
+        .task(id: iconIds) { for id in iconIds { icons.load(id) } }
     }
 }
 

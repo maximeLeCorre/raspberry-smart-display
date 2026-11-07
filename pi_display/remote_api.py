@@ -21,6 +21,7 @@ from __future__ import annotations
 import hmac
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -37,6 +38,7 @@ class RemoteState:
         self._cond = threading.Condition()
         self.version = 0
         self.snapshot: dict = {}
+        self.published_at = time.time()   # horodatage de la version (latence côté client)
 
     def publish(self, snapshot: dict) -> None:
         """Nouvelle version seulement si le contenu change (réveille les attentes)."""
@@ -44,6 +46,7 @@ class RemoteState:
             if snapshot == self.snapshot:
                 return
             self.snapshot = snapshot
+            self.published_at = time.time()
             self.version += 1
             self._cond.notify_all()
 
@@ -145,7 +148,8 @@ class RemoteServer:
                 except ValueError:
                     return self._send(400, {"ok": False, "error": "paramètre invalide"})
                 version, snapshot = server.state.wait(known, wait)
-                self._send(200, {"v": version, **snapshot})
+                self._send(200, {"v": version, "t": round(server.state.published_at, 3),
+                                 **snapshot})
 
             def _asset(self, path: str) -> None:
                 if not self._authorized():
