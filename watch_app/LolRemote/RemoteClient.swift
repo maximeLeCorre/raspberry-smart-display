@@ -35,6 +35,7 @@ struct SelectTimer: Decodable {
 struct ChampSelect: Decodable {
     let me: Champ?
     let bench: [Champ]?
+    let choices: [Champ]?       // choix de départ (ARAM Chaos : 2-3 champions, ~15 s)
     let rerolls: Int?
     let timer: SelectTimer?
 }
@@ -134,6 +135,8 @@ final class RemoteClient: ObservableObject {
     private func notify(old: RemoteState?, new: RemoteState) {
         if new.queue?.state == "readycheck" && old?.queue?.state != "readycheck" {
             WKInterfaceDevice.current().play(.notification)
+        } else if !(new.champselect?.choices ?? []).isEmpty && (old?.champselect?.choices ?? []).isEmpty {
+            WKInterfaceDevice.current().play(.notification)   // à toi de choisir
         } else if new.screen == "champselect" && old?.screen != "champselect" {
             WKInterfaceDevice.current().play(.click)
         }
@@ -142,6 +145,11 @@ final class RemoteClient: ObservableObject {
     func accept(_ yes: Bool) {
         pendingResponse = yes ? "Accepted" : "Declined"
         send(["action": yes ? "accept" : "decline"])
+    }
+
+    func pick(_ champ: Champ) {
+        pendingChamp = champ
+        send(["action": "pick", "championId": champ.championId])
     }
 
     func swap(_ champ: Champ) {

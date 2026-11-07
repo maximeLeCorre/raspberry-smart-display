@@ -11,6 +11,20 @@ from __future__ import annotations
 
 from lcu import LcuClient
 
+# Choix proposés en début de sélection (ARAM Chaos : 2-3 champions, ~15 s).
+SUBSET_PATH = "/lol-lobby-team-builder/champ-select/v1/subset-champion-list"
+
+
+def my_pending_pick(session: dict) -> dict | None:
+    """Notre action « pick » en cours (non verrouillée), sinon None."""
+    me = session.get("localPlayerCellId")
+    for group in session.get("actions") or []:
+        for action in group:
+            if (action.get("actorCellId") == me and action.get("type") == "pick"
+                    and action.get("isInProgress") and not action.get("completed")):
+                return action
+    return None
+
 # Phases de sélection -> libellé français.
 SELECT_PHASES = {
     "PLANNING": "Préparation", "BAN_PICK": "Sélection",
@@ -69,11 +83,15 @@ def build_champ_select_payload(lcu: LcuClient) -> dict | None:
     # `benchChampionIds` (ancien format).
     bench_ids = ([c.get("championId") for c in session.get("benchChampions") or []]
                  or list(session.get("benchChampionIds") or []))
+    # Choix de départ : seulement tant que notre pick n'est pas verrouillé.
+    choice_ids = (lcu.get_json(SUBSET_PATH) or []) if my_pending_pick(session) else []
     return {
         "phase": "champselect",
         "players": players,
         "bench": [{"championId": cid, "championName": lcu.champion_name(cid)}
                   for cid in bench_ids if cid],
+        "choices": [{"championId": cid, "championName": lcu.champion_name(cid)}
+                    for cid in choice_ids if isinstance(cid, int) and cid],
         "rerolls": session.get("rerollsRemaining", 0) or 0,
         "timer": {
             "phase": SELECT_PHASES.get(timer.get("phase", ""), ""),

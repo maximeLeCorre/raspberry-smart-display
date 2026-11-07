@@ -29,6 +29,8 @@ EVENTS = (
     "OnJsonApiEvent_lol-matchmaking_v1_ready-check",   # ready-check (Accepter)
     "OnJsonApiEvent_lol-matchmaking_v1_search",        # entrée/sortie de file
     "OnJsonApiEvent_lol-champ-select_v1_session",      # sélection / banc
+    # Choix parmi 2-3 champions (ARAM Chaos) : publié juste APRÈS la session.
+    "OnJsonApiEvent_lol-lobby-team-builder_champ-select_v1_subset-champion-list",
 )
 WAMP_SUBSCRIBE = 5
 WAMP_EVENT = 8
