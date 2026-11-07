@@ -67,6 +67,10 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Connexion au Pi
+    entitlements:
+      path: build/LolRemote.entitlements
+      properties:
+        aps-environment: production   # notifications push (builds TestFlight)
     settings:
       base:
         PRODUCT_NAME: LolRemote

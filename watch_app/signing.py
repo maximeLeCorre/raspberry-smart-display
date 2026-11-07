@@ -84,6 +84,19 @@ def ensure_bundle_id(api: Api, identifier: str, name: str) -> str:
     return created["data"]["id"]
 
 
+def ensure_push_capability(api: Api, bundle_db_id: str) -> None:
+    """Notifications push sur l'app montre (les profils doivent être recréés après)."""
+    caps = api.call("GET", f"/bundleIds/{bundle_db_id}/bundleIdCapabilities")
+    if any(c["attributes"]["capabilityType"] == "PUSH_NOTIFICATIONS" for c in caps["data"]):
+        print("  notifications push : déjà actives")
+        return
+    api.call("POST", "/bundleIdCapabilities", {"data": {
+        "type": "bundleIdCapabilities",
+        "attributes": {"capabilityType": "PUSH_NOTIFICATIONS"},
+        "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": bundle_db_id}}}}})
+    print("  notifications push : activées")
+
+
 def ensure_certificate(api: Api) -> tuple[str, rsa.RSAPrivateKey, x509.Certificate]:
     key_path = os.path.join(OUT_DIR, "dist_key.pem")
     meta_path = os.path.join(OUT_DIR, "dist_cert.json")
@@ -157,6 +170,7 @@ def main() -> None:
 
     print("App Store Connect :")
     bundle_ids = {ident: ensure_bundle_id(api, ident, names[0]) for ident, names in APPS.items()}
+    ensure_push_capability(api, bundle_ids["fr.maxime.lolremote.watchkitapp"])
     cert_id, cert_key, cert = ensure_certificate(api)
     team_id = cert.subject.get_attributes_for_oid(NameOID.ORGANIZATIONAL_UNIT_NAME)[0].value
     profiles = {ident: recreate_profile(api, names[1], bundle_ids[ident], cert_id)

@@ -1,7 +1,9 @@
 import SwiftUI
+import WatchKit
 
 @main
 struct LolRemoteApp: App {
+    @WKApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate   // notifications push
     @StateObject private var client = RemoteClient()
     @StateObject private var icons = IconStore()
     @Environment(\.scenePhase) private var scenePhase
@@ -14,6 +16,7 @@ struct LolRemoteApp: App {
             // Poignet relevé : état frais tout de suite ; app en fond : on coupe.
             if phase == .active {
                 client.restart()
+                WKApplication.shared().registerForRemoteNotifications()   // jeton renvoyé au Pi
             } else if phase == .background {
                 client.stop()
             }

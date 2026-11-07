@@ -14,6 +14,7 @@ import app as app_module
 from config import load_config
 from icon_cache import IconCache
 from modules.league import module as league_module
+from push_apns import PushSender
 from remote_api import RemoteState
 from store import Store
 
@@ -28,6 +29,8 @@ CHAMPSELECT = {"players": [{"isSelf": True, "championId": 1, "championName": "An
 def app(tmp_path, free_port, monkeypatch):
     monkeypatch.setattr(league_module, "Store", lambda: Store(tmp_path / "t.db"))
     monkeypatch.setattr(league_module, "IconCache", lambda: IconCache(tmp_path / "i.db"))
+    monkeypatch.setattr(app_module, "PushSender",
+                        lambda cfg: PushSender(cfg, db_path=tmp_path / "p.db"))
     cfg = load_config(app_module.__file__.replace("app.py", "config.toml"))
     cfg.setdefault("server", {})["host"] = ""
     cfg.setdefault("weather", {})["enabled"] = False
@@ -149,3 +152,26 @@ def test_icone_de_champion(app, monkeypatch):
     assert call(app, "GET", "/asset/league/icon/abc")[0] == 404
     assert call(app, "GET", "/asset/inconnu/icon/22")[0] == 404
     assert call(app, "GET", "/asset/league/icon/22", token="faux")[0] == 401
+
+
+def test_enregistrement_push(app):
+    assert call(app, "POST", "/push/register", {"token": "zz"})[0] == 400
+    assert call(app, "POST", "/push/register", {"token": "ab" * 32}) == (200, {"ok": True})
+    assert "ab" * 32 in app.push.tokens()
+    assert call(app, "POST", "/push/register", {"token": "ab" * 32}, token="faux")[0] == 401
+
+
+def test_notification_ready_check(app, monkeypatch):
+    sent = []
+    monkeypatch.setattr(app.push, "notify", lambda aps, **kw: sent.append((aps, kw)))
+    push(app, type="_connected")
+    push(app, type="set_screen", screen="queue")
+    push(app, type="data", screen="queue", payload=READY)
+    time.sleep(0.1)
+    league = app.modules["league"]
+    league.tick()
+    league.tick()                                     # une seule par ready-check
+    assert len(sent) == 1
+    aps, kw = sent[0]
+    assert aps["category"] == "READY_CHECK" and kw["collapse_id"] == "readycheck"
+    assert kw["ttl"] == READY["remaining"]

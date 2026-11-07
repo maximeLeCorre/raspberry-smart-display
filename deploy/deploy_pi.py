@@ -80,7 +80,8 @@ KNOWN_HOSTS = REPO_ROOT / "deploy" / "known_hosts"   # empreinte du Pi (TOFU)
 APT_PACKAGES = ("python3-venv python3-pip libsdl2-2.0-0 libsdl2-ttf-2.0-0 "
                 "libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 libfreetype6 libjpeg62-turbo "
                 "libegl1 libegl-mesa0 libgles2 libgl1-mesa-dri libgbm1")
-PIP_PACKAGES = "'pygame>=2.5' 'websockets>=13.0,<18' 'python-dotenv>=1.0' 'paramiko>=3.0'"
+PIP_PACKAGES = ("'pygame>=2.5' 'websockets>=13.0,<18' 'python-dotenv>=1.0' 'paramiko>=3.0' "
+                "'httpx[http2]>=0.27'")
 DEPS_HASH = hashlib.sha256(f"{APT_PACKAGES}|{PIP_PACKAGES}".encode()).hexdigest()[:16]
 
 

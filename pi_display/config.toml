@@ -24,6 +24,17 @@ key_file = "certs/pi-display.key"    # (clé privée, reste sur le Pi)
 enabled = true
 port = 8766
 
+[push]
+# Notifications push vers la montre (push_apns.py) : « Partie trouvée ! » avec
+# Accepter/Refuser, app fermée. Clé APNs .p8 dans certs/ (secrète, copiée par
+# deploy) ; key_id/team_id ne sont pas secrets. sandbox = false : TestFlight.
+enabled = true
+team_id = "TEAMID"
+key_id = ""                      # ID de la clé APNs (10 caractères)
+key_file = "certs/apns_key.p8"
+topic = "fr.maxime.lolremote.watchkitapp"
+sandbox = false
+
 [display]
 width = 800        # résolution interne de rendu (ne pas changer : écran 5")
 height = 480
