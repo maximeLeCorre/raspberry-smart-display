@@ -71,6 +71,7 @@ struct HomeView: View {
     @EnvironmentObject var client: RemoteClient
     let state: RemoteState
     @State private var confirmQuit = false
+    @State private var showSettings = false
 
     /// Pi joint (état frais) ET PC connecté au Pi : sans le 1er, l'état affiché est
     /// celui du cache et on ne sait rien du PC.
@@ -90,6 +91,12 @@ struct HomeView: View {
         } else {
             VStack(spacing: 8) {
                 HStack {
+                    Button { showSettings = true } label: {
+                        Image(systemName: "gearshape.fill").font(.system(size: 15))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Réglages")
                     Text("LolRemote").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.accent)
                     Spacer()
                     Label(status.text, systemImage: status.filled ? "circle.fill" : "circle")
@@ -137,6 +144,7 @@ struct HomeView: View {
                 Spacer(minLength: 0)
                 LatencyFooter()
             }
+            .sheet(isPresented: $showSettings) { SettingsView() }
             .confirmationDialog("Fermer League ?", isPresented: $confirmQuit) {
                 Button("Fermer League", role: .destructive) { client.send(["action": "quit_client"]) }
                 Button("Annuler", role: .cancel) {}
