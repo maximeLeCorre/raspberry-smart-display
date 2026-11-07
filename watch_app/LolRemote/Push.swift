@@ -6,6 +6,9 @@ import Foundation
 import UserNotifications
 import WatchKit
 
+/// Wi-Fi seul, comme le reste (le relais de l'iPhone ne joint pas le Pi).
+private let pushSession = wifiSession(.ephemeral, timeout: 10)
+
 /// POST JSON vers le Pi ; renvoie le statut HTTP (0 = injoignable).
 @discardableResult
 func postToPi(_ path: String, _ body: [String: Any]) async -> Int {
@@ -14,7 +17,7 @@ func postToPi(_ path: String, _ body: [String: Any]) async -> Int {
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
     req.timeoutInterval = 10
-    guard let result = try? await URLSession.shared.data(for: req) else { return 0 }
+    guard let result = try? await pushSession.data(for: req) else { return 0 }
     return (result.1 as? HTTPURLResponse)?.statusCode ?? 0
 }
 
