@@ -27,6 +27,13 @@ Structure imposée par Apple : coquille iOS vide `LolRemote`
    s'y ajouter. Sur l'iPhone : app **TestFlight** → installer ; l'app arrive sur
    la montre (sinon : app TestFlight de la montre).
 
+## Sons des kills (facultatif)
+`kill1` … `kill5` (.mp3/.m4a/.wav/.caf, quelques secondes) dans `pi_display/sounds/`
+(**gitignoré** : extraits sans licence, jamais dans ce dépôt public), puis
+redéployer le Pi. La montre les télécharge une fois et les garde (nouvelle build
+inutile pour en changer). Sans fichier : vibrations seules (douces jusqu'au
+triple, fortes au quadra/penta).
+
 ## Ensuite
 - Nouvelle version = relancer le workflow (build valable **90 jours**).
 - Profils ou certificat expirés (1 an) / IP du Pi changée (`PI_URL` dans

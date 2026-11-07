@@ -71,11 +71,13 @@ def test_poll_lobby_puis_client_ferme():
     screen, payload = src.poll()
     assert screen == "default" and payload["lobby"]["members"]
     src.lcu.phase = "None"                                  # retour au menu
-    assert src.poll() == ("default", {"lobby": None, "invitation": None, "chat": None})
+    assert src.poll() == ("default", {"client": True, "lobby": None, "invitation": None,
+                                      "chat": None})
     src.lcu.phase = "Lobby"
     src.poll()
     src.lcu.phase = None                                    # client fermé : effacé une fois
-    assert src.poll() == ("default", {"lobby": None, "invitation": None, "chat": None})
+    assert src.poll() == ("default", {"client": False, "lobby": None, "invitation": None,
+                                      "chat": None})
     assert src.poll() is None
 
 
@@ -131,3 +133,12 @@ def test_dernier_message_prive_recu():
     since = chat._timestamp("2026-11-07T11:00:00Z")
     msg = chat.build_last_message(ChatLcu(), since)
     assert (msg["id"], msg["from"], msg["body"]) == ("m2", "Ami", "on joue ?")
+
+
+def test_quitter_le_lobby_et_fermer_le_client():
+    src = LeagueSource({})
+    src.lcu = FakeLcu()
+    src.handle_request({"type": "lcu_action", "action": "leave_lobby"}, None)
+    src.handle_request({"type": "lcu_action", "action": "quit_client"}, None)
+    assert src.lcu.deleted == [lobby.LOBBY_PATH]
+    assert src.lcu.posted == ["/process-control/v1/process/quit"]

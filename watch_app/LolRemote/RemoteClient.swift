@@ -107,11 +107,22 @@ struct Invitation: Codable {
 
 /// Accueil : bouton « Jouer » (étapes `playStatus`), lobby en cours, invitation reçue.
 struct Home: Codable {
+    let client: Bool?           // client League ouvert (au menu ou dans un lobby)
     let lobby: Lobby?
     let invitation: Invitation?
     let playStatus: String?
     let playBusy: Bool?
     let playInvite: String?     // ami invité par le bouton Jouer (`[lol] lobby_invite`)
+}
+
+/// Notre dernier kill en partie (`streak` 1..5 : simple → pentakill).
+struct KillInfo: Codable, Equatable {
+    let id: Int
+    let streak: Int
+}
+
+struct Game: Codable {
+    let kill: KillInfo?
 }
 
 struct RemoteState: Codable {
@@ -122,6 +133,7 @@ struct RemoteState: Codable {
     let queue: QueueInfo?
     let champselect: ChampSelect?
     let home: Home?
+    let game: Game?
 }
 
 private struct ActionResult: Decodable {
@@ -148,6 +160,7 @@ final class RemoteClient: ObservableObject {
 
     private var task: Task<Void, Never>?
     private var lastResponse = Date.distantPast
+    private let gameSession = GameSession()   // app gardée en vie pendant la partie
     private static let cacheKey = "lastHomeState"
 
     /// Dernier accueil connu affiché dès le lancement (le temps que le Pi réponde) ;
@@ -178,6 +191,7 @@ final class RemoteClient: ObservableObject {
     /// depuis plus longtemps qu'un long polling (requête morte pendant la pause). Au
     /// lancement, `.task` vient de démarrer : la couper rallongerait la connexion.
     func resume() {
+        gameSession.update(screen: state?.screen)   // démarrable seulement app active
         if task == nil {
             start()
         } else if Date().timeIntervalSince(lastResponse) > 30 {
@@ -206,7 +220,10 @@ final class RemoteClient: ObservableObject {
                     continue
                 }
                 let new = try JSONDecoder().decode(RemoteState.self, from: data)
-                if !connected { message = nil }
+                if !connected {
+                    message = nil
+                    SoundStore.shared.sync()              // 1re connexion : sons à jour
+                }
                 connected = true
                 failures = 0
                 lastError = nil
@@ -222,9 +239,13 @@ final class RemoteClient: ObservableObject {
                         || new.screen != "champselect" {
                         pendingChamp = nil
                     }
+                    if new.screen == "champselect" && state?.screen != "champselect" {
+                        SoundStore.shared.sync()          // sons à jour avant la partie
+                    }
                     notify(old: state, new: new)
                     state = new
                     version = new.v
+                    gameSession.update(screen: new.screen)
                     if new.screen == "default", let data = try? JSONEncoder().encode(new) {
                         UserDefaults.standard.set(data, forKey: Self.cacheKey)
                     }
@@ -243,8 +264,14 @@ final class RemoteClient: ObservableObject {
         }
     }
 
-    /// Vibrations : partie trouvée (forte), entrée en sélection (légère).
+    /// Vibrations : partie trouvée (forte), entrée en sélection (légère), nos kills.
     private func notify(old: RemoteState?, new: RemoteState) {
+        // Kill : nouveau kill, ou même kill passé en multikill (l'événement Multikill
+        // peut arriver un relevé après). Pas au 1er état reçu (vieux kill).
+        if new.screen == "lol", old?.screen == "lol", let kill = new.game?.kill,
+           kill != old?.game?.kill {
+            KillFeedback.play(streak: kill.streak)
+        }
         if new.queue?.state == "readycheck" && old?.queue?.state != "readycheck" {
             WKInterfaceDevice.current().play(.notification)
         } else if !(new.champselect?.choices ?? []).isEmpty && (old?.champselect?.choices ?? []).isEmpty {

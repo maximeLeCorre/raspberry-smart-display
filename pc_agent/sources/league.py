@@ -18,8 +18,8 @@ import psutil
 
 import chat
 from champ_select import build_champ_select_payload, my_champion, my_pending_pick
-from lobby import (INVITES_PATH, SEARCH_PATH, SEND_INVITES_PATH, build_invitation,
-                   build_lobby_payload)
+from lobby import (INVITES_PATH, LOBBY_PATH, SEARCH_PATH, SEND_INVITES_PATH,
+                   build_invitation, build_lobby_payload)
 from lcu import LcuClient, find_lcu_credentials
 from lcu_events import LcuEventListener
 from riot_client import RiotClient
@@ -36,6 +36,8 @@ LCU_ACTIONS = {
     "decline": "/lol-matchmaking/v1/ready-check/decline",
     "reroll": "/lol-champ-select/v1/session/my-selection/reroll",
     "start_queue": SEARCH_PATH,     # lobby : lancer la recherche de partie
+    # Fermeture PROPRE du client (comme sa croix) : jamais taskkill (Vanguard).
+    "quit_client": "/process-control/v1/process/quit",
 }
 
 # Démarrage à froid du client (Riot Client -> maj -> League -> login -> menu) :
@@ -79,7 +81,7 @@ class LeagueSource(Source):
         self._player_syncing = False  # idem pour l'historique de l'ami comparé
         self._playing = False       # un enchaînement « jouer » à la fois
         self._cancel = threading.Event()  # ré-appui sur « Jouer » = annuler
-        self._lobby_sent = False    # un lobby a été envoyé (à effacer si le client ferme)
+        self._client_sent = False   # accueil « client ouvert » envoyé (à effacer à sa fermeture)
         self._started = chat.now()  # messages plus anciens : pas de notification
         lol_cfg = config.get("lol", {})
         self._launch_exe = (lol_cfg.get("launch_exe") or "").strip()
@@ -112,9 +114,9 @@ class LeagueSource(Source):
     def poll(self):
         phase = self.lcu.gameflow_phase()
         if phase is None:             # client fermé -> League inactif
-            if self._lobby_sent:      # (une fois) effacer le lobby affiché
-                self._lobby_sent = False
-                return ("default", {"lobby": None, "invitation": None, "chat": None})
+            if self._client_sent:     # (une fois) effacer le lobby affiché
+                self._client_sent = False
+                return ("default", {"client": False, "lobby": None, "invitation": None, "chat": None})
             return None
         for matches, screen, build in self._rules:
             if matches(phase):
@@ -123,8 +125,9 @@ class LeagueSource(Source):
         lobby = build_lobby_payload(self.lcu) if phase == "Lobby" else None
         invitation = build_invitation(self.lcu)   # on m'invite (menu ou lobby)
         message = chat.build_last_message(self.lcu, self._started)   # message privé reçu
-        self._lobby_sent = lobby is not None or invitation is not None
-        return ("default", {"lobby": lobby, "invitation": invitation, "chat": message})
+        self._client_sent = True
+        return ("default", {"client": True, "lobby": lobby, "invitation": invitation,
+                            "chat": message})
 
     def handle_request(self, message: dict, sender) -> bool:
         """Requêtes du Pi : synchro de l'historique (LCU) et actions (accepter…)."""
@@ -175,6 +178,10 @@ class LeagueSource(Source):
                 sid = message.get("summonerId")
                 ok = bool(sid) and self.lcu.post(SEND_INVITES_PATH, [{"toSummonerId": sid}])
                 print(f"[league] Invitation de {sid} -> {'OK' if ok else 'échec'}")
+                return True
+            if action == "leave_lobby":    # quitter / fermer le lobby
+                ok = self.lcu.delete(LOBBY_PATH)
+                print(f"[league] Quitter le lobby -> {'OK' if ok else 'échec'}")
                 return True
             if action == "cancel_queue":   # quitter la file
                 ok = self.lcu.delete(SEARCH_PATH)

@@ -76,6 +76,26 @@ def _riot_id(player: dict) -> tuple[str, str]:
     return name, tag
 
 
+def _is_me(name: str, me_name: str) -> bool:
+    """KillerName = nom affiché ou Riot ID « Nom#TAG » selon les versions."""
+    return bool(me_name) and (name or "").split("#")[0] == me_name
+
+
+def my_last_kill(events: list, me_name: str) -> dict | None:
+    """Notre dernier kill : {id, streak} (streak 1..5 via l'événement Multikill qui
+    suit le ChampionKill). La montre vibre à chaque nouvel `id`."""
+    last = None
+    for e in events:
+        name = e.get("EventName")
+        if name == "ChampionKill" and _is_me(e.get("KillerName", ""), me_name):
+            last = {"id": int(e.get("EventID", 0) or 0), "streak": 1,
+                    "t": float(e.get("EventTime", 0) or 0)}
+        elif (name == "Multikill" and last and _is_me(e.get("KillerName", ""), me_name)
+              and float(e.get("EventTime", 0) or 0) - last["t"] < 1.0):
+            last["streak"] = int(e.get("KillStreak", 1) or 1)
+    return {"id": last["id"], "streak": last["streak"]} if last else None
+
+
 def summarize_full(data: dict, id_resolver=None) -> dict:
     """Résumé complet de la partie : scoreboard des 10 joueurs + événements.
 
@@ -126,8 +146,9 @@ def summarize_full(data: dict, id_resolver=None) -> dict:
             "isSelf": name == me_name,
         })
 
+    raw_events = data.get("events", {}).get("Events", []) or []
     events = []
-    for e in (data.get("events", {}).get("Events", []) or []):
+    for e in raw_events:
         txt = _format_event(e)
         if txt:
             events.append(txt)
@@ -143,4 +164,5 @@ def summarize_full(data: dict, id_resolver=None) -> dict:
         "events": events,
         "objectives": objectives,
         "self": {"gold": int(active.get("currentGold", 0) or 0)},
+        "myKill": my_last_kill(raw_events, me_name),   # vibration de la montre
     }

@@ -14,9 +14,12 @@ de `Module` ; les écrans League passent par `app.modules["league"]`.
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
+import json
 import threading
 import time
+from pathlib import Path
 
 import pygame
 
@@ -494,8 +497,8 @@ class LeagueModule(Module):
 
     # ------------------------------------------------- télécommande (montre)
     def remote_view(self) -> dict:
-        """Ready-check et sélection (banc ARAM) pour l'API télécommande. Rien en
-        partie : le tableau changerait chaque seconde pour rien."""
+        """Ready-check et sélection (banc ARAM) pour l'API télécommande. En partie,
+        seulement notre dernier kill : le tableau changerait chaque seconde pour rien."""
         screen, data = self.app.network_screen, self.app.agent_data
         if screen == "queue":
             return {"queue": data.get("queue") or {}}
@@ -510,9 +513,12 @@ class LeagueModule(Module):
                 "rerolls": cs.get("rerolls", 0),
                 "timer": cs.get("timer", {}),
             }}
+        if screen == "lol":       # en partie : seulement notre dernier kill (vibration)
+            return {"game": {"kill": (data.get("lol") or {}).get("myKill")}}
         if screen == "default":   # accueil : bouton Jouer + lobby (joueurs, Lancer)
             home = data.get("default") or {}
-            return {"home": {"lobby": self._lobby_with_default_friend(home.get("lobby")),
+            return {"home": {"client": bool(home.get("client")),
+                             "lobby": self._lobby_with_default_friend(home.get("lobby")),
                              "invitation": home.get("invitation"),
                              "playStatus": home.get("playStatus") or "",
                              "playBusy": bool(home.get("playBusy")),
@@ -531,10 +537,20 @@ class LeagueModule(Module):
         return {**lobby, "friends": friends}
 
     def remote_asset(self, name: str) -> tuple[bytes, str] | None:
-        """`icon/<championId>` : icône carrée (cache disque `icons.db`, sinon CDN),
+        """`sounds` (liste + empreintes) et `sound/<kill1…5>` : sons des kills de la
+        montre (`sounds/`, gitignoré : extraits sans licence, hors dépôt public).
+        `icon/<championId>` : icône carrée (cache disque `icons.db`, sinon CDN),
         **réduite** pour la montre (~4 Ko au lieu de ~30 : le lien montre ↔ iPhone
         en Bluetooth est lent). Le verrou sérialise aussi pygame (thread HTTP)."""
         kind, _, ident = name.partition("/")
+        if kind == "sounds":
+            return json.dumps(_kill_sounds()).encode(), "application/json"
+        if kind == "sound":       # nom exact de la liste : pas de chemin arbitraire
+            sound = _kill_sounds().get(ident)
+            if sound is None:
+                return None
+            path = SOUNDS_DIR / f"{ident}.{sound['ext']}"
+            return path.read_bytes(), AUDIO_TYPES[path.suffix]
         if kind != "icon" or not ident.isdigit():
             return None
         cid = int(ident)
@@ -585,6 +601,15 @@ class LeagueModule(Module):
             if not lobby.get("isLeader"):
                 return 409, {"ok": False, "error": "seul le chef lance"}
             self.lcu_action("start_queue")
+            return 200, {"ok": True}
+        if action in ("leave_lobby", "quit_client"):
+            home = (data.get("default") or {}) if screen == "default" else {}
+            if action == "leave_lobby" and not home.get("lobby"):
+                return 409, {"ok": False, "error": "pas de lobby"}
+            if action == "quit_client" and not home.get("client"):
+                # Hors accueil (sélection, partie) : jamais de fermeture à distance.
+                return 409, {"ok": False, "error": "client fermé ou en partie"}
+            self.lcu_action(action)
             return 200, {"ok": True}
         if action == "cancel_queue":
             if screen != "queue" or (data.get("queue") or {}).get("state") == "readycheck":
@@ -705,3 +730,18 @@ def _shrink_icon(raw: bytes) -> bytes:
     out = io.BytesIO()
     pygame.image.save(small, out, "icon.jpg")
     return out.getvalue()
+
+
+SOUNDS_DIR = Path(__file__).resolve().parents[2] / "sounds"
+AUDIO_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".caf": "audio/x-caf"}
+
+
+def _kill_sounds() -> dict[str, dict]:
+    """{"kill1": {"ext": "mp3", "hash": …}, …} : la montre ne retélécharge qu'un son
+    dont l'empreinte a changé. Relu à chaque appel (5 petits fichiers, rare)."""
+    out = {}
+    for path in sorted(SOUNDS_DIR.glob("kill[1-5].*")):
+        if path.suffix.lower() in AUDIO_TYPES:
+            out[path.stem] = {"ext": path.suffix[1:].lower(),
+                              "hash": hashlib.sha1(path.read_bytes()).hexdigest()}
+    return out

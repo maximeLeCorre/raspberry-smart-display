@@ -69,6 +69,8 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Connexion au Pi
+        # Session longue (GameSession.swift) : vibrer à nos kills poignet baissé.
+        WKBackgroundModes: [physical-therapy]
     entitlements:
       path: build/LolRemote.entitlements
       properties:
