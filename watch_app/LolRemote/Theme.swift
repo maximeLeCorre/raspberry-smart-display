@@ -88,3 +88,15 @@ struct Avatar: View {
             .background(Color(white: 0.23), in: Circle())
     }
 }
+
+extension View {
+    /// Double tap (index + pouce, Series 9+ / Ultra 2, watchOS 11+) = appui sur ce
+    /// bouton, sans toucher l'écran. UN seul par écran (l'action principale).
+    @ViewBuilder func doubleTapAction() -> some View {
+        if #available(watchOS 11.0, *) {
+            handGestureShortcut(.primaryAction)
+        } else {
+            self
+        }
+    }
+}

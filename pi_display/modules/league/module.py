@@ -191,7 +191,8 @@ class LeagueModule(Module):
                 {"alert": {"title": f"Message de {msg.get('from') or '?'}",
                            "body": msg.get("body") or ""},
                  "sound": "default", "category": "CHAT_MESSAGE"},
-                collapse_id=f"chat-{msg.get('from') or ''}"[:64], ttl=600)
+                collapse_id=f"chat-{msg.get('from') or ''}"[:64], ttl=600,
+                extra={"conversationId": msg.get("conv") or "", "from": msg.get("from") or ""})
         self._chat_pushed = msg.get("id") or self._chat_pushed
 
     def on_agent_screen(self, screen: str, shown: bool) -> None:
@@ -611,6 +612,16 @@ class LeagueModule(Module):
                 return 409, {"ok": False, "error": "client fermé ou en partie"}
             self.lcu_action(action)
             return 200, {"ok": True}
+        if action == "chat_reply":      # réponse à un message privé (notif / app montre)
+            conv, text = body.get("conversationId"), body.get("body")
+            if not (isinstance(conv, str) and conv and len(conv) <= 200
+                    and isinstance(text, str) and 0 < len(text.strip()) <= MAX_REPLY):
+                return 400, {"ok": False, "error": "réponse invalide"}
+            if screen == "default" and not (data.get("default") or {}).get("client"):
+                return 409, {"ok": False, "error": "client fermé"}
+            self.app.server.send({"type": "lcu_action", "action": "chat_reply",
+                                  "conversationId": conv, "body": text.strip()})
+            return 200, {"ok": True}
         if action == "cancel_queue":
             if screen != "queue" or (data.get("queue") or {}).get("state") == "readycheck":
                 return 409, {"ok": False, "error": "pas en file"}
@@ -734,6 +745,7 @@ def _shrink_icon(raw: bytes) -> bytes:
 
 SOUNDS_DIR = Path(__file__).resolve().parents[2] / "sounds"
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".caf": "audio/x-caf"}
+MAX_REPLY = 200        # réponse à un message privé depuis la montre (caractères)
 
 
 def _kill_sounds() -> dict[str, dict]:

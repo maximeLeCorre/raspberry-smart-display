@@ -248,7 +248,8 @@ def test_inviter_ami_par_defaut_en_tete(app):
 
 def test_notif_arrivee_dans_le_lobby_et_message(app, monkeypatch):
     sent = []
-    monkeypatch.setattr(app.push, "notify", lambda aps, **kw: sent.append(aps))
+    extras = []
+    monkeypatch.setattr(app.push, "notify", lambda aps, **kw: sent.append(aps) or extras.append(kw.get("extra")))
     league = app.modules["league"]
     push(app, type="_connected")
     me = {"name": "Moi", "isLeader": True, "isSelf": True}
@@ -258,13 +259,43 @@ def test_notif_arrivee_dans_le_lobby_et_message(app, monkeypatch):
     league.tick()                                    # création du lobby : rien
     push(app, type="data", screen="default",
          payload={"lobby": {**lob, "members": [me, {"name": "Ami", "isSelf": False}]},
-                  "chat": {"id": "m1", "from": "Ami", "body": "on joue ?"}})
+                  "chat": {"id": "m1", "from": "Ami", "body": "on joue ?", "conv": "ami@pvp"}})
     time.sleep(0.1)
     league.tick()
     league.tick()
     assert [a["category"] for a in sent] == ["LOBBY_JOIN", "CHAT_MESSAGE"]
     assert sent[0]["alert"]["title"] == "Ami a rejoint ton lobby"
     assert sent[1]["alert"] == {"title": "Message de Ami", "body": "on joue ?"}
+    assert extras[1] == {"conversationId": "ami@pvp", "from": "Ami"}     # pour répondre
+
+
+def test_reponse_a_un_message(app):
+    push(app, type="_connected")
+    time.sleep(0.1)
+    reply = {"action": "chat_reply", "conversationId": "ami@pvp", "body": " J'arrive ! "}
+    assert call(app, "POST", "/action", reply)[0] == 409                  # client fermé
+    push(app, type="data", screen="default", payload={"client": True})
+    time.sleep(0.1)
+    assert call(app, "POST", "/action", {**reply, "body": "  "})[0] == 400
+    assert call(app, "POST", "/action", reply)[0] == 200
+    assert {"type": "lcu_action", "action": "chat_reply", "conversationId": "ami@pvp",
+            "body": "J'arrive !"} in app.sent
+
+
+def test_horaires_des_trains_pour_la_montre(app):
+    from modules.transit.transit_feed import Departure
+    assert call(app, "GET", "/asset/transit/next")[0] == 404              # pas de flux (sans clé)
+
+    class Feed:
+        def snapshot(self):
+            dep = Departure(when=2000.0, aimed=1880.0, destination="Paris Saint-Lazare", mission="",
+                            platform="2", status="delayed", at_stop=False, to_paris=True, line="L")
+            return {"departures": [dep], "messages": [], "updated": 1900.0, "error": ""}
+    app._transit_feed = Feed()
+    status, board = call(app, "GET", "/asset/transit/next")
+    assert status == 200 and board["updated"] == 1900.0
+    assert board["departures"] == [{"line": "L", "destination": "Paris St-Lazare", "time": 2000.0,
+                                    "delay": 2, "cancelled": False, "platform": "2", "toParis": True}]
 
 
 def test_fermer_lobby_et_client_verifies(app):

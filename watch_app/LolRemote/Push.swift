@@ -1,6 +1,6 @@
 // Notifications push (envoyées par le Pi, pi_display/push_apns.py) : « Partie
-// trouvée ! », invitation, arrivée dans notre lobby, message privé ; avec
-// boutons d'action, même app fermée. À chaque lancement, le jeton APNs de la
+// trouvée ! », invitation, arrivée dans notre lobby, message privé (réponse :
+// Reply.swift) ; avec boutons d'action, même app fermée. À chaque lancement, le jeton APNs de la
 // montre est renvoyé au Pi (POST /push/register).
 import Foundation
 import UserNotifications
@@ -32,15 +32,21 @@ final class AppDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCent
         let join = UNNotificationAction(identifier: "INVITE_ACCEPT", title: "Accepter", options: [.foreground])
         let refuse = UNNotificationAction(identifier: "INVITE_DECLINE", title: "Refuser", options: [.destructive])
         let start = UNNotificationAction(identifier: "START_QUEUE", title: "Lancer la partie", options: [.foreground])
+        // Message : « Répondre… » en 1er (= double tap) ouvre l'écran de réponse ;
+        // les réponses rapides partent sans ouvrir l'app.
+        let reply = UNNotificationAction(identifier: "REPLY", title: "Répondre…", options: [.foreground])
+        let quick = QuickReplies.all.prefix(QuickReplies.inNotification).enumerated().map { index, text in
+            UNNotificationAction(identifier: "QUICK_\(index)", title: text, options: [])
+        }
         center.setNotificationCategories([
             UNNotificationCategory(identifier: "READY_CHECK", actions: [accept, decline],
                                    intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: "LOBBY_INVITE", actions: [join, refuse],
                                    intentIdentifiers: [], options: []),
-            // Quelqu'un rejoint notre lobby ; message privé (simple appui = ouvrir l'app).
+            // Quelqu'un rejoint notre lobby (simple appui = ouvrir l'app).
             UNNotificationCategory(identifier: "LOBBY_JOIN", actions: [start],
                                    intentIdentifiers: [], options: []),
-            UNNotificationCategory(identifier: "CHAT_MESSAGE", actions: [],
+            UNNotificationCategory(identifier: "CHAT_MESSAGE", actions: [reply] + quick,
                                    intentIdentifiers: [], options: []),
         ])
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
@@ -60,8 +66,19 @@ final class AppDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCent
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
-        let invitationId = response.notification.request.content.userInfo["invitationId"] as? String ?? ""
-        switch response.actionIdentifier {
+        let info = response.notification.request.content.userInfo
+        let invitationId = info["invitationId"] as? String ?? ""
+        let conversationId = info["conversationId"] as? String ?? ""
+        let from = info["from"] as? String ?? ""
+        let action = response.actionIdentifier
+        if action.hasPrefix("QUICK_"), let index = Int(action.dropFirst(6)),
+           QuickReplies.all.indices.contains(index), !conversationId.isEmpty {
+            if !(await sendReply(QuickReplies.all[index], to: conversationId)) { notifyReplyFailed(to: from) }
+            return
+        }
+        switch action {
+        case "REPLY" where !conversationId.isEmpty:
+            await MainActor.run { ReplyCenter.shared.target = ReplyTarget(conversationId: conversationId, from: from) }
         case "ACCEPT": await postToPi("/action", ["action": "accept"])
         case "DECLINE": await postToPi("/action", ["action": "decline"])
         case "INVITE_ACCEPT": await postToPi("/action", ["action": "invite_accept", "invitationId": invitationId])

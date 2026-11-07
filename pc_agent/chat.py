@@ -1,10 +1,11 @@
 """Dernier message privé reçu (chat du client League), pour la notification
-« Message de X » sur la montre. Seulement les messages privés (`chat`), pas les
+« Message de X » sur la montre (`conv` = conversation, pour y répondre). Seulement les messages privés (`chat`), pas les
 salons de lobby/sélection, ni nos propres messages."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from lcu import LcuClient
 
@@ -34,10 +35,15 @@ def build_last_message(lcu: LcuClient, since: float) -> dict | None:
         sent = _timestamp(msg.get("timestamp", ""))
         if sent < since or (best and sent <= best["t"]):
             continue
-        best = {"id": str(msg["id"]), "t": sent,
+        best = {"id": str(msg["id"]), "t": sent, "conv": str(conv.get("id") or ""),
                 "from": conv.get("gameName") or conv.get("name") or "?",
                 "body": (msg.get("body") or "")[:MAX_BODY]}
     return best
+
+
+def reply_path(conversation_id: str) -> str:
+    """POST {"body", "type": "chat"} ici = message envoyé dans la conversation."""
+    return f"{CONVERSATIONS_PATH}/{quote(conversation_id, safe='')}/messages"
 
 
 def now() -> float:

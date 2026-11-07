@@ -128,7 +128,9 @@ class RemoteServer:
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(data)))
-                self.send_header("Cache-Control", f"private, max-age={ASSET_MAX_AGE}")
+                # JSON (listes, horaires) = dynamique ; fichiers (icônes, sons) = cache.
+                cache = "no-store" if "json" in content_type else f"private, max-age={ASSET_MAX_AGE}"
+                self.send_header("Cache-Control", cache)
                 self.end_headers()
                 self.wfile.write(data)
 

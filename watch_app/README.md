@@ -7,7 +7,9 @@ Developer **payant** requis (TestFlight).
 
 Structure imposée par Apple : coquille iOS vide `LolRemote`
 (`fr.maxime.lolremote`) qui embarque l'app montre seule `LolRemoteWatch`
-(`fr.maxime.lolremote.watchkitapp`). Icône : `gen_icon.py`.
+(`fr.maxime.lolremote.watchkitapp`), qui embarque la complication « Prochain
+train » `LolRemoteTrains` (`….watchkitapp.trains`, WidgetKit, `Trains/`). Code
+commun app + complication : `Shared/`. Icône : `gen_icon.py`.
 
 ## Une seule fois (depuis le PC Windows)
 1. **Clé d'API** : appstoreconnect.apple.com → Utilisateurs et accès →
@@ -35,8 +37,14 @@ inutile pour en changer). Trop faibles ? Originaux dans `sounds/originals/`, pui
 `pi_display/tools/boost_sounds.py` (WAV normalisés et poussés). Sans fichier : vibrations seules (douces jusqu'au
 triple, fortes au quadra/penta).
 
+## Complication « Prochain train »
+Cadran : appui long → Modifier → onglet Complications → un emplacement →
+LolRemote → Prochain train. Cadran sans emplacement : tourner la couronne depuis
+le cadran (pile intelligente) → Modifier → « + ». Elle lit le Pi en Wi-Fi seul
+(hors maison : dernier relevé, « màj HH:MM »).
+
 ## Ensuite
 - Nouvelle version = relancer le workflow (build valable **90 jours**).
 - Profils ou certificat expirés (1 an) / IP du Pi changée (`PI_URL` dans
-  `signing.py`) : relancer `signing.py`, remplacer le secret.
+  `signing.py`) / nouvelle cible (extension) : relancer `signing.py`, remplacer le secret.
 - Au 1er lancement : accepter l'accès au **réseau local**.

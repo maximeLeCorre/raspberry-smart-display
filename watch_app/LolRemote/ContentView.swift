@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var client: RemoteClient
+    @ObservedObject private var replies = ReplyCenter.shared
 
     var body: some View {
         Group {
@@ -42,6 +43,7 @@ struct ContentView: View {
                     .background(Theme.raised, in: Capsule())
             }
         }
+        .sheet(item: $replies.target) { target in ReplyView(target: target) }   // « Répondre… »
         .task { client.start() }
     }
 }
@@ -199,6 +201,7 @@ struct InvitationView: View {
                 Label("Rejoindre", systemImage: "checkmark")
             }
             .buttonStyle(PrimaryButtonStyle(height: 44))
+            .doubleTapAction()
             Button { client.send(["action": "invite_decline", "invitationId": invitation.id]) } label: {
                 Label("Refuser", systemImage: "xmark")
             }
@@ -279,6 +282,7 @@ struct LobbyView: View {
                           systemImage: "play.fill")
                 }
                 .buttonStyle(PrimaryButtonStyle(height: 42))
+                .doubleTapAction()
                 .disabled(client.busy || lobby.canStart != true)
                 .opacity(lobby.canStart == true ? 1 : 0.5)
             } else {
@@ -388,6 +392,7 @@ struct ReadyCheckView: View {
                 Spacer(minLength: 0)
                 Button { client.accept(true) } label: { Label("Accepter", systemImage: "checkmark") }
                     .buttonStyle(PrimaryButtonStyle(height: 46))
+                    .doubleTapAction()
                 Button { client.accept(false) } label: { Label("Refuser", systemImage: "xmark") }
                     .buttonStyle(SecondaryButtonStyle(height: 32))
             }

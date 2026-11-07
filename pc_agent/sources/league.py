@@ -179,6 +179,12 @@ class LeagueSource(Source):
                 ok = bool(sid) and self.lcu.post(SEND_INVITES_PATH, [{"toSummonerId": sid}])
                 print(f"[league] Invitation de {sid} -> {'OK' if ok else 'échec'}")
                 return True
+            if action == "chat_reply":     # réponse à un message privé (montre)
+                conv, text = str(message.get("conversationId") or ""), str(message.get("body") or "")
+                ok = bool(conv and text) and self.lcu.post(chat.reply_path(conv),
+                                                           {"body": text, "type": "chat"})
+                print(f"[league] Réponse au message -> {'OK' if ok else 'échec'}")
+                return True
             if action == "leave_lobby":    # quitter / fermer le lobby
                 ok = self.lcu.delete(LOBBY_PATH)
                 print(f"[league] Quitter le lobby -> {'OK' if ok else 'échec'}")

@@ -83,6 +83,7 @@ jobs:
             <key>provisioningProfiles</key><dict>
               <key>fr.maxime.lolremote</key><string>LolRemote App Store</string>
               <key>fr.maxime.lolremote.watchkitapp</key><string>LolRemote Watch App Store</string>
+              <key>fr.maxime.lolremote.watchkitapp.trains</key><string>LolRemote Trains App Store</string>
             </dict>
             <key>manageAppVersionAndBuildNumber</key><false/>
           </dict></plist>

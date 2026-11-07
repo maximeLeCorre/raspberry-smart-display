@@ -119,7 +119,7 @@ def test_dernier_message_prive_recu():
             if path == chat.ME_PATH:
                 return {"id": "moi@pvp"}
             return [
-                {"type": "chat", "gameName": "Ami", "unreadMessageCount": 1,
+                {"type": "chat", "gameName": "Ami", "unreadMessageCount": 1, "id": "ami@pvp",
                  "lastMessage": {"id": "m2", "fromId": "ami@pvp", "body": "on joue ?",
                                  "timestamp": "2026-11-07T12:00:05.000Z"}},
                 {"type": "chat", "gameName": "Vieux", "unreadMessageCount": 1,       # avant le démarrage
@@ -135,7 +135,19 @@ def test_dernier_message_prive_recu():
 
     since = chat._timestamp("2026-11-07T11:00:00Z")
     msg = chat.build_last_message(ChatLcu(), since)
-    assert (msg["id"], msg["from"], msg["body"]) == ("m2", "Ami", "on joue ?")
+    assert (msg["id"], msg["from"], msg["body"], msg["conv"]) == ("m2", "Ami", "on joue ?", "ami@pvp")
+
+
+def test_reponse_a_un_message_depuis_la_montre():
+    import chat
+    src = LeagueSource({})
+    src.lcu = FakeLcu()
+    src.handle_request({"type": "lcu_action", "action": "chat_reply",
+                        "conversationId": "ami@pvp.net", "body": "J'arrive !"}, None)
+    src.handle_request({"type": "lcu_action", "action": "chat_reply",
+                        "conversationId": "", "body": "x"}, None)        # ignorée
+    assert src.lcu.posted == [chat.reply_path("ami@pvp.net")]
+    assert chat.reply_path("ami@pvp.net") == "/lol-chat/v1/conversations/ami%40pvp.net/messages"
 
 
 def test_quitter_le_lobby_et_fermer_le_client():

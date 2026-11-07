@@ -56,7 +56,7 @@ targets:
   LolRemoteWatch:
     type: application
     platform: watchOS
-    sources: [LolRemote]
+    sources: [LolRemote, Shared]
     info:
       path: build/Info.plist
       properties:
@@ -86,3 +86,30 @@ targets:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: Apple Distribution
           PROVISIONING_PROFILE_SPECIFIER: LolRemote Watch App Store
+    dependencies:
+      - target: LolRemoteTrains   # complication, embarquée dans PlugIns/
+  # Complication / widget « Prochain train » (WidgetKit), lit le Pi elle-même.
+  LolRemoteTrains:
+    type: app-extension
+    platform: watchOS
+    sources: [Trains, Shared, LolRemote/Secrets.swift]
+    info:
+      path: build/Trains-Info.plist
+      properties:
+        CFBundleDisplayName: Prochain train
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Horaires des trains lus sur le Pi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fr.maxime.lolremote.watchkitapp.trains
+        SKIP_INSTALL: true
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: LolRemote Trains App Store
