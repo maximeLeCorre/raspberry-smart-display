@@ -145,18 +145,30 @@ final class RemoteClient: ObservableObject {
             state = cached
         }
     }
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 28    // > attente du long polling (20 s)
+    /// ESSAI « Wi-Fi seul » : près de l'iPhone, watchOS fait passer le trafic par le
+    /// relais Bluetooth de l'iPhone, qui ne joint PAS le réseau local (délai dépassé).
+    /// URLSession ne permet pas de choisir le Wi-Fi ; on refuse les réseaux « coûteux »
+    /// et « restreints », en pariant que le relais en fait partie (non documenté).
+    /// Échec → chemin normal. `route` dit lequel a marché (accueil).
+    @Published var route: String?
+    @Published var wifiError: String?         // pourquoi le Wi-Fi seul a échoué (diagnostic)
+    private static func makeSession(_ config: URLSessionConfiguration, timeout: TimeInterval,
+                                    wifiOnly: Bool) -> URLSession {
+        config.timeoutIntervalForRequest = timeout
+        if wifiOnly {
+            config.allowsExpensiveNetworkAccess = false
+            config.allowsConstrainedNetworkAccess = false
+            config.allowsCellularAccess = false
+        }
         return URLSession(configuration: config)
-    }()
-    /// Actions sur des connexions NEUVES (session éphémère à part) : une connexion
+    }
+    // Long polling : 28 s > attente du Pi (20 s).
+    private let session = makeSession(.default, timeout: 28, wifiOnly: false)
+    private let wifiSession = makeSession(.default, timeout: 28, wifiOnly: true)
+    /// Actions sur des connexions NEUVES (sessions éphémères à part) : une connexion
     /// gardée ouverte peut être morte (Pi redémarré, relais iPhone coupé) sans le savoir.
-    private let actionSession: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 6
-        return URLSession(configuration: config)
-    }()
+    private let actionSession = makeSession(.ephemeral, timeout: 6, wifiOnly: false)
+    private let wifiActionSession = makeSession(.ephemeral, timeout: 3, wifiOnly: true)
 
     func start() {
         guard task == nil else { return }
@@ -183,15 +195,16 @@ final class RemoteClient: ObservableObject {
     private func loop() async {
         var version: Int?
         var failures = 0
+        var wifiOnly = true           // chaque nouvelle connexion retente d'abord le Wi-Fi seul
         connectingSince = Date()
         while !Task.isCancelled {
             let path = "/state?wait=20" + (version.map { "&v=\($0)" } ?? "")
             var req = apiRequest(path)
             // 1re requête (sans version) = réponse immédiate attendue : délai court, pour
             // ne pas rester 40 s sur une connexion morte (réveil, relais iPhone coupé).
-            req.timeoutInterval = version == nil ? 4 : 28
+            req.timeoutInterval = version == nil ? (wifiOnly ? 2 : 4) : 28
             do {
-                let (data, response) = try await session.data(for: req)
+                let (data, response) = try await (wifiOnly ? wifiSession : session).data(for: req)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard code == 200 else {
                     connected = false
@@ -205,6 +218,7 @@ final class RemoteClient: ObservableObject {
                 failures = 0
                 lastError = nil
                 lastResponse = Date()
+                route = wifiOnly ? "Wi-Fi seul" : "chemin normal"
                 if new.v != version {
                     if version != nil, let t = new.t {   // réveil du long polling = vrai changement
                         latencyMs = max(0, Int((Date().timeIntervalSince1970 - t) * 1000))
@@ -225,6 +239,12 @@ final class RemoteClient: ObservableObject {
                 }
             } catch {
                 if Task.isCancelled { break }
+                if wifiOnly && version == nil {       // Wi-Fi seul impossible : chemin normal tout de suite
+                    wifiOnly = false
+                    wifiError = describe(error)
+                    continue
+                }
+                wifiOnly = true
                 if connected { connectingSince = Date() }
                 connected = false
                 version = nil
@@ -279,12 +299,11 @@ final class RemoteClient: ObservableObject {
         }
     }
 
-    /// Un 2e essai (connexion neuve) si le 1er échoue au niveau réseau.
+    /// Wi-Fi seul d'abord (essai), puis le chemin normal, chacun sur une connexion neuve.
     private func postWithRetry(_ req: URLRequest) async throws -> (Data, URLResponse) {
         do {
-            return try await actionSession.data(for: req)
+            return try await wifiActionSession.data(for: req)
         } catch {
-            try? await Task.sleep(nanoseconds: 300_000_000)
             return try await actionSession.data(for: req)
         }
     }

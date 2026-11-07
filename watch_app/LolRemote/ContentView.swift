@@ -486,11 +486,19 @@ struct LatencyFooter: View {
     @EnvironmentObject var client: RemoteClient
 
     var body: some View {
-        if client.latencyMs != nil || client.actionMs != nil {
-            Text([client.latencyMs.map { "réseau \($0) ms" }, client.actionMs.map { "action \($0) ms" }]
-                    .compactMap { $0 }.joined(separator: " · "))
-                .font(.system(size: 10)).foregroundStyle(Color(white: 0.56)).monospacedDigit()
+        VStack(spacing: 1) {
+            if client.latencyMs != nil || client.actionMs != nil {
+                Text([client.latencyMs.map { "réseau \($0) ms" }, client.actionMs.map { "action \($0) ms" }]
+                        .compactMap { $0 }.joined(separator: " · "))
+                    .monospacedDigit()
+            }
+            // ESSAI Wi-Fi seul : chemin utilisé, et l'erreur du Wi-Fi seul s'il a échoué.
+            if let route = client.route {
+                Text("via \(route)" + (route == "Wi-Fi seul" ? "" : client.wifiError.map { " · wifi : \($0)" } ?? ""))
+                    .lineLimit(2).multilineTextAlignment(.center)
+            }
         }
+        .font(.system(size: 10)).foregroundStyle(Color(white: 0.56))
     }
 }
 
