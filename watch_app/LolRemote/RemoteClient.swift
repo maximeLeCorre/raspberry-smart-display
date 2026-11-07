@@ -254,6 +254,9 @@ final class RemoteClient: ObservableObject {
                 if Task.isCancelled { break }
                 if connected { connectingSince = Date() }
                 connected = false
+                // Pi muet depuis 2 min : la fin de partie ne nous parviendra pas,
+                // on n'empêche pas la montre de se mettre en veille pour rien.
+                if Date().timeIntervalSince(connectingSince) > 120 { gameSession.stop() }
                 version = nil
                 lastError = describe(error)
                 // Nouvel essai vite d'abord (réseau qui se réveille), puis toutes les 2 s.

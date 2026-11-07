@@ -104,15 +104,24 @@ final class SoundStore {
 /// penta ; + le son `killN` s'il est sur la montre. Joué AUSSITÔT ; pendant un son,
 /// les kills suivants attendent sa fin (jamais coupé) et seul le dernier est joué
 /// (1 → 3 pendant le son du 1 : le 2 est sauté).
+/// ⚠️ Tout l'audio vit sur `audioQueue`, JAMAIS sur le fil principal : l'activation
+/// de la session audio peut bloquer longtemps (surtout en arrière-plan) et figeait
+/// l'app entière (plus aucun appui pris en compte). Activation asynchrone, une seule
+/// fois, abandonnée au bout de 2 s : les vibrations, elles, partent toujours.
 @MainActor
 final class KillFeedback: NSObject, AVAudioPlayerDelegate {
     static let shared = KillFeedback()
-    private var player: AVAudioPlayer?
+    private var soundPlaying = false           // un son est en cours (fil principal)
     private var pending: Int?                  // dernier kill en attente de la fin du son
+
+    private let audioQueue = DispatchQueue(label: "lolremote.killsound")
+    // Accédés UNIQUEMENT sur `audioQueue`.
+    nonisolated(unsafe) private var player: AVAudioPlayer?
+    nonisolated(unsafe) private var audioReady = false
 
     static func play(streak: Int) {
         let level = max(1, min(streak, 5))
-        if shared.player?.isPlaying == true {
+        if shared.soundPlaying {
             shared.pending = level                       // joué à la fin du son en cours
         } else {
             shared.perform(level)
@@ -122,12 +131,17 @@ final class KillFeedback: NSObject, AVAudioPlayerDelegate {
     /// Bouton « Tester » des réglages : coupe un éventuel test en cours.
     static func preview(_ level: Int) {
         shared.pending = nil
-        shared.player?.stop()
+        shared.soundPlaying = false
+        shared.audioQueue.async { shared.player?.stop() }
         shared.perform(level)
     }
 
     private func perform(_ level: Int) {
-        if KillSettings.soundOn { playSound(level) }
+        if KillSettings.soundOn, let url = SoundStore.shared.url(level: level) {
+            soundPlaying = true
+            let volume = KillSettings.volume
+            audioQueue.async { self.startSound(url, volume: volume) }
+        }
         let strong = level >= 4
         let haptic: WKHapticType = strong ? .notification : KillSettings.haptic
         let pulses = (strong ? level - 2 : level) * KillSettings.repeats   // 1, 2, 3 ; 2 / 3 fortes
@@ -139,21 +153,36 @@ final class KillFeedback: NSObject, AVAudioPlayerDelegate {
         }
     }
 
-    private func playSound(_ level: Int) {
-        guard let url = SoundStore.shared.url(level: level) else { return }
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-        try? AVAudioSession.sharedInstance().setActive(true)
+    /// Sur `audioQueue`.
+    nonisolated private func startSound(_ url: URL, volume: Float) {
+        if !audioReady {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .default)
+            let done = DispatchSemaphore(value: 0)
+            var ok = false
+            session.activate(options: []) { success, _ in
+                ok = success
+                done.signal()
+            }
+            guard done.wait(timeout: .now() + 2) == .success, ok else { return soundEnded() }
+            audioReady = true
+        }
         player = try? AVAudioPlayer(contentsOf: url)
-        player?.volume = KillSettings.volume
+        player?.volume = volume
         player?.delegate = self
-        player?.play()
+        if player?.play() != true { soundEnded() }
     }
 
-    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+    nonisolated private func soundEnded() {
         Task { @MainActor in
+            self.soundPlaying = false
             guard let level = self.pending else { return }
             self.pending = nil
             self.perform(level)
         }
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        soundEnded()
     }
 }

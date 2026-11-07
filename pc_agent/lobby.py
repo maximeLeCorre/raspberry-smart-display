@@ -14,6 +14,7 @@ MAX_FRIENDS = 30
 # Disponibilité du chat → libellé écrit (« mobile »/« offline » : non invitables).
 AVAILABILITY = {"chat": "en ligne", "away": "absent", "dnd": "occupé"}
 _queue_names: dict[int, str] = {}
+_names: dict[int, str] = {}           # summonerId → Riot ID (nom), stable
 
 
 def queue_name(lcu: LcuClient, queue_id: int) -> str:
@@ -27,9 +28,20 @@ def queue_name(lcu: LcuClient, queue_id: int) -> str:
     return _queue_names[queue_id]
 
 
-def _name(member: dict) -> str:
-    return (member.get("gameName") or member.get("summonerName")
-            or member.get("toSummonerName") or "?")
+def _name(lcu: LcuClient, member: dict, id_key: str = "summonerId") -> str:
+    """⚠️ Les membres du lobby n'ont plus de nom (gameName/summonerName vides) :
+    résolu par summonerId via la LCU (mis en cache)."""
+    name = (member.get("gameName") or member.get("summonerName")
+            or member.get("toSummonerName") or "")
+    if name:
+        return name
+    sid = member.get(id_key)
+    if sid and sid not in _names:
+        found = (lcu.summoner_by_id(sid) or {}).get("gameName") or ""
+        if not found:
+            return "?"                     # pas de cache : on réessaiera
+        _names[sid] = found
+    return _names.get(sid, "?")
 
 
 def build_lobby_payload(lcu: LcuClient) -> dict | None:
@@ -45,10 +57,10 @@ def build_lobby_payload(lcu: LcuClient) -> dict | None:
     return {
         "queueId": queue_id,
         "queueName": queue_name(lcu, queue_id) if queue_id else "",
-        "members": [{"name": _name(m), "isLeader": bool(m.get("isLeader")),
+        "members": [{"name": _name(lcu, m), "isLeader": bool(m.get("isLeader")),
                      "isSelf": m.get("summonerId") == me}
                     for m in lobby.get("members") or []],
-        "invites": [{"name": _name(i), "state": i.get("state", "")}
+        "invites": [{"name": _name(lcu, i, "toSummonerId"), "state": i.get("state", "")}
                     for i in lobby.get("invitations") or []
                     if i.get("state") in ("Pending", "Requested")],
         "isLeader": bool((lobby.get("localMember") or {}).get("isLeader")),
