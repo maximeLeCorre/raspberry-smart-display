@@ -50,3 +50,28 @@ def test_pick_verrouille_notre_action():
     assert src.handle_request({"type": "lcu_action", "action": "pick", "championId": 893}, None)
     assert src.lcu.patched == [("/lol-champ-select/v1/session/actions/8",
                                 {"championId": 893, "completed": True})]
+
+
+class BenchLcu:
+    """Banc : le 1er échange est ignoré par le client (2xx sans effet), le 2e passe."""
+
+    def __init__(self):
+        self.posts, self.mine = 0, 22
+
+    def post(self, path, payload=None):
+        self.posts += 1
+        if self.posts >= 2:
+            self.mine = 121
+        return True
+
+    def champ_select_session(self):
+        bench = [] if self.mine == 121 else [{"championId": 121}]
+        return {"localPlayerCellId": 0, "myTeam": [{"cellId": 0, "championId": self.mine}],
+                "benchChampions": bench}
+
+
+def test_echange_du_banc_verifie_et_reessaye():
+    src = LeagueSource({})
+    src.lcu = BenchLcu()
+    src._swap(121)
+    assert src.lcu.posts == 2 and src.lcu.mine == 121

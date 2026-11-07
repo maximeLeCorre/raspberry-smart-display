@@ -16,7 +16,7 @@ import time
 
 import psutil
 
-from champ_select import build_champ_select_payload, my_pending_pick
+from champ_select import build_champ_select_payload, my_champion, my_pending_pick
 from lobby import (INVITES_PATH, SEARCH_PATH, SEND_INVITES_PATH, build_invitation,
                    build_lobby_payload)
 from lcu import LcuClient, find_lcu_credentials
@@ -180,14 +180,36 @@ class LeagueSource(Source):
             if action == "pick":   # choix de départ (2-3 champions) : verrouillé
                 self._pick(int(message.get("championId") or 0))
                 return True
+            if action == "swap":   # banc ARAM : en thread (vérifie l'effet, réessaie)
+                threading.Thread(target=self._swap, daemon=True,
+                                 args=(int(message.get("championId") or 0),)).start()
+                return True
             path = LCU_ACTIONS.get(action)
-            if action == "swap":   # banc ARAM : prendre ce champion
-                path = f"/lol-champ-select/v1/session/bench/swap/{int(message.get('championId') or 0)}"
             if path:
                 ok = self.lcu.post(path)
                 print(f"[league] Action LCU '{action}' -> {'OK' if ok else 'échec'}")
             return True
         return False
+
+    def _swap(self, champion_id: int, attempts: int = 4) -> None:
+        """Prend `champion_id` sur le banc. ⚠️ La LCU répond 2xx même quand l'échange
+        n'a pas lieu (ex. juste après le choix de départ, avant la finalisation) :
+        on vérifie dans la session que c'est bien notre champion, sinon on réessaie."""
+        path = f"/lol-champ-select/v1/session/bench/swap/{champion_id}"
+        for attempt in range(1, attempts + 1):
+            self.lcu.post(path)
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                session = self.lcu.champ_select_session() or {}
+                if my_champion(session) == champion_id:
+                    print(f"[league] Banc : {champion_id} pris (essai {attempt})")
+                    return
+                bench = {c.get("championId") for c in session.get("benchChampions") or []}
+                if not session or champion_id not in bench and attempt > 1:
+                    print(f"[league] Banc : {champion_id} n'est plus disponible")
+                    return
+                time.sleep(0.2)
+        print(f"[league] Banc : échange vers {champion_id} refusé ({attempts} essais)")
 
     def _pick(self, champion_id: int) -> None:
         """Verrouille notre pick en cours sur `champion_id` (id d'action relu ici)."""

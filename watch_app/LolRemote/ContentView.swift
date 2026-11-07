@@ -7,7 +7,9 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if let state = client.state, client.connected {
+            // Hors connexion, seul l'accueil (mis en cache) reste affiché : un ready-check
+            // ou une sélection seraient périmés.
+            if let state = client.state, client.connected || state.screen == "default" {
                 switch state.screen {
                 case "queue": QueueView(queue: state.queue)
                 case "champselect":
@@ -20,10 +22,15 @@ struct ContentView: View {
                 default: HomeView(state: state)
                 }
             } else {
-                VStack(spacing: 10) {
-                    ProgressView().tint(Theme.accent)
-                    Text("Connexion au Pi…").font(.system(size: 14)).foregroundStyle(Theme.muted)
-                }
+                ConnectingView()
+            }
+        }
+        .overlay(alignment: .top) {
+            if client.state != nil && !client.connected {
+                Label("connexion…", systemImage: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Theme.raised, in: Capsule())
             }
         }
         .overlay(alignment: .bottom) {
@@ -36,6 +43,24 @@ struct ContentView: View {
             }
         }
         .task { client.start() }
+    }
+}
+
+/// Première connexion : durée écoulée et dernière erreur (pour diagnostiquer la lenteur).
+struct ConnectingView: View {
+    @EnvironmentObject var client: RemoteClient
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(spacing: 8) {
+                ProgressView().tint(Theme.accent)
+                Text("Connexion au Pi…").font(.system(size: 14)).foregroundStyle(Theme.muted)
+                let seconds = Int(context.date.timeIntervalSince(client.connectingSince))
+                Text(([seconds >= 2 ? "\(seconds) s" : nil, client.lastError].compactMap { $0 })
+                        .joined(separator: " · "))
+                    .font(.system(size: 11)).foregroundStyle(Color(white: 0.56)).monospacedDigit()
+            }
+        }
     }
 }
 
