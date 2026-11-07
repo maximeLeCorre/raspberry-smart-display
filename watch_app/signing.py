@@ -191,7 +191,7 @@ def main() -> None:
     copied = subprocess.run(["clip"], input=value.encode(), check=False).returncode == 0
     print(f"\nÉquipe {team_id}. Secret WATCH_SIGNING ({len(value)} caractères) écrit dans {out}"
           + (" et copié dans le presse-papiers." if copied else "."))
-    print("→ GitHub : Settings → Secrets and variables → Actions → New repository secret,"
+    print("GitHub : Settings > Secrets and variables > Actions > New repository secret,"
           " nom WATCH_SIGNING, coller la valeur.")
 
 
