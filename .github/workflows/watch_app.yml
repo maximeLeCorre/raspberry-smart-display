@@ -22,10 +22,16 @@ jobs:
       - name: Compilation (simulateur watchOS)
         working-directory: watch_app
         run: |
-          set -o pipefail
-          xcodebuild -project LolRemote.xcodeproj -scheme LolRemoteWatch \
-            -destination 'generic/platform=watchOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO build | tail -n 60
+          # Erreurs Swift remontées en annotations (lisibles sans se connecter à GitHub).
+          mkdir -p build
+          if ! xcodebuild -project LolRemote.xcodeproj -scheme LolRemoteWatch \
+              -destination 'generic/platform=watchOS Simulator' \
+              CODE_SIGNING_ALLOWED=NO build > build/build.log 2>&1; then
+            grep -E "error:" build/build.log | sort -u | head -n 15 \
+              | while IFS= read -r line; do echo "::error title=compilation::$line"; done
+            tail -n 40 build/build.log
+            exit 1
+          fi
       - name: Archive non signée (structure TestFlight)
         working-directory: watch_app
         run: |
