@@ -294,7 +294,7 @@ final class RemoteClient: ObservableObject {
         Task {
             busy = true
             defer { busy = false }
-            let start = Date()
+            let sentAt = Date()
             var req = apiRequest("/action")
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -302,7 +302,7 @@ final class RemoteClient: ObservableObject {
             do {
                 let (data, response) = try await postWithRetry(req)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                actionMs = Int(Date().timeIntervalSince(start) * 1000)
+                actionMs = Int(Date().timeIntervalSince(sentAt) * 1000)
                 if code == 200 {
                     message = nil
                     WKInterfaceDevice.current().play(.success)
