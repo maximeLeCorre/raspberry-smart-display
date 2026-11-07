@@ -1,6 +1,7 @@
 // Notifications push (envoyées par le Pi, pi_display/push_apns.py) : « Partie
-// trouvée ! » avec Accepter/Refuser, même app fermée. À chaque lancement, le
-// jeton APNs de la montre est renvoyé au Pi (POST /push/register).
+// trouvée ! » et invitation dans un lobby, avec Accepter/Refuser, même app
+// fermée. À chaque lancement, le jeton APNs de la montre est renvoyé au Pi
+// (POST /push/register).
 import Foundation
 import UserNotifications
 import WatchKit
@@ -21,11 +22,16 @@ final class AppDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        // Boutons de la notification ; sans `.foreground` : l'action part sans ouvrir l'app.
-        let accept = UNNotificationAction(identifier: "ACCEPT", title: "Accepter", options: [])
+        // Boutons des notifications. Accepter (`.foreground`) ouvre l'app en plus
+        // d'envoyer l'action : la suite (choix du champion, lobby) s'y affiche.
+        let accept = UNNotificationAction(identifier: "ACCEPT", title: "Accepter", options: [.foreground])
         let decline = UNNotificationAction(identifier: "DECLINE", title: "Refuser", options: [.destructive])
+        let join = UNNotificationAction(identifier: "INVITE_ACCEPT", title: "Accepter", options: [.foreground])
+        let refuse = UNNotificationAction(identifier: "INVITE_DECLINE", title: "Refuser", options: [.destructive])
         center.setNotificationCategories([
             UNNotificationCategory(identifier: "READY_CHECK", actions: [accept, decline],
+                                   intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: "LOBBY_INVITE", actions: [join, refuse],
                                    intentIdentifiers: [], options: []),
         ])
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
@@ -45,9 +51,12 @@ final class AppDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCent
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
+        let invitationId = response.notification.request.content.userInfo["invitationId"] as? String ?? ""
         switch response.actionIdentifier {
         case "ACCEPT": await postToPi("/action", ["action": "accept"])
         case "DECLINE": await postToPi("/action", ["action": "decline"])
+        case "INVITE_ACCEPT": await postToPi("/action", ["action": "invite_accept", "invitationId": invitationId])
+        case "INVITE_DECLINE": await postToPi("/action", ["action": "invite_decline", "invitationId": invitationId])
         default: break      // simple appui : l'app s'ouvre sur le ready-check
         }
     }

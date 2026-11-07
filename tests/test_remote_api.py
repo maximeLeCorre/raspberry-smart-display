@@ -193,3 +193,54 @@ def test_choix_de_depart(app, monkeypatch):
     app.modules["league"].tick()
     assert [a["category"] for a in sent] == ["CHAMP_CHOICE"]
     assert sent[0]["alert"]["body"] == "Briar"
+
+
+def test_accueil_lobby_et_jouer(app):
+    push(app, type="_connected")
+    time.sleep(0.1)
+    assert call(app, "POST", "/action", {"action": "start_queue"})[0] == 409   # pas de lobby
+    assert call(app, "POST", "/action", {"action": "play"})[0] == 200
+    assert any(m.get("action") == "play" for m in app.sent)
+    lob = {"queueName": "ARAM : Chaos", "members": [{"name": "Moi", "isLeader": True, "isSelf": True}],
+           "invites": [], "isLeader": True, "canStart": True}
+    push(app, type="data", screen="default", payload={"lobby": lob})
+    push(app, type="data", screen="default", payload={"playStatus": "Lobby prêt", "playBusy": False})
+    time.sleep(0.1)
+    home = call(app, "GET", "/state?wait=0")[1]["home"]
+    assert home["lobby"] == {**lob, "friends": []} and home["playStatus"] == "Lobby prêt"   # fusionnés
+    assert call(app, "POST", "/action", {"action": "start_queue"})[0] == 200
+    assert {"type": "lcu_action", "action": "start_queue"} in app.sent
+
+
+def test_invitation_notifiee_et_acceptee(app, monkeypatch):
+    sent = []
+    monkeypatch.setattr(app.push, "notify", lambda aps, **kw: sent.append((aps, kw)))
+    push(app, type="_connected")
+    push(app, type="data", screen="default",
+         payload={"lobby": None, "invitation": {"id": "abc", "from": "Ami", "queueName": "ARAM"}})
+    time.sleep(0.1)
+    league = app.modules["league"]
+    league.tick()
+    league.tick()
+    assert len(sent) == 1 and sent[0][0]["category"] == "LOBBY_INVITE"
+    assert sent[0][1]["extra"] == {"invitationId": "abc"}
+    assert call(app, "GET", "/state?wait=0")[1]["home"]["invitation"]["from"] == "Ami"
+    assert call(app, "POST", "/action", {"action": "invite_accept", "invitationId": "zzz"})[0] == 409
+    assert call(app, "POST", "/action", {"action": "invite_accept", "invitationId": "abc"})[0] == 200
+    assert {"type": "lcu_action", "action": "invite_accept", "invitationId": "abc"} in app.sent
+
+
+def test_inviter_ami_par_defaut_en_tete(app):
+    app.modules["league"].lobby_invite = "Matte mwa"
+    push(app, type="_connected")
+    lob = {"members": [], "invites": [], "isLeader": True, "canStart": True,
+           "friends": [{"name": "Bob", "riotId": "Bob#EUW", "summonerId": 6, "status": "en ligne"},
+                       {"name": "Matte mwa", "riotId": "Matte mwa#EUW", "summonerId": 9,
+                        "status": "absent"}]}
+    push(app, type="data", screen="default", payload={"lobby": lob})
+    time.sleep(0.1)
+    friends = call(app, "GET", "/state?wait=0")[1]["home"]["lobby"]["friends"]
+    assert [(f["name"], f["isDefault"]) for f in friends] == [("Matte mwa", True), ("Bob", False)]
+    assert call(app, "POST", "/action", {"action": "invite", "summonerId": 1})[0] == 409
+    assert call(app, "POST", "/action", {"action": "invite", "summonerId": 9})[0] == 200
+    assert {"type": "lcu_action", "action": "invite", "summonerId": 9} in app.sent

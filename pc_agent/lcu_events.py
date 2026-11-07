@@ -28,6 +28,8 @@ EVENTS = (
     "OnJsonApiEvent_lol-gameflow_v1_gameflow-phase",   # changement d'écran
     "OnJsonApiEvent_lol-matchmaking_v1_ready-check",   # ready-check (Accepter)
     "OnJsonApiEvent_lol-matchmaking_v1_search",        # entrée/sortie de file
+    "OnJsonApiEvent_lol-lobby_v2_lobby",               # lobby : joueurs, invitations
+    "OnJsonApiEvent_lol-lobby_v2_received-invitations",  # on m'invite (notif montre)
     "OnJsonApiEvent_lol-champ-select_v1_session",      # sélection / banc
     # Choix parmi 2-3 champions (ARAM Chaos) : publié juste APRÈS la session.
     "OnJsonApiEvent_lol-lobby-team-builder_champ-select_v1_subset-champion-list",

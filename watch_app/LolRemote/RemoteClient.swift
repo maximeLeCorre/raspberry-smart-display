@@ -40,6 +40,49 @@ struct ChampSelect: Decodable {
     let timer: SelectTimer?
 }
 
+struct LobbyMember: Decodable, Hashable {
+    let name: String
+    let isLeader: Bool?
+    let isSelf: Bool?
+}
+
+struct LobbyInvite: Decodable, Hashable {
+    let name: String
+    let state: String?
+}
+
+/// Ami invitable (en ligne sur PC, pas déjà dans le lobby) ; `isDefault` = `[lol] lobby_invite`.
+struct Friend: Decodable, Hashable, Identifiable {
+    let name: String
+    let summonerId: Int
+    let status: String?         // « en ligne », « absent », « occupé », « en partie »
+    let isDefault: Bool?
+    var id: Int { summonerId }
+}
+
+struct Lobby: Decodable {
+    let queueName: String?
+    let members: [LobbyMember]?
+    let invites: [LobbyInvite]?
+    let isLeader: Bool?
+    let canStart: Bool?
+    let friends: [Friend]?
+}
+
+struct Invitation: Decodable {
+    let id: String
+    let from: String?
+    let queueName: String?
+}
+
+/// Accueil : bouton « Jouer » (étapes `playStatus`), lobby en cours, invitation reçue.
+struct Home: Decodable {
+    let lobby: Lobby?
+    let invitation: Invitation?
+    let playStatus: String?
+    let playBusy: Bool?
+}
+
 struct RemoteState: Decodable {
     let v: Int
     let t: Double?              // horodatage Pi de la version (mesure de latence)
@@ -47,6 +90,7 @@ struct RemoteState: Decodable {
     let screen: String?
     let queue: QueueInfo?
     let champselect: ChampSelect?
+    let home: Home?
 }
 
 private struct ActionResult: Decodable {
