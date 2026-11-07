@@ -279,6 +279,16 @@ final class RemoteClient: ObservableObject {
         }
     }
 
+    /// Un 2e essai (connexion neuve) si le 1er échoue au niveau réseau.
+    private func postWithRetry(_ req: URLRequest) async throws -> (Data, URLResponse) {
+        do {
+            return try await actionSession.data(for: req)
+        } catch {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            return try await actionSession.data(for: req)
+        }
+    }
+
     func send(_ body: [String: Any]) {
         WKInterfaceDevice.current().play(.click)   // retour immédiat au doigt
         Task {
@@ -290,13 +300,7 @@ final class RemoteClient: ObservableObject {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: body)
             do {
-                let (data, response): (Data, URLResponse)
-                do {
-                    (data, response) = try await actionSession.data(for: req)
-                } catch {
-                    try? await Task.sleep(nanoseconds: 300_000_000)   // un 2e essai, connexion neuve
-                    (data, response) = try await actionSession.data(for: req)
-                }
+                let (data, response) = try await postWithRetry(req)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 actionMs = Int(Date().timeIntervalSince(start) * 1000)
                 if code == 200 {
