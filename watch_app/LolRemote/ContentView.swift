@@ -9,7 +9,13 @@ struct ContentView: View {
             if let state = client.state, client.connected {
                 switch state.screen {
                 case "queue": QueueView(queue: state.queue)
-                case "champselect": ChampSelectView(select: state.champselect)
+                case "champselect":
+                    // Choix de départ d'abord (tant qu'aucun n'est demandé), puis le banc.
+                    if let choices = state.champselect?.choices, !choices.isEmpty, client.pendingChamp == nil {
+                        ChoiceView(choices: choices, timer: state.champselect?.timer)
+                    } else {
+                        ChampSelectView(select: state.champselect)
+                    }
                 default: IdleView(state: state)
                 }
             } else {
@@ -145,6 +151,35 @@ struct ChampSelectView: View {
         .disabled(client.busy)
         // Toutes les icônes demandées d'un coup (pas au fil du défilement).
         .task(id: iconIds) { for id in iconIds { icons.load(id) } }
+    }
+}
+
+/// Début de sélection : 2-3 champions proposés, on en touche un (verrouillé aussitôt).
+struct ChoiceView: View {
+    @EnvironmentObject var client: RemoteClient
+    let choices: [Champ]
+    let timer: SelectTimer?
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text("Choisis ton champion").font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+            if let left = timer?.left {
+                Text("\(left) s").font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+            }
+            HStack(spacing: 8) {
+                ForEach(choices) { champ in
+                    Button { client.pick(champ) } label: {
+                        VStack(spacing: 3) {
+                            ChampIcon(championId: champ.championId, size: choices.count > 2 ? 52 : 64)
+                            Text(champ.label)   // nom toujours écrit
+                                .font(.system(size: 11)).lineLimit(1).minimumScaleFactor(0.6)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .disabled(client.busy)
     }
 }
 

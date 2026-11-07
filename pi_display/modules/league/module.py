@@ -79,6 +79,7 @@ class LeagueModule(Module):
         self._remote_icons: dict[int, bytes] = {}   # icônes réduites pour la montre
         self._remote_icons_lock = threading.Lock()
         self._ready_pushed = False      # notification du ready-check courant déjà envoyée
+        self._choice_pushed = False     # idem pour le choix de départ
         # Patch relu chaque heure même si toutes les icônes sont déjà en mémoire
         # (sinon un nouveau patch ne serait vu qu'au redémarrage).
         self._patch_check = time.monotonic()
@@ -128,7 +129,8 @@ class LeagueModule(Module):
 
     def _maybe_push_ready_check(self) -> None:
         """Partie trouvée → notification sur la montre (une par ready-check),
-        avec Accepter/Refuser ; périmée au bout de la fenêtre du ready-check."""
+        avec Accepter/Refuser ; périmée au bout de la fenêtre du ready-check.
+        Idem au choix de départ de la sélection (ouvre l'app dessus)."""
         queue = ((self.app.agent_data.get("queue") or {})
                  if self.app.network_screen == "queue" else {})
         ready = queue.get("state") == "readycheck" and queue.get("response") == "None"
@@ -139,6 +141,18 @@ class LeagueModule(Module):
                  "sound": "default", "category": "READY_CHECK"},
                 collapse_id="readycheck", ttl=max(3, remaining))
         self._ready_pushed = ready
+
+        # Choix de départ (2-3 champions, ~15 s) : la montre ouvre l'app dessus.
+        cs = ((self.app.agent_data.get("champselect") or {})
+              if self.app.network_screen == "champselect" else {})
+        choices = [c.get("championName") or "?" for c in cs.get("choices") or []]
+        if choices and not self._choice_pushed:
+            left = int((cs.get("timer") or {}).get("left") or 15)
+            self.app.push.notify(
+                {"alert": {"title": "Choisis ton champion", "body": " ou ".join(choices)},
+                 "sound": "default", "category": "CHAMP_CHOICE"},
+                collapse_id="champchoice", ttl=max(3, left))
+        self._choice_pushed = bool(choices)
 
     def on_agent_screen(self, screen: str, shown: bool) -> None:
         # Un écran poussé par l'agent (vraie partie) sort du mode « revue ».
@@ -455,6 +469,7 @@ class LeagueModule(Module):
                 "me": {"championId": me.get("championId", 0),
                        "championName": me.get("championName", "")},
                 "bench": cs.get("bench", []),
+                "choices": cs.get("choices", []),
                 "rerolls": cs.get("rerolls", 0),
                 "timer": cs.get("timer", {}),
             }}
@@ -488,7 +503,7 @@ class LeagueModule(Module):
                 return 409, {"ok": False, "error": "aucun ready-check en cours"}
             self.lcu_action(action)
             return 200, {"ok": True}
-        if action in ("swap", "reroll"):
+        if action in ("swap", "reroll", "pick"):
             if screen != "champselect":
                 return 409, {"ok": False, "error": "pas en sélection"}
             cs = data.get("champselect") or {}
@@ -501,6 +516,11 @@ class LeagueModule(Module):
                 cid = int(body.get("championId") or 0)
             except (TypeError, ValueError):
                 cid = 0
+            if action == "pick":   # choix de départ (2-3 champions)
+                if cid not in {c.get("championId") for c in cs.get("choices", [])}:
+                    return 409, {"ok": False, "error": "choix terminé"}
+                self.app.server.send({"type": "lcu_action", "action": "pick", "championId": cid})
+                return 200, {"ok": True}
             if cid not in {c.get("championId") for c in cs.get("bench", [])}:
                 return 409, {"ok": False, "error": "champion plus sur le banc"}
             self.app.server.send({"type": "lcu_action", "action": "swap", "championId": cid})

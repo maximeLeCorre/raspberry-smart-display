@@ -16,7 +16,7 @@ import time
 
 import psutil
 
-from champ_select import build_champ_select_payload
+from champ_select import build_champ_select_payload, my_pending_pick
 from lcu import LcuClient, find_lcu_credentials
 from lcu_events import LcuEventListener
 from riot_client import RiotClient
@@ -151,6 +151,9 @@ class LeagueSource(Source):
                                      args=(sender, message.get("queueId"),
                                            message.get("invite"))).start()
                 return True
+            if action == "pick":   # choix de départ (2-3 champions) : verrouillé
+                self._pick(int(message.get("championId") or 0))
+                return True
             path = LCU_ACTIONS.get(action)
             if action == "swap":   # banc ARAM : prendre ce champion
                 path = f"/lol-champ-select/v1/session/bench/swap/{int(message.get('championId') or 0)}"
@@ -159,6 +162,15 @@ class LeagueSource(Source):
                 print(f"[league] Action LCU '{action}' -> {'OK' if ok else 'échec'}")
             return True
         return False
+
+    def _pick(self, champion_id: int) -> None:
+        """Verrouille notre pick en cours sur `champion_id` (id d'action relu ici)."""
+        session = self.lcu.champ_select_session() or {}
+        action = my_pending_pick(session)
+        ok = bool(action and champion_id) and self.lcu.patch(
+            f"/lol-champ-select/v1/session/actions/{action['id']}",
+            {"championId": champion_id, "completed": True})
+        print(f"[league] Choix du champion {champion_id} -> {'OK' if ok else 'échec'}")
 
     # -------------------------------------------------------------- jouer (1 clic)
     def _play(self, sender, queue_id, invite) -> None:

@@ -22,6 +22,7 @@ TOKEN = "jeton-test"
 READY = {"state": "readycheck", "remaining": 9, "response": "None"}
 CHAMPSELECT = {"players": [{"isSelf": True, "championId": 1, "championName": "Annie"}],
                "bench": [{"championId": 22, "championName": "Ashe"}],
+               "choices": [{"championId": 233, "championName": "Briar"}],
                "rerolls": 1, "timer": {"phase": "Sélection", "left": 50}}
 
 
@@ -175,3 +176,20 @@ def test_notification_ready_check(app, monkeypatch):
     aps, kw = sent[0]
     assert aps["category"] == "READY_CHECK" and kw["collapse_id"] == "readycheck"
     assert kw["ttl"] == READY["remaining"]
+
+
+def test_choix_de_depart(app, monkeypatch):
+    sent = []
+    monkeypatch.setattr(app.push, "notify", lambda aps, **kw: sent.append(aps))
+    push(app, type="_connected")
+    push(app, type="set_screen", screen="champselect")
+    push(app, type="data", screen="champselect", payload=CHAMPSELECT)
+    time.sleep(0.1)
+    assert call(app, "GET", "/state?wait=0")[1]["champselect"]["choices"][0]["championId"] == 233
+    assert call(app, "POST", "/action", {"action": "pick", "championId": 22})[0] == 409
+    assert call(app, "POST", "/action", {"action": "pick", "championId": 233})[0] == 200
+    assert {"type": "lcu_action", "action": "pick", "championId": 233} in app.sent
+    app.modules["league"].tick()
+    app.modules["league"].tick()
+    assert [a["category"] for a in sent] == ["CHAMP_CHOICE"]
+    assert sent[0]["alert"]["body"] == "Briar"
