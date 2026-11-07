@@ -81,6 +81,7 @@ struct Home: Decodable {
     let invitation: Invitation?
     let playStatus: String?
     let playBusy: Bool?
+    let playInvite: String?     // ami invité par le bouton Jouer (`[lol] lobby_invite`)
 }
 
 struct RemoteState: Decodable {

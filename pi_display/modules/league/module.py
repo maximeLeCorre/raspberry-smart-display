@@ -489,7 +489,8 @@ class LeagueModule(Module):
             return {"home": {"lobby": self._lobby_with_default_friend(home.get("lobby")),
                              "invitation": home.get("invitation"),
                              "playStatus": home.get("playStatus") or "",
-                             "playBusy": bool(home.get("playBusy"))}}
+                             "playBusy": bool(home.get("playBusy")),
+                             "playInvite": self.lobby_invite}}
         return {}
 
     def _lobby_with_default_friend(self, lobby: dict | None) -> dict | None:
