@@ -15,7 +15,7 @@ struct LolRemoteApp: App {
         .onChange(of: scenePhase) { _, phase in
             // Poignet relevé : état frais tout de suite ; app en fond : on coupe.
             if phase == .active {
-                client.restart()
+                client.resume()
                 WKApplication.shared().registerForRemoteNotifications()   // jeton renvoyé au Pi
             } else if phase == .background {
                 client.stop()

@@ -15,6 +15,13 @@ from lcu import LcuClient
 SUBSET_PATH = "/lol-lobby-team-builder/champ-select/v1/subset-champion-list"
 
 
+def my_champion(session: dict) -> int:
+    """Notre champion actuel dans la session (0 si aucun)."""
+    me = session.get("localPlayerCellId")
+    cell = next((c for c in session.get("myTeam") or [] if c.get("cellId") == me), {})
+    return int(cell.get("championId") or 0)
+
+
 def my_pending_pick(session: dict) -> dict | None:
     """Notre action « pick » en cours (non verrouillée), sinon None."""
     me = session.get("localPlayerCellId")

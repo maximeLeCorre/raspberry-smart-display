@@ -109,6 +109,12 @@ class RemoteServer:
             def log_message(self, *args):    # pas une ligne de journal par requête
                 pass
 
+            def setup(self):
+                # Une ligne par CONNEXION (keep-alive : rare) : qui se connecte et quand
+                # (montre en Wi-Fi direct, ou relayée par l'iPhone = IP de l'iPhone).
+                super().setup()
+                print(f"[remote] connexion de {self.client_address[0]}")
+
             def _send(self, status: int, obj: dict) -> None:
                 body = json.dumps(obj, ensure_ascii=False).encode()
                 self.send_response(status)

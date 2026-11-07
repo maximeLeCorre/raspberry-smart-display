@@ -12,7 +12,7 @@ func apiRequest(_ path: String) -> URLRequest {
     return req
 }
 
-struct QueueInfo: Decodable {
+struct QueueInfo: Codable {
     let state: String?          // "readycheck" | "searching"
     let remaining: Int?         // ready-check : secondes restantes
     let response: String?       // "None" | "Accepted" | "Declined"
@@ -20,19 +20,19 @@ struct QueueInfo: Decodable {
     let estimated: Int?
 }
 
-struct Champ: Decodable, Identifiable, Hashable {
+struct Champ: Codable, Identifiable, Hashable {
     let championId: Int
     let championName: String
     var id: Int { championId }
     var label: String { championName.isEmpty ? "#\(championId)" : championName }
 }
 
-struct SelectTimer: Decodable {
+struct SelectTimer: Codable {
     let phase: String?
     let left: Int?
 }
 
-struct ChampSelect: Decodable {
+struct ChampSelect: Codable {
     let me: Champ?
     let bench: [Champ]?
     let choices: [Champ]?       // choix de départ (ARAM Chaos : 2-3 champions, ~15 s)
@@ -40,19 +40,19 @@ struct ChampSelect: Decodable {
     let timer: SelectTimer?
 }
 
-struct LobbyMember: Decodable, Hashable {
+struct LobbyMember: Codable, Hashable {
     let name: String
     let isLeader: Bool?
     let isSelf: Bool?
 }
 
-struct LobbyInvite: Decodable, Hashable {
+struct LobbyInvite: Codable, Hashable {
     let name: String
     let state: String?
 }
 
 /// Ami invitable (en ligne sur PC, pas déjà dans le lobby) ; `isDefault` = `[lol] lobby_invite`.
-struct Friend: Decodable, Hashable, Identifiable {
+struct Friend: Codable, Hashable, Identifiable {
     let name: String
     let summonerId: Int
     let status: String?         // « en ligne », « absent », « occupé », « en partie »
@@ -60,7 +60,7 @@ struct Friend: Decodable, Hashable, Identifiable {
     var id: Int { summonerId }
 }
 
-struct Lobby: Decodable {
+struct Lobby: Codable {
     let queueName: String?
     let members: [LobbyMember]?
     let invites: [LobbyInvite]?
@@ -69,14 +69,14 @@ struct Lobby: Decodable {
     let friends: [Friend]?
 }
 
-struct Invitation: Decodable {
+struct Invitation: Codable {
     let id: String
     let from: String?
     let queueName: String?
 }
 
 /// Accueil : bouton « Jouer » (étapes `playStatus`), lobby en cours, invitation reçue.
-struct Home: Decodable {
+struct Home: Codable {
     let lobby: Lobby?
     let invitation: Invitation?
     let playStatus: String?
@@ -84,7 +84,7 @@ struct Home: Decodable {
     let playInvite: String?     // ami invité par le bouton Jouer (`[lol] lobby_invite`)
 }
 
-struct RemoteState: Decodable {
+struct RemoteState: Codable {
     let v: Int
     let t: Double?              // horodatage Pi de la version (mesure de latence)
     let agent: Bool?
@@ -112,8 +112,22 @@ final class RemoteClient: ObservableObject {
     /// Mesures affichées sur l'écran d'accueil (ms) : Pi → montre, et action → réponse.
     @Published var latencyMs: Int?
     @Published var actionMs: Int?
+    /// Écran « Connexion au Pi… » : depuis quand, et la dernière erreur (diagnostic).
+    @Published var connectingSince = Date()
+    @Published var lastError: String?
 
     private var task: Task<Void, Never>?
+    private var lastResponse = Date.distantPast
+    private static let cacheKey = "lastHomeState"
+
+    /// Dernier accueil connu affiché dès le lancement (le temps que le Pi réponde) ;
+    /// jamais un ready-check ou une sélection, périmés en quelques secondes.
+    init() {
+        if let data = UserDefaults.standard.data(forKey: Self.cacheKey),
+           let cached = try? JSONDecoder().decode(RemoteState.self, from: data) {
+            state = cached
+        }
+    }
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 40    // > attente du long polling (25 s)
@@ -130,18 +144,30 @@ final class RemoteClient: ObservableObject {
         task = nil
     }
 
-    /// Au retour au premier plan : nouvelle requête tout de suite (l'ancienne a pu mourir en pause).
-    func restart() {
-        stop()
-        start()
+    /// Retour au premier plan : relance seulement si la boucle est arrêtée ou muette
+    /// depuis plus longtemps qu'un long polling (requête morte pendant la pause). Au
+    /// lancement, `.task` vient de démarrer : la couper rallongerait la connexion.
+    func resume() {
+        if task == nil {
+            start()
+        } else if Date().timeIntervalSince(lastResponse) > 30 {
+            stop()
+            start()
+        }
     }
 
     private func loop() async {
         var version: Int?
+        var failures = 0
+        connectingSince = Date()
         while !Task.isCancelled {
             let path = "/state?wait=25" + (version.map { "&v=\($0)" } ?? "")
+            var req = apiRequest(path)
+            // 1re requête (sans version) = réponse immédiate attendue : délai court, pour
+            // ne pas rester 40 s sur une connexion morte (réveil, relais iPhone coupé).
+            req.timeoutInterval = version == nil ? 4 : 40
             do {
-                let (data, response) = try await session.data(for: apiRequest(path))
+                let (data, response) = try await session.data(for: req)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard code == 200 else {
                     connected = false
@@ -152,6 +178,9 @@ final class RemoteClient: ObservableObject {
                 let new = try JSONDecoder().decode(RemoteState.self, from: data)
                 if !connected { message = nil }
                 connected = true
+                failures = 0
+                lastError = nil
+                lastResponse = Date()
                 if new.v != version {
                     if version != nil, let t = new.t {   // réveil du long polling = vrai changement
                         latencyMs = max(0, Int((Date().timeIntervalSince1970 - t) * 1000))
@@ -166,12 +195,20 @@ final class RemoteClient: ObservableObject {
                     notify(old: state, new: new)
                     state = new
                     version = new.v
+                    if new.screen == "default", let data = try? JSONEncoder().encode(new) {
+                        UserDefaults.standard.set(data, forKey: Self.cacheKey)
+                    }
                 }
             } catch {
                 if Task.isCancelled { break }
+                if connected { connectingSince = Date() }
                 connected = false
                 version = nil
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                lastError = (error as? URLError)?.code == .timedOut ? "délai dépassé" : "Pi injoignable"
+                // Nouvel essai vite d'abord (réseau qui se réveille), puis toutes les 2 s.
+                failures += 1
+                let delay = [0.25, 0.5, 1.0][min(failures - 1, 2)] * (failures > 3 ? 2 : 1)
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
         }
     }
@@ -195,11 +232,27 @@ final class RemoteClient: ObservableObject {
     func pick(_ champ: Champ) {
         pendingChamp = champ
         send(["action": "pick", "championId": champ.championId])
+        expirePending(champ)
     }
 
     func swap(_ champ: Champ) {
         pendingChamp = champ
         send(["action": "swap", "championId": champ.championId])
+        expirePending(champ)
+    }
+
+    /// L'affichage optimiste n'est qu'une promesse : si le client League n'a pas
+    /// réellement changé notre champion après quelques secondes (l'agent réessaie
+    /// ~4 s), on revient à l'état réel et on le dit, au lieu d'afficher « bon ».
+    private func expirePending(_ champ: Champ) {
+        Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard pendingChamp?.championId == champ.championId,
+                  state?.champselect?.me?.championId != champ.championId else { return }
+            pendingChamp = nil
+            message = "\(champ.label) non pris : réessaie"
+            WKInterfaceDevice.current().play(.failure)
+        }
     }
 
     func send(_ body: [String: Any]) {
