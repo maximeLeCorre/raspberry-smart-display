@@ -44,6 +44,9 @@ class FakeLcu:
             return {"description": "ARAM : Chaos"}
         return None
 
+    def summoner_by_id(self, sid):
+        return {"gameName": {1: "Moi", 2: "Ami"}.get(sid, "")}
+
     def post(self, path, payload=None):
         self.posted.append(path)
         return True
@@ -142,3 +145,10 @@ def test_quitter_le_lobby_et_fermer_le_client():
     src.handle_request({"type": "lcu_action", "action": "quit_client"}, None)
     assert src.lcu.deleted == [lobby.LOBBY_PATH]
     assert src.lcu.posted == ["/process-control/v1/process/quit"]
+
+
+def test_noms_des_membres_resolus_par_summoner_id():
+    lcu = FakeLcu()
+    bare = {**LOBBY, "members": [{"summonerId": 2, "isLeader": False}]}   # sans gameName (réel)
+    lcu.get_json = lambda path, **_kw: bare if path == lobby.LOBBY_PATH else None
+    assert [m["name"] for m in lobby.build_lobby_payload(lcu)["members"]] == ["Ami"]
