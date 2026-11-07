@@ -26,7 +26,7 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .top) {
-            if client.state != nil && !client.connected {
+            if client.state != nil && !client.connected && client.state?.screen != "default" {
                 Label("connexion…", systemImage: "antenna.radiowaves.left.and.right")
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.muted)
                     .padding(.horizontal, 8).padding(.vertical, 3)
@@ -71,7 +71,13 @@ struct HomeView: View {
     @EnvironmentObject var client: RemoteClient
     let state: RemoteState
 
-    private var online: Bool { state.agent == true }
+    /// Pi joint (état frais) ET PC connecté au Pi : sans le 1er, l'état affiché est
+    /// celui du cache et on ne sait rien du PC.
+    private var online: Bool { client.connected && state.agent == true }
+    private var status: (text: String, filled: Bool) {
+        if !client.connected { return (client.lastError ?? "connexion au Pi…", false) }
+        return state.agent == true ? ("PC connecté", true) : ("PC hors ligne", false)
+    }
 
     var body: some View {
         if online, let invitation = state.home?.invitation, state.screen == "default" {
@@ -85,14 +91,17 @@ struct HomeView: View {
                 HStack {
                     Text("LolRemote").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.accent)
                     Spacer()
-                    Label(online ? "PC connecté" : "PC hors ligne",
-                          systemImage: online ? "circle.fill" : "circle")
+                    Label(status.text, systemImage: status.filled ? "circle.fill" : "circle")
                         .font(.system(size: 11)).foregroundStyle(Theme.muted)
                         .labelStyle(DotLabelStyle())
+                        .lineLimit(1).minimumScaleFactor(0.6)
                 }
                 .padding(.horizontal, 6)
                 Spacer(minLength: 0)
-                if !online {
+                if !client.connected {
+                    ProgressView().tint(Theme.accent)
+                    Text("Connexion au Pi…").font(.system(size: 14)).foregroundStyle(Theme.muted)
+                } else if !online {
                     Text("Allume le PC pour jouer").font(.system(size: 14)).foregroundStyle(Theme.muted)
                 } else if state.screen == "lol" || state.screen == "postgame" {
                     Image(systemName: "gamecontroller.fill").font(.system(size: 30)).foregroundStyle(Theme.accent)
