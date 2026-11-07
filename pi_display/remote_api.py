@@ -6,6 +6,7 @@ vide = accès ouvert, comme le WebSocket en test local) :
                                        la réponse **attend** le prochain
                                        changement (long polling, ≤ `wait` s)
     POST /action  {"action": ...}      action d'un module (accept, swap…)
+    POST /push/register {"token": hex}  jeton APNs de la montre (push_apns.py)
     GET  /asset/<module>/<nom>         fichier d'un module (icône de champion :
                                        /asset/league/icon/<id>), servi DANS le
                                        thread HTTP (fournisseur thread-safe)
@@ -79,9 +80,10 @@ class RemoteServer:
     """Serveur HTTP/1.1 (keep-alive) en thread démon."""
 
     def __init__(self, host: str, port: int, state: RemoteState, event_queue,
-                 token: str = "", assets=None):
+                 token: str = "", assets=None, push_register=None):
         self.state = state
         self.assets = assets      # (module, nom) -> (octets, type MIME) | None
+        self.push_register = push_register   # jeton APNs -> bool (thread-safe)
         self.event_queue = event_queue
         self.token = token or ""
         self._httpd = ThreadingHTTPServer((host, port), self._handler_class())
@@ -161,7 +163,8 @@ class RemoteServer:
                 self._send_bytes(*found)
 
             def do_POST(self):
-                if urlparse(self.path).path != "/action":
+                path = urlparse(self.path).path
+                if path not in ("/action", "/push/register"):
                     return self._send(404, {"ok": False, "error": "route inconnue"})
                 if not self._authorized():
                     return
@@ -172,6 +175,10 @@ class RemoteServer:
                     body = json.loads(self.rfile.read(length) or b"{}")
                 except json.JSONDecodeError:
                     return self._send(400, {"ok": False, "error": "JSON invalide"})
+                if path == "/push/register":
+                    ok = bool(isinstance(body, dict) and server.push_register
+                              and server.push_register(str(body.get("token", ""))))
+                    return self._send(200 if ok else 400, {"ok": ok})
                 if not isinstance(body, dict) or not body.get("action"):
                     return self._send(400, {"ok": False, "error": "champ 'action' manquant"})
                 request = RemoteRequest(body)

@@ -27,6 +27,7 @@ from backlight import Backlight
 from inputs import ACTION_BACK, ACTION_NEXT, InputManager
 from modules import MODULES
 from network import NetworkServer
+from push_apns import PushSender
 from remote_api import RemoteServer, RemoteState
 
 DEFAULT_SCREEN = "default"
@@ -88,6 +89,7 @@ class App:
 
         # API télécommande (montre…) : état publié + actions remises à la boucle.
         self.remote_state = RemoteState()
+        self.push = PushSender(config.get("push", {}))   # notifications montre (no-op si non configuré)
         self.remote = None
         remote_cfg = config.get("remote", {})
         if remote_cfg.get("enabled", False):
@@ -95,7 +97,8 @@ class App:
                 self.remote = RemoteServer(host, remote_cfg.get("port", 8766),
                                            self.remote_state, self.net_queue,
                                            token=remote_token,
-                                           assets=self._remote_asset)
+                                           assets=self._remote_asset,
+                                           push_register=self.push.register)
                 self.remote.start()
             except OSError as exc:
                 print(f"[remote] API HTTP non démarrée : {exc}")

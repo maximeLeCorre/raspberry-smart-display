@@ -78,6 +78,7 @@ class LeagueModule(Module):
         self.icon_cache = IconCache()
         self._remote_icons: dict[int, bytes] = {}   # icônes réduites pour la montre
         self._remote_icons_lock = threading.Lock()
+        self._ready_pushed = False      # notification du ready-check courant déjà envoyée
         # Patch relu chaque heure même si toutes les icônes sont déjà en mémoire
         # (sinon un nouveau patch ne serait vu qu'au redémarrage).
         self._patch_check = time.monotonic()
@@ -120,9 +121,24 @@ class LeagueModule(Module):
 
     def tick(self) -> None:
         self._maybe_sync()
+        self._maybe_push_ready_check()
         if time.monotonic() - self._patch_check >= PATCH_TTL:
             self._patch_check = time.monotonic()
             self.app.async_call(current_patch, lambda _: None)
+
+    def _maybe_push_ready_check(self) -> None:
+        """Partie trouvée → notification sur la montre (une par ready-check),
+        avec Accepter/Refuser ; périmée au bout de la fenêtre du ready-check."""
+        queue = ((self.app.agent_data.get("queue") or {})
+                 if self.app.network_screen == "queue" else {})
+        ready = queue.get("state") == "readycheck" and queue.get("response") == "None"
+        if ready and not self._ready_pushed:
+            remaining = int(queue.get("remaining") or 10)
+            self.app.push.notify(
+                {"alert": {"title": "Partie trouvée !", "body": f"{remaining} s pour accepter"},
+                 "sound": "default", "category": "READY_CHECK"},
+                collapse_id="readycheck", ttl=max(3, remaining))
+        self._ready_pushed = ready
 
     def on_agent_screen(self, screen: str, shown: bool) -> None:
         # Un écran poussé par l'agent (vraie partie) sort du mode « revue ».

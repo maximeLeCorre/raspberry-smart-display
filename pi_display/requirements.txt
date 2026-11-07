@@ -7,6 +7,9 @@ websockets>=13.0,<18
 # fournit des roues ARM pré-compilées. Inutile si le module server est désactivé.
 paramiko>=3.0
 
+# Notifications push vers la montre (push_apns.py) : APNs n'accepte que HTTP/2.
+httpx[http2]>=0.27
+
 # Génération des fonds placeholder (script tools/gen_backgrounds.py uniquement).
 # Pas nécessaire au fonctionnement de l'appli une fois les PNG générés.
 Pillow>=10.0
