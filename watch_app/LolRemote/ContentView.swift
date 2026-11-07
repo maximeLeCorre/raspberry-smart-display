@@ -492,11 +492,6 @@ struct LatencyFooter: View {
                         .compactMap { $0 }.joined(separator: " · "))
                     .monospacedDigit()
             }
-            // ESSAI Wi-Fi seul : chemin utilisé, et l'erreur du Wi-Fi seul s'il a échoué.
-            if let route = client.route {
-                Text("via \(route)" + (route == "Wi-Fi seul" ? "" : client.wifiError.map { " · wifi : \($0)" } ?? ""))
-                    .lineLimit(2).multilineTextAlignment(.center)
-            }
         }
         .font(.system(size: 10)).foregroundStyle(Color(white: 0.56))
     }

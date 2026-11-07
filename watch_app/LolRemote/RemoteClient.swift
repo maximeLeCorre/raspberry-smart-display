@@ -11,7 +11,7 @@ func describe(_ error: Error) -> String {
     let reason: String
     switch error.code {
     case .timedOut: reason = "délai dépassé"
-    case .notConnectedToInternet: reason = "pas de réseau"
+    case .notConnectedToInternet: reason = "pas de Wi-Fi"
     case .cannotConnectToHost: reason = "connexion refusée"
     case .cannotFindHost: reason = "adresse introuvable"
     case .networkConnectionLost: reason = "connexion perdue"
@@ -20,6 +20,19 @@ func describe(_ error: Error) -> String {
     default: reason = "Pi injoignable"
     }
     return "\(reason) (\(error.code.rawValue))"
+}
+
+/// Session vers le Pi en **Wi-Fi seul**. Près de l'iPhone, watchOS fait passer le
+/// trafic par son relais Bluetooth, qui ne joint JAMAIS le réseau local (délai
+/// dépassé). URLSession ne permet pas de choisir le Wi-Fi, mais refuser les réseaux
+/// « coûteux »/« restreints » écarte ce relais (constaté sur la montre, non
+/// documenté par Apple) : la montre passe alors par son propre Wi-Fi.
+func wifiSession(_ config: URLSessionConfiguration, timeout: TimeInterval) -> URLSession {
+    config.timeoutIntervalForRequest = timeout
+    config.allowsExpensiveNetworkAccess = false
+    config.allowsConstrainedNetworkAccess = false
+    config.allowsCellularAccess = false
+    return URLSession(configuration: config)
 }
 
 /// Requête vers le Pi, avec le jeton.
@@ -145,30 +158,11 @@ final class RemoteClient: ObservableObject {
             state = cached
         }
     }
-    /// ESSAI « Wi-Fi seul » : près de l'iPhone, watchOS fait passer le trafic par le
-    /// relais Bluetooth de l'iPhone, qui ne joint PAS le réseau local (délai dépassé).
-    /// URLSession ne permet pas de choisir le Wi-Fi ; on refuse les réseaux « coûteux »
-    /// et « restreints », en pariant que le relais en fait partie (non documenté).
-    /// Échec → chemin normal. `route` dit lequel a marché (accueil).
-    @Published var route: String?
-    @Published var wifiError: String?         // pourquoi le Wi-Fi seul a échoué (diagnostic)
-    private static func makeSession(_ config: URLSessionConfiguration, timeout: TimeInterval,
-                                    wifiOnly: Bool) -> URLSession {
-        config.timeoutIntervalForRequest = timeout
-        if wifiOnly {
-            config.allowsExpensiveNetworkAccess = false
-            config.allowsConstrainedNetworkAccess = false
-            config.allowsCellularAccess = false
-        }
-        return URLSession(configuration: config)
-    }
-    // Long polling : 28 s > attente du Pi (20 s).
-    private let session = makeSession(.default, timeout: 28, wifiOnly: false)
-    private let wifiSession = makeSession(.default, timeout: 28, wifiOnly: true)
-    /// Actions sur des connexions NEUVES (sessions éphémères à part) : une connexion
-    /// gardée ouverte peut être morte (Pi redémarré, relais iPhone coupé) sans le savoir.
-    private let actionSession = makeSession(.ephemeral, timeout: 6, wifiOnly: false)
-    private let wifiActionSession = makeSession(.ephemeral, timeout: 3, wifiOnly: true)
+    // Long polling : 28 s > attente du Pi (20 s). Wi-Fi seul (cf. `wifiSession`).
+    private let session = wifiSession(.default, timeout: 28)
+    /// Actions sur des connexions NEUVES (session éphémère à part) : une connexion
+    /// gardée ouverte peut être morte (Pi redémarré) sans le savoir.
+    private let actionSession = wifiSession(.ephemeral, timeout: 6)
 
     func start() {
         guard task == nil else { return }
@@ -195,16 +189,15 @@ final class RemoteClient: ObservableObject {
     private func loop() async {
         var version: Int?
         var failures = 0
-        var wifiOnly = true           // chaque nouvelle connexion retente d'abord le Wi-Fi seul
         connectingSince = Date()
         while !Task.isCancelled {
             let path = "/state?wait=20" + (version.map { "&v=\($0)" } ?? "")
             var req = apiRequest(path)
             // 1re requête (sans version) = réponse immédiate attendue : délai court, pour
             // ne pas rester 40 s sur une connexion morte (réveil, relais iPhone coupé).
-            req.timeoutInterval = version == nil ? (wifiOnly ? 2 : 4) : 28
+            req.timeoutInterval = version == nil ? 4 : 28
             do {
-                let (data, response) = try await (wifiOnly ? wifiSession : session).data(for: req)
+                let (data, response) = try await session.data(for: req)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard code == 200 else {
                     connected = false
@@ -218,7 +211,6 @@ final class RemoteClient: ObservableObject {
                 failures = 0
                 lastError = nil
                 lastResponse = Date()
-                route = wifiOnly ? "Wi-Fi seul" : "chemin normal"
                 if new.v != version {
                     if version != nil, let t = new.t {   // réveil du long polling = vrai changement
                         latencyMs = max(0, Int((Date().timeIntervalSince1970 - t) * 1000))
@@ -239,12 +231,6 @@ final class RemoteClient: ObservableObject {
                 }
             } catch {
                 if Task.isCancelled { break }
-                if wifiOnly && version == nil {       // Wi-Fi seul impossible : chemin normal tout de suite
-                    wifiOnly = false
-                    wifiError = describe(error)
-                    continue
-                }
-                wifiOnly = true
                 if connected { connectingSince = Date() }
                 connected = false
                 version = nil
@@ -299,11 +285,12 @@ final class RemoteClient: ObservableObject {
         }
     }
 
-    /// Wi-Fi seul d'abord (essai), puis le chemin normal, chacun sur une connexion neuve.
+    /// Un 2e essai (connexion neuve) si le 1er échoue au niveau réseau.
     private func postWithRetry(_ req: URLRequest) async throws -> (Data, URLResponse) {
         do {
-            return try await wifiActionSession.data(for: req)
+            return try await actionSession.data(for: req)
         } catch {
+            try? await Task.sleep(nanoseconds: 300_000_000)
             return try await actionSession.data(for: req)
         }
     }
@@ -356,9 +343,8 @@ final class IconStore: ObservableObject {
     private var pending = Set<Int>()
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 10
         config.urlCache = URLCache(memoryCapacity: 4 << 20, diskCapacity: 32 << 20)
-        return URLSession(configuration: config)
+        return wifiSession(config, timeout: 10)
     }()
 
     func load(_ championId: Int) {
