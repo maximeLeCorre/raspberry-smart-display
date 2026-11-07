@@ -37,7 +37,12 @@ inutile pour en changer). Trop faibles ? Originaux dans `sounds/originals/`, pui
 `pi_display/tools/boost_sounds.py` (WAV normalisés et poussés). Sans fichier : vibrations seules (douces jusqu'au
 triple, fortes au quadra/penta).
 
-## Complication « Prochain train »
+## Complication « Prochain train » et trajet retour
+Chez toi (Pi joignable ou < 300 m) : trains pour St-Lazare. Ailleurs : trajet le
+plus court pour rentrer (calculateur IDFM, temps réel) ; appui = détail, puis
+« Guider » ouvre Plans. Il faut 2 secrets GitHub en plus : `IDFM_API_KEY` (la même
+clé que le Pi) et `HOME_COORDS` = `latitude,longitude` du domicile (ex. `48.80,2.19` ;
+jamais dans le dépôt, il est public). Sans eux : trains seulement.
 Cadran : appui long → Modifier → onglet Complications → un emplacement →
 LolRemote → Prochain train. Cadran sans emplacement : tourner la couronne depuis
 le cadran (pile intelligente) → Modifier → « + ». Elle lit le Pi en Wi-Fi seul
@@ -46,5 +51,6 @@ le cadran (pile intelligente) → Modifier → « + ». Elle lit le Pi en Wi-Fi 
 ## Ensuite
 - Nouvelle version = relancer le workflow (build valable **90 jours**).
 - Profils ou certificat expirés (1 an) / IP du Pi changée (`PI_URL` dans
-  `signing.py`) / nouvelle cible (extension) : relancer `signing.py`, remplacer le secret.
+  `signing.py`) : relancer `signing.py`, remplacer le secret. (Nouvelle cible : rien à faire,
+  la CI crée identifiants et profils, `ci_profiles.py`.)
 - Au 1er lancement : accepter l'accès au **réseau local**.

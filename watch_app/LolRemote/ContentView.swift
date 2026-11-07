@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var client: RemoteClient
     @ObservedObject private var replies = ReplyCenter.shared
+    @State private var showTrip = false
 
     var body: some View {
         Group {
@@ -44,6 +45,8 @@ struct ContentView: View {
             }
         }
         .sheet(item: $replies.target) { target in ReplyView(target: target) }   // « Répondre… »
+        .sheet(isPresented: $showTrip) { TripView() }
+        .onOpenURL { url in if url.host == "trip" { showTrip = true } }       // appui sur la complication
         .task { client.start() }
     }
 }
@@ -74,6 +77,7 @@ struct HomeView: View {
     let state: RemoteState
     @State private var confirmQuit = false
     @State private var showSettings = false
+    @State private var showTrip = false
 
     /// Pi joint (état frais) ET PC connecté au Pi : sans le 1er, l'état affiché est
     /// celui du cache et on ne sait rien du PC.
@@ -99,6 +103,14 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Réglages")
+                    if Home.configured {
+                        Button { showTrip = true } label: {
+                            Image(systemName: "house.fill").font(.system(size: 15))
+                                .foregroundStyle(Theme.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Rentrer")
+                    }
                     Text("LolRemote").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.accent)
                     Spacer()
                     Label(status.text, systemImage: status.filled ? "circle.fill" : "circle")
@@ -147,6 +159,7 @@ struct HomeView: View {
                 LatencyFooter()
             }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showTrip) { TripView() }
             .confirmationDialog("Fermer League ?", isPresented: $confirmQuit) {
                 Button("Fermer League", role: .destructive) { client.send(["action": "quit_client"]) }
                 Button("Annuler", role: .cancel) {}

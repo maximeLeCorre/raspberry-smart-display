@@ -29,6 +29,13 @@ jobs:
             echo "::add-mask::$value"
             echo "$key=$value" >> "$GITHUB_ENV"
           done < "$SIGN_DIR/signing.env"
+      - name: Identifiants d'app + profils (API App Store Connect)
+        run: |
+          # Profils refaits à chaque build : une nouvelle cible n'oblige plus à
+          # remplacer le secret (watch_app/ci_profiles.py).
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q cryptography
+          "$RUNNER_TEMP/venv/bin/python" watch_app/ci_profiles.py "$SIGN_DIR"
       - name: Trousseau + profils
         run: |
           KC_PASSWORD=$(uuidgen)
@@ -47,12 +54,20 @@ jobs:
               cp "$profile" "$dir/$uuid.mobileprovision"
             done
           done
-      - name: Jeton du Pi dans Secrets.swift
+      - name: Jeton du Pi, clé IDFM et domicile dans Secrets.swift
+        env:
+          IDFM_API_KEY: ${{ secrets.IDFM_API_KEY }}
+          HOME_COORDS: ${{ secrets.HOME_COORDS }}   # « 48.80,2.19 » (vide = pas de trajet retour)
         run: |
+          HOME_LAT=$(echo "${HOME_COORDS:-0,0}" | cut -d, -f1 | tr -d ' ')
+          HOME_LON=$(echo "${HOME_COORDS:-0,0}" | cut -d, -f2 | tr -d ' ')
           cat > watch_app/LolRemote/Secrets.swift <<EOF
           enum Secrets {
               static let baseURL = "$PI_URL"
               static let token = "$REMOTE_API_TOKEN"
+              static let idfmKey = "$IDFM_API_KEY"
+              static let homeLat: Double = ${HOME_LAT:-0}
+              static let homeLon: Double = ${HOME_LON:-0}
           }
           EOF
       - name: XcodeGen

@@ -69,6 +69,10 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Connexion au Pi
+        NSLocationWhenInUseUsageDescription: Trajet le plus court pour rentrer chez toi
+        CFBundleURLTypes:   # lolremote://trip = appui sur la complication
+          - CFBundleURLName: fr.maxime.lolremote.watchkitapp
+            CFBundleURLSchemes: [lolremote]
         # Session longue (GameSession.swift) : vibrer à nos kills poignet baissé.
         WKBackgroundModes: [physical-therapy]
     entitlements:
@@ -88,7 +92,7 @@ targets:
           PROVISIONING_PROFILE_SPECIFIER: LolRemote Watch App Store
     dependencies:
       - target: LolRemoteTrains   # complication, embarquée dans PlugIns/
-  # Complication / widget « Prochain train » (WidgetKit), lit le Pi elle-même.
+  # Complication / widget « Prochain train » (WidgetKit) : trains (Pi) ou trajet retour (IDFM).
   LolRemoteTrains:
     type: app-extension
     platform: watchOS
@@ -104,6 +108,8 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Horaires des trains lus sur le Pi
+        NSLocationWhenInUseUsageDescription: Trajet le plus court pour rentrer chez toi
+        NSWidgetWantsLocation: true   # hors de chez soi : trajet retour
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fr.maxime.lolremote.watchkitapp.trains
