@@ -5,6 +5,23 @@ import Foundation
 import UIKit
 import WatchKit
 
+/// Erreur réseau en clair, avec son code (diagnostic quand la montre ne joint pas le Pi).
+func describe(_ error: Error) -> String {
+    guard let error = error as? URLError else { return "Pi injoignable" }
+    let reason: String
+    switch error.code {
+    case .timedOut: reason = "délai dépassé"
+    case .notConnectedToInternet: reason = "pas de réseau"
+    case .cannotConnectToHost: reason = "connexion refusée"
+    case .cannotFindHost: reason = "adresse introuvable"
+    case .networkConnectionLost: reason = "connexion perdue"
+    case .dataNotAllowed: reason = "réseau non autorisé"
+    case .appTransportSecurityRequiresSecureConnection: reason = "HTTP bloqué (ATS)"
+    default: reason = "Pi injoignable"
+    }
+    return "\(reason) (\(error.code.rawValue))"
+}
+
 /// Requête vers le Pi, avec le jeton.
 func apiRequest(_ path: String) -> URLRequest {
     var req = URLRequest(url: URL(string: Secrets.baseURL + path)!)
@@ -130,7 +147,14 @@ final class RemoteClient: ObservableObject {
     }
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 40    // > attente du long polling (25 s)
+        config.timeoutIntervalForRequest = 28    // > attente du long polling (20 s)
+        return URLSession(configuration: config)
+    }()
+    /// Actions sur des connexions NEUVES (session éphémère à part) : une connexion
+    /// gardée ouverte peut être morte (Pi redémarré, relais iPhone coupé) sans le savoir.
+    private let actionSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 6
         return URLSession(configuration: config)
     }()
 
@@ -161,11 +185,11 @@ final class RemoteClient: ObservableObject {
         var failures = 0
         connectingSince = Date()
         while !Task.isCancelled {
-            let path = "/state?wait=25" + (version.map { "&v=\($0)" } ?? "")
+            let path = "/state?wait=20" + (version.map { "&v=\($0)" } ?? "")
             var req = apiRequest(path)
             // 1re requête (sans version) = réponse immédiate attendue : délai court, pour
             // ne pas rester 40 s sur une connexion morte (réveil, relais iPhone coupé).
-            req.timeoutInterval = version == nil ? 4 : 40
+            req.timeoutInterval = version == nil ? 4 : 28
             do {
                 let (data, response) = try await session.data(for: req)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -204,7 +228,7 @@ final class RemoteClient: ObservableObject {
                 if connected { connectingSince = Date() }
                 connected = false
                 version = nil
-                lastError = (error as? URLError)?.code == .timedOut ? "délai dépassé" : "Pi injoignable"
+                lastError = describe(error)
                 // Nouvel essai vite d'abord (réseau qui se réveille), puis toutes les 2 s.
                 failures += 1
                 let delay = [0.25, 0.5, 1.0][min(failures - 1, 2)] * (failures > 3 ? 2 : 1)
@@ -266,7 +290,13 @@ final class RemoteClient: ObservableObject {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: body)
             do {
-                let (data, response) = try await session.data(for: req)
+                let (data, response): (Data, URLResponse)
+                do {
+                    (data, response) = try await actionSession.data(for: req)
+                } catch {
+                    try? await Task.sleep(nanoseconds: 300_000_000)   // un 2e essai, connexion neuve
+                    (data, response) = try await actionSession.data(for: req)
+                }
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 actionMs = Int(Date().timeIntervalSince(start) * 1000)
                 if code == 200 {
@@ -282,8 +312,13 @@ final class RemoteClient: ObservableObject {
             } catch {
                 pendingResponse = nil
                 pendingChamp = nil
-                message = "Pi injoignable"
+                message = describe(error)
                 WKInterfaceDevice.current().play(.failure)
+                if connected {        // le long polling tient sans doute une connexion morte
+                    connected = false
+                    stop()
+                    start()
+                }
             }
         }
     }
