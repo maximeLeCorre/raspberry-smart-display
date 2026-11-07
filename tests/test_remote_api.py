@@ -265,3 +265,40 @@ def test_notif_arrivee_dans_le_lobby_et_message(app, monkeypatch):
     assert [a["category"] for a in sent] == ["LOBBY_JOIN", "CHAT_MESSAGE"]
     assert sent[0]["alert"]["title"] == "Ami a rejoint ton lobby"
     assert sent[1]["alert"] == {"title": "Message de Ami", "body": "on joue ?"}
+
+
+def test_fermer_lobby_et_client_verifies(app):
+    push(app, type="_connected")
+    time.sleep(0.1)
+    assert call(app, "POST", "/action", {"action": "leave_lobby"})[0] == 409    # pas de lobby
+    assert call(app, "POST", "/action", {"action": "quit_client"})[0] == 409    # client fermé
+    push(app, type="data", screen="default",
+         payload={"client": True, "lobby": {"members": [], "friends": []}})
+    time.sleep(0.1)
+    assert call(app, "POST", "/action", {"action": "leave_lobby"})[0] == 200
+    assert call(app, "POST", "/action", {"action": "quit_client"})[0] == 200
+    push(app, type="set_screen", screen="lol")                                 # en partie : jamais
+    time.sleep(0.1)
+    assert call(app, "POST", "/action", {"action": "quit_client"})[0] == 409
+
+
+def test_dernier_kill_expose_en_partie(app):
+    push(app, type="_connected")
+    push(app, type="set_screen", screen="lol")
+    push(app, type="data", screen="lol", payload={"players": [], "myKill": {"id": 7, "streak": 4}})
+    time.sleep(0.1)
+    assert call(app, "GET", "/state?wait=0")[1]["game"] == {"kill": {"id": 7, "streak": 4}}
+
+
+def test_sons_des_kills(app, tmp_path, monkeypatch):
+    (tmp_path / "kill1.mp3").write_bytes(b"ID3-son-1")
+    (tmp_path / "notes.txt").write_text("pas un son")
+    monkeypatch.setattr(league_module, "SOUNDS_DIR", tmp_path)
+    status, sounds = call(app, "GET", "/asset/league/sounds")
+    assert status == 200 and list(sounds) == ["kill1"] and sounds["kill1"]["ext"] == "mp3"
+    url = f"http://127.0.0.1:{app.remote.port}/asset/league/sound/kill1"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {TOKEN}"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        assert resp.read() == b"ID3-son-1" and resp.headers["Content-Type"] == "audio/mpeg"
+    assert call(app, "GET", "/asset/league/sound/notes")[0] == 404
+    assert call(app, "GET", "/asset/league/sound/..%2Fapp")[0] == 404

@@ -47,3 +47,7 @@ watch_app/*.xcodeproj/
 
 # App montre : signature TestFlight (clé privée, secret) — watch_app/signing.py
 watch_app/signing/
+
+# Sons des kills (montre) : extraits sans licence, JAMAIS dans le dépôt public ;
+# copiés sur le Pi par deploy (archive du dossier), servis à la montre.
+pi_display/sounds/

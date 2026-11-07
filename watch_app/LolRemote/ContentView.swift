@@ -70,6 +70,7 @@ struct ConnectingView: View {
 struct HomeView: View {
     @EnvironmentObject var client: RemoteClient
     let state: RemoteState
+    @State private var confirmQuit = false
 
     /// Pi joint (état frais) ET PC connecté au Pi : sans le 1er, l'état affiché est
     /// celui du cache et on ne sait rien du PC.
@@ -125,9 +126,22 @@ struct HomeView: View {
                     if let status = state.home?.playStatus, !status.isEmpty {
                         Text(status).font(.system(size: 12)).foregroundStyle(Theme.muted)   // message final
                     }
+                    if state.home?.client == true {
+                        Button { confirmQuit = true } label: {
+                            Label("Fermer League", systemImage: "power")
+                        }
+                        .buttonStyle(SecondaryButtonStyle(height: 32))
+                        .disabled(client.busy)
+                    }
                 }
                 Spacer(minLength: 0)
                 LatencyFooter()
+            }
+            .confirmationDialog("Fermer League ?", isPresented: $confirmQuit) {
+                Button("Fermer League", role: .destructive) { client.send(["action": "quit_client"]) }
+                Button("Annuler", role: .cancel) {}
+            } message: {
+                Text("Le client se ferme proprement (comme sa croix).")
             }
         }
     }
@@ -246,6 +260,11 @@ struct LobbyView: View {
                     }
                 }
             }
+            Button { client.send(["action": "leave_lobby"]) } label: {
+                Label(lobby.isLeader == true ? "Fermer le lobby" : "Quitter le lobby", systemImage: "xmark")
+            }
+            .buttonStyle(SecondaryButtonStyle(height: 30))
+            .disabled(client.busy)
             if lobby.isLeader == true {
                 Button { client.send(["action": "start_queue"]) } label: {
                     Label(lobby.canStart == true ? "Lancer la partie" : "Pas encore possible",
