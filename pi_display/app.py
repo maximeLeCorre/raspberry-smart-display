@@ -360,7 +360,12 @@ class App:
             screen = msg.get("screen")
             payload = msg.get("payload", {})
             if screen in self.screens:
-                self.agent_data[screen] = payload
+                if screen == DEFAULT_SCREEN and isinstance(payload, dict):
+                    # Accueil : clés indépendantes (`playStatus` du bouton Jouer,
+                    # `lobby`), envoyées séparément → fusionnées, pas remplacées.
+                    self.agent_data[screen] = {**self.agent_data.get(screen, {}), **payload}
+                else:
+                    self.agent_data[screen] = payload
                 self.screens[screen].update_data(payload)
 
         elif msg_type == "_remote_action":

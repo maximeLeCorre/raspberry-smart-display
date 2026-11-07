@@ -80,6 +80,7 @@ class LeagueModule(Module):
         self._remote_icons_lock = threading.Lock()
         self._ready_pushed = False      # notification du ready-check courant déjà envoyée
         self._choice_pushed = False     # idem pour le choix de départ
+        self._invite_pushed = ""        # id de la dernière invitation notifiée
         # Patch relu chaque heure même si toutes les icônes sont déjà en mémoire
         # (sinon un nouveau patch ne serait vu qu'au redémarrage).
         self._patch_check = time.monotonic()
@@ -153,6 +154,16 @@ class LeagueModule(Module):
                  "sound": "default", "category": "CHAMP_CHOICE"},
                 collapse_id="champchoice", ttl=max(3, left))
         self._choice_pushed = bool(choices)
+
+        # Invitation dans un lobby (client ouvert) : Accepter ouvre l'app.
+        inv = (self.app.agent_data.get("default") or {}).get("invitation") or {}
+        if inv.get("id") and inv["id"] != self._invite_pushed:
+            self.app.push.notify(
+                {"alert": {"title": f"Invitation de {inv.get('from') or '?'}",
+                           "body": inv.get("queueName") or "Rejoindre son lobby ?"},
+                 "sound": "default", "category": "LOBBY_INVITE"},
+                collapse_id="invite", ttl=120, extra={"invitationId": inv["id"]})
+        self._invite_pushed = inv.get("id") or ""
 
     def on_agent_screen(self, screen: str, shown: bool) -> None:
         # Un écran poussé par l'agent (vraie partie) sort du mode « revue ».
@@ -473,7 +484,24 @@ class LeagueModule(Module):
                 "rerolls": cs.get("rerolls", 0),
                 "timer": cs.get("timer", {}),
             }}
+        if screen == "default":   # accueil : bouton Jouer + lobby (joueurs, Lancer)
+            home = data.get("default") or {}
+            return {"home": {"lobby": self._lobby_with_default_friend(home.get("lobby")),
+                             "invitation": home.get("invitation"),
+                             "playStatus": home.get("playStatus") or "",
+                             "playBusy": bool(home.get("playBusy"))}}
         return {}
+
+    def _lobby_with_default_friend(self, lobby: dict | None) -> dict | None:
+        """Ami par défaut (`[lol] lobby_invite`, comme le bouton Jouer) marqué et en tête."""
+        if not lobby:
+            return lobby
+        want = self.lobby_invite.lower()
+        friends = [{**f, "isDefault": bool(want) and want in (f.get("name", "").lower(),
+                                                             f.get("riotId", "").lower())}
+                   for f in lobby.get("friends") or []]
+        friends.sort(key=lambda f: not f["isDefault"])     # tri stable : reste dans l'ordre
+        return {**lobby, "friends": friends}
 
     def remote_asset(self, name: str) -> tuple[bytes, str] | None:
         """`icon/<championId>` : icône carrée (cache disque `icons.db`, sinon CDN),
@@ -502,6 +530,39 @@ class LeagueModule(Module):
             if screen != "queue" or queue.get("state") != "readycheck":
                 return 409, {"ok": False, "error": "aucun ready-check en cours"}
             self.lcu_action(action)
+            return 200, {"ok": True}
+        if action in ("play", "play_cancel"):        # = bouton Jouer de l'accueil du Pi
+            if action == "play":
+                self.play()
+            else:
+                self.play_cancel()
+            return 200, {"ok": True}
+        if action in ("invite_accept", "invite_decline"):
+            inv = (data.get("default") or {}).get("invitation") or {}
+            if not inv or str(body.get("invitationId") or "") != inv.get("id"):
+                return 409, {"ok": False, "error": "invitation expirée"}
+            self.app.server.send({"type": "lcu_action", "action": action,
+                                  "invitationId": inv["id"]})
+            return 200, {"ok": True}
+        if action == "invite":
+            lobby = (data.get("default") or {}).get("lobby") if screen == "default" else None
+            sid = body.get("summonerId")
+            if not lobby or sid not in {f.get("summonerId") for f in lobby.get("friends") or []}:
+                return 409, {"ok": False, "error": "ami non invitable"}
+            self.app.server.send({"type": "lcu_action", "action": "invite", "summonerId": sid})
+            return 200, {"ok": True}
+        if action == "start_queue":
+            lobby = (data.get("default") or {}).get("lobby") if screen == "default" else None
+            if not lobby:
+                return 409, {"ok": False, "error": "pas de lobby"}
+            if not lobby.get("isLeader"):
+                return 409, {"ok": False, "error": "seul le chef lance"}
+            self.lcu_action("start_queue")
+            return 200, {"ok": True}
+        if action == "cancel_queue":
+            if screen != "queue" or (data.get("queue") or {}).get("state") == "readycheck":
+                return 409, {"ok": False, "error": "pas en file"}
+            self.lcu_action("cancel_queue")
             return 200, {"ok": True}
         if action in ("swap", "reroll", "pick"):
             if screen != "champselect":

@@ -145,6 +145,17 @@ class LcuClient:
             return False
         return 200 <= resp.status_code < 300
 
+    def delete(self, path: str, timeout: float = 3.0) -> bool:
+        """Comme `post`, en DELETE (ex. quitter la file)."""
+        if not self.connected and not self.connect():
+            return False
+        try:
+            resp = self.session.delete(self._url(path), timeout=timeout)
+        except requests.RequestException:
+            self.port = None
+            return False
+        return 200 <= resp.status_code < 300
+
     # ----------------------------------------------------------- endpoints
     def gameflow_phase(self) -> str | None:
         """Phase courante : 'None', 'Lobby', 'Matchmaking', 'ReadyCheck',

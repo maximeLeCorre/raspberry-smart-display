@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import time
 import urllib.error
+from types import SimpleNamespace
 
 import riot_web
 from riot_web import RiotWeb
@@ -44,7 +46,9 @@ def test_429_attend_retry_after_puis_reessaie(monkeypatch):
             raise http_error(429, "2")
         return FakeResp(json.dumps({"ok": 1}).encode())
     monkeypatch.setattr(riot_web.urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(riot_web.time, "sleep", sleeps.append)
+    # Faux module `time` propre à riot_web : patcher time.sleep lui-même
+    # capterait aussi les attentes des threads de fond des autres tests.
+    monkeypatch.setattr(riot_web, "time", SimpleNamespace(sleep=sleeps.append, monotonic=time.monotonic))
     assert riot_web._http_get("https://x") == b'{"ok": 1}'
     assert len(calls) == 2 and sleeps == [2.0]
 
@@ -54,7 +58,9 @@ def test_429_persistant_abandonne(monkeypatch):
         raise http_error(429, "999")
     sleeps = []
     monkeypatch.setattr(riot_web.urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(riot_web.time, "sleep", sleeps.append)
+    # Faux module `time` propre à riot_web : patcher time.sleep lui-même
+    # capterait aussi les attentes des threads de fond des autres tests.
+    monkeypatch.setattr(riot_web, "time", SimpleNamespace(sleep=sleeps.append, monotonic=time.monotonic))
     assert riot_web._http_get("https://x") is None
     assert sleeps == [riot_web.RATE_LIMIT_MAX_WAIT] * riot_web.RATE_LIMIT_RETRIES
 

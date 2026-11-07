@@ -38,29 +38,143 @@ struct ContentView: View {
     }
 }
 
+/// Accueil : état du PC, bouton « Jouer une ARAM Chaos » (comme sur le Pi),
+/// puis le lobby (joueurs présents, invitations) et « Lancer la partie ».
 struct IdleView: View {
     @EnvironmentObject var client: RemoteClient
     let state: RemoteState
 
-    private var label: String {
+    private var inGame: String? {
         switch state.screen {
         case "lol": return "En partie"
         case "postgame": return "Fin de partie"
-        default: return "Au menu"
+        default: return nil
         }
     }
 
     var body: some View {
-        VStack(spacing: 6) {
-            Text(state.agent == true ? "PC connecté" : "PC hors ligne").font(.headline)
-            if state.agent == true { Text(label).foregroundStyle(.secondary) }
-            // Mesures (diagnostic de lenteur) : Pi → montre et aller-retour d'une action.
-            if client.latencyMs != nil || client.actionMs != nil {
-                Text([client.latencyMs.map { "réseau \($0) ms" }, client.actionMs.map { "action \($0) ms" }]
-                        .compactMap { $0 }.joined(separator: " · "))
-                    .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(state.agent == true ? "PC connecté" : "PC hors ligne").font(.headline)
+                if state.agent == true {
+                    if let invitation = state.home?.invitation, inGame == nil {
+                        InvitationSection(invitation: invitation)
+                    }
+                    if let inGame {
+                        Text(inGame).foregroundStyle(.secondary)
+                    } else if let lobby = state.home?.lobby {
+                        LobbySection(lobby: lobby)
+                    } else {
+                        PlaySection(home: state.home)
+                    }
+                    if let status = state.home?.playStatus, !status.isEmpty, state.home?.playBusy != true {
+                        Text(status).font(.footnote).foregroundStyle(.secondary)   // message final
+                    }
+                }
+                // Mesures (diagnostic de lenteur) : Pi → montre et aller-retour d'une action.
+                if client.latencyMs != nil || client.actionMs != nil {
+                    Text([client.latencyMs.map { "réseau \($0) ms" }, client.actionMs.map { "action \($0) ms" }]
+                            .compactMap { $0 }.joined(separator: " · "))
+                        .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+struct InvitationSection: View {
+    @EnvironmentObject var client: RemoteClient
+    let invitation: Invitation
+
+    var body: some View {
+        Text("Invitation de \(invitation.from ?? "?")").font(.headline).lineLimit(2)
+        if let queue = invitation.queueName, !queue.isEmpty {
+            Text(queue).font(.footnote).foregroundStyle(.secondary)
+        }
+        HStack {
+            Button("Accepter") { client.send(["action": "invite_accept", "invitationId": invitation.id]) }
+                .tint(.green)
+            Button("Refuser") { client.send(["action": "invite_decline", "invitationId": invitation.id]) }
+                .tint(.red)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(client.busy)
+    }
+}
+
+struct PlaySection: View {
+    @EnvironmentObject var client: RemoteClient
+    let home: Home?
+
+    var body: some View {
+        if home?.playBusy == true {
+            Text(home?.playStatus ?? "…").font(.footnote)
+            Button("Annuler") { client.send(["action": "play_cancel"]) }
+                .tint(.red)
+        } else {
+            Button("Jouer une ARAM Chaos") { client.send(["action": "play"]) }
+                .tint(.green)
+                .disabled(client.busy)
+        }
+    }
+}
+
+struct LobbySection: View {
+    @EnvironmentObject var client: RemoteClient
+    let lobby: Lobby
+    @State private var choosingFriend = false
+
+    var body: some View {
+        Text(lobby.queueName ?? "Lobby").font(.footnote).foregroundStyle(.secondary)
+        ForEach(lobby.members ?? [], id: \.self) { member in
+            HStack {
+                Text(member.name + (member.isSelf == true ? " (toi)" : ""))
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                Spacer()
+                if member.isLeader == true {
+                    Text("chef").font(.caption2).foregroundStyle(.secondary)   // écrit, pas une couleur
+                }
             }
         }
+        ForEach(lobby.invites ?? [], id: \.self) { invite in
+            Text("\(invite.name) : invité…").font(.footnote).foregroundStyle(.secondary)
+        }
+        // Invitations : l'ami par défaut en un appui, sinon la liste des amis en ligne.
+        if let friend = lobby.friends?.first(where: { $0.isDefault == true }) {
+            Button("Inviter \(friend.name)") { invite(friend) }
+                .disabled(client.busy)
+        }
+        if !(lobby.friends ?? []).isEmpty {
+            Button("Inviter un ami…") { choosingFriend = true }
+                .sheet(isPresented: $choosingFriend) {
+                    List(lobby.friends ?? []) { friend in
+                        Button {
+                            invite(friend)
+                            choosingFriend = false
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(friend.name).lineLimit(1)
+                                Text(friend.status ?? "").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+        }
+        if lobby.isLeader == true {
+            Button("Lancer la partie") { client.send(["action": "start_queue"]) }
+                .tint(.green)
+                .disabled(client.busy || lobby.canStart != true)
+            if lobby.canStart != true {
+                Text("Lancement pas encore possible").font(.caption2).foregroundStyle(.secondary)
+            }
+        } else {
+            Text("Le chef lance la partie").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    private func invite(_ friend: Friend) {
+        client.send(["action": "invite", "summonerId": friend.summonerId])
     }
 }
 
@@ -91,6 +205,8 @@ struct QueueView: View {
             VStack(spacing: 6) {
                 Text("En file").font(.headline)
                 Text("\(queue?.timeInQueue ?? 0) s").font(.title3).monospacedDigit()
+                Button("Quitter la file") { client.send(["action": "cancel_queue"]) }
+                    .disabled(client.busy)
                 if let estimated = queue?.estimated, estimated > 0 {
                     Text("estimé \(estimated) s").font(.footnote).foregroundStyle(.secondary)
                 }
