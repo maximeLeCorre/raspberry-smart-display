@@ -1,7 +1,7 @@
 // Notifications push (envoyées par le Pi, pi_display/push_apns.py) : « Partie
-// trouvée ! » et invitation dans un lobby, avec Accepter/Refuser, même app
-// fermée. À chaque lancement, le jeton APNs de la montre est renvoyé au Pi
-// (POST /push/register).
+// trouvée ! », invitation, arrivée dans notre lobby, message privé ; avec
+// boutons d'action, même app fermée. À chaque lancement, le jeton APNs de la
+// montre est renvoyé au Pi (POST /push/register).
 import Foundation
 import UserNotifications
 import WatchKit
@@ -28,10 +28,16 @@ final class AppDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCent
         let decline = UNNotificationAction(identifier: "DECLINE", title: "Refuser", options: [.destructive])
         let join = UNNotificationAction(identifier: "INVITE_ACCEPT", title: "Accepter", options: [.foreground])
         let refuse = UNNotificationAction(identifier: "INVITE_DECLINE", title: "Refuser", options: [.destructive])
+        let start = UNNotificationAction(identifier: "START_QUEUE", title: "Lancer la partie", options: [.foreground])
         center.setNotificationCategories([
             UNNotificationCategory(identifier: "READY_CHECK", actions: [accept, decline],
                                    intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: "LOBBY_INVITE", actions: [join, refuse],
+                                   intentIdentifiers: [], options: []),
+            // Quelqu'un rejoint notre lobby ; message privé (simple appui = ouvrir l'app).
+            UNNotificationCategory(identifier: "LOBBY_JOIN", actions: [start],
+                                   intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: "CHAT_MESSAGE", actions: [],
                                    intentIdentifiers: [], options: []),
         ])
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
@@ -57,13 +63,18 @@ final class AppDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCent
         case "DECLINE": await postToPi("/action", ["action": "decline"])
         case "INVITE_ACCEPT": await postToPi("/action", ["action": "invite_accept", "invitationId": invitationId])
         case "INVITE_DECLINE": await postToPi("/action", ["action": "invite_decline", "invitationId": invitationId])
+        case "START_QUEUE": await postToPi("/action", ["action": "start_queue"])
         default: break      // simple appui : l'app s'ouvre sur le ready-check
         }
     }
 
-    /// App déjà à l'écran : pas de bandeau, la vue du ready-check (et sa vibration) suffit.
+    /// App déjà à l'écran : pas de bandeau pour ce qu'elle affiche déjà (ready-check,
+    /// choix, invitation) ; bandeau pour un message ou une arrivée dans le lobby.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        []
+        switch notification.request.content.categoryIdentifier {
+        case "CHAT_MESSAGE", "LOBBY_JOIN": return [.banner, .sound]
+        default: return []
+        }
     }
 }

@@ -81,6 +81,8 @@ class LeagueModule(Module):
         self._ready_pushed = False      # notification du ready-check courant déjà envoyée
         self._choice_pushed = False     # idem pour le choix de départ
         self._invite_pushed = ""        # id de la dernière invitation notifiée
+        self._lobby_members: set | None = None   # autres membres du lobby (None : pas de lobby)
+        self._chat_pushed = ""          # id du dernier message notifié
         # Patch relu chaque heure même si toutes les icônes sont déjà en mémoire
         # (sinon un nouveau patch ne serait vu qu'au redémarrage).
         self._patch_check = time.monotonic()
@@ -131,7 +133,8 @@ class LeagueModule(Module):
     def _maybe_push_ready_check(self) -> None:
         """Partie trouvée → notification sur la montre (une par ready-check),
         avec Accepter/Refuser ; périmée au bout de la fenêtre du ready-check.
-        Idem au choix de départ de la sélection (ouvre l'app dessus)."""
+        Idem au choix de départ de la sélection (ouvre l'app dessus), à une
+        invitation, à l'arrivée d'un joueur dans notre lobby et à un message privé."""
         queue = ((self.app.agent_data.get("queue") or {})
                  if self.app.network_screen == "queue" else {})
         ready = queue.get("state") == "readycheck" and queue.get("response") == "None"
@@ -164,6 +167,29 @@ class LeagueModule(Module):
                  "sound": "default", "category": "LOBBY_INVITE"},
                 collapse_id="invite", ttl=120, extra={"invitationId": inv["id"]})
         self._invite_pushed = inv.get("id") or ""
+
+        # Quelqu'un rejoint NOTRE lobby (pas à sa création ni quand on en rejoint un).
+        lobby = (self.app.agent_data.get("default") or {}).get("lobby")
+        members = ({m.get("name") for m in lobby.get("members") or [] if not m.get("isSelf")}
+                   if lobby and self.app.network_screen == "default" else None)
+        if members is not None and self._lobby_members is not None:
+            for name in sorted(members - self._lobby_members):
+                self.app.push.notify(
+                    {"alert": {"title": f"{name} a rejoint ton lobby",
+                               "body": lobby.get("queueName") or ""},
+                     "sound": "default", "category": "LOBBY_JOIN"},
+                    collapse_id="lobbyjoin", ttl=300)
+        self._lobby_members = members
+
+        # Message privé reçu (menu ou lobby : l'agent ne lit le chat qu'à l'accueil).
+        msg = (self.app.agent_data.get("default") or {}).get("chat") or {}
+        if msg.get("id") and msg["id"] != self._chat_pushed:
+            self.app.push.notify(
+                {"alert": {"title": f"Message de {msg.get('from') or '?'}",
+                           "body": msg.get("body") or ""},
+                 "sound": "default", "category": "CHAT_MESSAGE"},
+                collapse_id=f"chat-{msg.get('from') or ''}"[:64], ttl=600)
+        self._chat_pushed = msg.get("id") or self._chat_pushed
 
     def on_agent_screen(self, screen: str, shown: bool) -> None:
         # Un écran poussé par l'agent (vraie partie) sort du mode « revue ».

@@ -71,11 +71,11 @@ def test_poll_lobby_puis_client_ferme():
     screen, payload = src.poll()
     assert screen == "default" and payload["lobby"]["members"]
     src.lcu.phase = "None"                                  # retour au menu
-    assert src.poll() == ("default", {"lobby": None, "invitation": None})
+    assert src.poll() == ("default", {"lobby": None, "invitation": None, "chat": None})
     src.lcu.phase = "Lobby"
     src.poll()
     src.lcu.phase = None                                    # client fermé : effacé une fois
-    assert src.poll() == ("default", {"lobby": None, "invitation": None})
+    assert src.poll() == ("default", {"lobby": None, "invitation": None, "chat": None})
     assert src.poll() is None
 
 
@@ -104,3 +104,30 @@ def test_inviter_un_ami():
     src.lcu = FakeLcu()
     src.handle_request({"type": "lcu_action", "action": "invite", "summonerId": 6}, None)
     assert src.lcu.posted == [lobby.SEND_INVITES_PATH]
+
+
+def test_dernier_message_prive_recu():
+    import chat
+
+    class ChatLcu:
+        def get_json(self, path, **_kw):
+            if path == chat.ME_PATH:
+                return {"id": "moi@pvp"}
+            return [
+                {"type": "chat", "gameName": "Ami", "unreadMessageCount": 1,
+                 "lastMessage": {"id": "m2", "fromId": "ami@pvp", "body": "on joue ?",
+                                 "timestamp": "2026-11-07T12:00:05.000Z"}},
+                {"type": "chat", "gameName": "Vieux", "unreadMessageCount": 1,       # avant le démarrage
+                 "lastMessage": {"id": "m0", "fromId": "x@pvp", "body": "...",
+                                 "timestamp": "2026-11-01T12:00:00.000Z"}},
+                {"type": "chat", "gameName": "Moi", "unreadMessageCount": 1,         # notre message
+                 "lastMessage": {"id": "m3", "fromId": "moi@pvp", "body": "ok",
+                                 "timestamp": "2026-11-07T12:00:09.000Z"}},
+                {"type": "customGame", "name": "Lobby", "unreadMessageCount": 3,     # salon de lobby
+                 "lastMessage": {"id": "m4", "fromId": "y@pvp", "body": "gg",
+                                 "timestamp": "2026-11-07T12:00:10.000Z"}},
+            ]
+
+    since = chat._timestamp("2026-11-07T11:00:00Z")
+    msg = chat.build_last_message(ChatLcu(), since)
+    assert (msg["id"], msg["from"], msg["body"]) == ("m2", "Ami", "on joue ?")

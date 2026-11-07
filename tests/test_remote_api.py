@@ -244,3 +244,24 @@ def test_inviter_ami_par_defaut_en_tete(app):
     assert call(app, "POST", "/action", {"action": "invite", "summonerId": 1})[0] == 409
     assert call(app, "POST", "/action", {"action": "invite", "summonerId": 9})[0] == 200
     assert {"type": "lcu_action", "action": "invite", "summonerId": 9} in app.sent
+
+
+def test_notif_arrivee_dans_le_lobby_et_message(app, monkeypatch):
+    sent = []
+    monkeypatch.setattr(app.push, "notify", lambda aps, **kw: sent.append(aps))
+    league = app.modules["league"]
+    push(app, type="_connected")
+    me = {"name": "Moi", "isLeader": True, "isSelf": True}
+    lob = {"queueName": "ARAM", "members": [me], "invites": [], "friends": []}
+    push(app, type="data", screen="default", payload={"lobby": lob})
+    time.sleep(0.1)
+    league.tick()                                    # création du lobby : rien
+    push(app, type="data", screen="default",
+         payload={"lobby": {**lob, "members": [me, {"name": "Ami", "isSelf": False}]},
+                  "chat": {"id": "m1", "from": "Ami", "body": "on joue ?"}})
+    time.sleep(0.1)
+    league.tick()
+    league.tick()
+    assert [a["category"] for a in sent] == ["LOBBY_JOIN", "CHAT_MESSAGE"]
+    assert sent[0]["alert"]["title"] == "Ami a rejoint ton lobby"
+    assert sent[1]["alert"] == {"title": "Message de Ami", "body": "on joue ?"}
