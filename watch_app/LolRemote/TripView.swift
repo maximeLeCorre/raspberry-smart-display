@@ -30,7 +30,7 @@ struct TripView: View {
                     Label(status, systemImage: loading ? "location" : "exclamationmark.triangle")
                         .font(.system(size: 14))
                 }
-                if Home.configured {
+                if HomePlace.configured {
                     Button { guide() } label: {
                         Label("Guider (Plans)", systemImage: "location.north.line.fill")
                     }
@@ -45,7 +45,7 @@ struct TripView: View {
     }
 
     private func load() async {
-        guard Home.configured else {
+        guard HomePlace.configured else {
             status = "Domicile non configuré (secret HOME_COORDS)"
             return
         }
@@ -57,7 +57,7 @@ struct TripView: View {
             status = location.authorized ? "Position introuvable" : "Autorise la localisation (Réglages › Confidentialité)"
             return
         }
-        if Home.isNear(here) {
+        if HomePlace.isNear(here) {
             status = "Tu es chez toi"
             return
         }
@@ -71,7 +71,7 @@ struct TripView: View {
 
     /// Plans prend le relais : itinéraire en transports jusqu'à la maison.
     private func guide() {
-        let item = MKMapItem(placemark: MKPlacemark(coordinate: Home.location.coordinate))
+        let item = MKMapItem(placemark: MKPlacemark(coordinate: HomePlace.location.coordinate))
         item.name = "Maison"
         item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeTransit])
     }

@@ -17,6 +17,7 @@ import time
 import psutil
 
 import chat
+import endgame
 from champ_select import build_champ_select_payload, my_champion, my_pending_pick
 from lobby import (INVITES_PATH, LOBBY_PATH, SEARCH_PATH, SEND_INVITES_PATH,
                    build_invitation, build_lobby_payload)
@@ -38,6 +39,7 @@ LCU_ACTIONS = {
     "start_queue": SEARCH_PATH,     # lobby : lancer la recherche de partie
     # Fermeture PROPRE du client (comme sa croix) : jamais taskkill (Vanguard).
     "quit_client": "/process-control/v1/process/quit",
+    "play_again": endgame.PLAY_AGAIN_PATH,   # fin de partie → lobby (mêmes joueurs)
 }
 
 # Démarrage à froid du client (Riot Client -> maj -> League -> login -> menu) :
@@ -95,10 +97,10 @@ class LeagueSource(Source):
              lambda p: build_champ_select_payload(self.lcu)),
             (lambda p: p == "InProgress", "lol",
              lambda p: self._lol_payload()),
-            # Fin de partie : on bascule l'écran, mais c'est le Pi qui récupère le
-            # bilan (via l'API Web, la dernière partie du compte configuré).
+            # Fin de partie : le bilan vient du store du Pi (synchro LCU) ; le payload
+            # ne porte que le bulletin d'honneurs (montre).
             (lambda p: p in ("WaitingForStats", "PreEndOfGame", "EndOfGame"), "postgame",
-             lambda p: None),
+             lambda p: endgame.build_postgame_payload(self.lcu, p)),
         ]
 
     def _lol_payload(self):
@@ -178,6 +180,10 @@ class LeagueSource(Source):
                 sid = message.get("summonerId")
                 ok = bool(sid) and self.lcu.post(SEND_INVITES_PATH, [{"toSummonerId": sid}])
                 print(f"[league] Invitation de {sid} -> {'OK' if ok else 'échec'}")
+                return True
+            if action == "honor":          # fin de partie : honorer un joueur (montre)
+                ok = endgame.honor_player(self.lcu, str(message.get("puuid") or ""))
+                print(f"[league] Honneur -> {'OK' if ok else 'échec'}")
                 return True
             if action == "chat_reply":     # réponse à un message privé (montre)
                 conv, text = str(message.get("conversationId") or ""), str(message.get("body") or "")

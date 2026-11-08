@@ -336,3 +336,23 @@ def test_sons_des_kills(app, tmp_path, monkeypatch):
         assert resp.read() == b"ID3-son-1" and resp.headers["Content-Type"] == "audio/mpeg"
     assert call(app, "GET", "/asset/league/sound/notes")[0] == 404
     assert call(app, "GET", "/asset/league/sound/..%2Fapp")[0] == 404
+
+
+def test_honneurs_et_retour_au_lobby(app):
+    push(app, type="_connected")
+    time.sleep(0.1)
+    assert call(app, "POST", "/action", {"action": "play_again"})[0] == 409     # pas en fin de partie
+    honor = {"gameId": 42, "votesLeft": 1,
+             "allies": [{"puuid": "a1", "name": "Ami", "championId": 103, "honored": True},
+                        {"puuid": "a2", "name": "Bob", "championId": 110, "honored": False}],
+             "opponents": []}
+    push(app, type="set_screen", screen="postgame")
+    push(app, type="data", screen="postgame", payload={"phase": "EndOfGame", "honor": honor})
+    time.sleep(0.1)
+    assert call(app, "GET", "/state?wait=0")[1]["postgame"]["honor"]["votesLeft"] == 1
+    assert app.screens["postgame"].data.get("honor") is None       # bilan du Pi non écrasé
+    assert call(app, "POST", "/action", {"action": "honor", "puuid": "a1"})[0] == 409   # déjà honoré
+    assert call(app, "POST", "/action", {"action": "honor", "puuid": "a2"})[0] == 200
+    assert call(app, "POST", "/action", {"action": "play_again"})[0] == 200
+    assert {"type": "lcu_action", "action": "honor", "puuid": "a2"} in app.sent
+    assert {"type": "lcu_action", "action": "play_again"} in app.sent

@@ -65,11 +65,11 @@ struct Provider: TimelineProvider {
             return (trainEntries(board), 15 * 60)                   // Wi-Fi de la maison
         }
         let cached = cachedBoard()
-        guard Home.configured else {
+        guard HomePlace.configured else {
             return (cached.map(trainEntries) ?? [TrainEntry(date: Date(), content: .none("Pi injoignable"))], 15 * 60)
         }
         let here = await LocationOnce().current()
-        if here == nil || Home.isNear(here!) {
+        if here == nil || HomePlace.isNear(here!) {
             let message = here == nil ? "Position inconnue" : "Pi injoignable"
             return (cached.map(trainEntries) ?? [TrainEntry(date: Date(), content: .none(message))], 15 * 60)
         }

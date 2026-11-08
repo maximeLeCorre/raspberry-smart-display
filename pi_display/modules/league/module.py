@@ -516,6 +516,8 @@ class LeagueModule(Module):
             }}
         if screen == "lol":       # en partie : seulement notre dernier kill (vibration)
             return {"game": {"kill": (data.get("lol") or {}).get("myKill")}}
+        if screen == "postgame":  # honneurs + « Retour au lobby »
+            return {"postgame": {"honor": (data.get("postgame") or {}).get("honor")}}
         if screen == "default":   # accueil : bouton Jouer + lobby (joueurs, Lancer)
             home = data.get("default") or {}
             return {"home": {"client": bool(home.get("client")),
@@ -611,6 +613,21 @@ class LeagueModule(Module):
                 # Hors accueil (sélection, partie) : jamais de fermeture à distance.
                 return 409, {"ok": False, "error": "client fermé ou en partie"}
             self.lcu_action(action)
+            return 200, {"ok": True}
+        if action in ("honor", "play_again"):
+            if screen != "postgame":
+                return 409, {"ok": False, "error": "partie pas terminée"}
+            if action == "play_again":
+                self.lcu_action("play_again")
+                return 200, {"ok": True}
+            honor = (data.get("postgame") or {}).get("honor") or {}
+            target = next((p for p in (honor.get("allies") or []) + (honor.get("opponents") or [])
+                           if p.get("puuid") == body.get("puuid")), None)
+            if target is None or target.get("honored"):
+                return 409, {"ok": False, "error": "joueur déjà honoré ou absent"}
+            if not honor.get("votesLeft"):
+                return 409, {"ok": False, "error": "plus de vote"}
+            self.app.server.send({"type": "lcu_action", "action": "honor", "puuid": target["puuid"]})
             return 200, {"ok": True}
         if action == "chat_reply":      # réponse à un message privé (notif / app montre)
             conv, text = body.get("conversationId"), body.get("body")

@@ -131,6 +131,10 @@ class PostGameScreen(Screen):
         self.icons.forget_requests()
 
     def update_data(self, payload: dict) -> None:
+        # L'agent n'envoie en fin de partie que le bulletin d'honneurs (montre) : le
+        # bilan affiché vient du store (`LeagueModule`), on ne l'écrase pas.
+        if payload and "players" not in payload:
+            return
         self.data = payload or {}
 
     def set_champion_icon(self, champion_id: int, icon_b64: str | None) -> None:

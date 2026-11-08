@@ -6,7 +6,7 @@
 import CoreLocation
 import Foundation
 
-enum Home {
+enum HomePlace {
     /// Clé et coordonnées fournies par la CI (secrets IDFM_API_KEY, HOME_COORDS).
     static var configured: Bool { !Secrets.idfmKey.isEmpty && Secrets.homeLat != 0 }
     static var location: CLLocation { CLLocation(latitude: Secrets.homeLat, longitude: Secrets.homeLon) }
@@ -86,8 +86,8 @@ private let tripCacheKey = "tripHome"
 
 /// Meilleur trajet d'`here` à la maison (temps réel), sinon nil.
 func fetchTripHome(from here: CLLocation) async -> Trip? {
-    guard Home.configured else { return nil }
-    let home = Home.location.coordinate
+    guard HomePlace.configured else { return nil }
+    let home = HomePlace.location.coordinate
     var parts = URLComponents(string: "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys")!
     parts.queryItems = [
         URLQueryItem(name: "from", value: String(format: "%.5f;%.5f", here.coordinate.longitude, here.coordinate.latitude)),

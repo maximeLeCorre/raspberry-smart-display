@@ -14,6 +14,7 @@ struct ContentView: View {
             if let state = client.state, client.connected || state.screen == "default" {
                 switch state.screen {
                 case "queue": QueueView(queue: state.queue)
+                case "postgame": PostGameView(post: state.postgame)
                 case "champselect":
                     // Choix de départ d'abord (tant qu'aucun n'est demandé), puis le banc.
                     if let choices = state.champselect?.choices, !choices.isEmpty, client.pendingChamp == nil {
@@ -103,7 +104,7 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Réglages")
-                    if Home.configured {
+                    if HomePlace.configured {
                         Button { showTrip = true } label: {
                             Image(systemName: "house.fill").font(.system(size: 15))
                                 .foregroundStyle(Theme.accent)
@@ -221,6 +222,79 @@ struct InvitationView: View {
             .buttonStyle(SecondaryButtonStyle(height: 36))
         }
         .disabled(client.busy)
+    }
+}
+
+// MARK: - Fin de partie
+
+/// Honorer des joueurs (cœur, comme le client) puis « Retour au lobby » (mêmes joueurs).
+struct PostGameView: View {
+    @EnvironmentObject var client: RemoteClient
+    let post: PostGame?
+    @State private var pending: Set<String> = []      // honorés, en attente de l'état du Pi
+
+    private var votesLeft: Int { max(0, (post?.honor?.votesLeft ?? 0) - pending.count) }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ScrollView {
+                VStack(spacing: 5) {
+                    ScreenHeader(title: "Fin de partie",
+                                 trailing: post?.honor == nil ? "" : "\(votesLeft) vote\(votesLeft > 1 ? "s" : "")")
+                    if let honor = post?.honor {
+                        group("Ton équipe", honor.allies)
+                        if !honor.opponents.isEmpty { group("Adversaires", honor.opponents) }
+                    } else {
+                        Text("Honneurs pas encore disponibles").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+            Button { client.send(["action": "play_again"]) } label: {
+                Label("Retour au lobby", systemImage: "arrow.uturn.backward")
+            }
+            .buttonStyle(PrimaryButtonStyle(height: 42))
+            .doubleTapAction()
+            .disabled(client.busy)
+        }
+        .onChange(of: client.message) { _, message in if message != nil { pending.removeAll() } }  // refusé
+    }
+
+    @ViewBuilder
+    private func group(_ title: String, _ players: [HonorPlayer]) -> some View {
+        Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.muted)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 6)
+        ForEach(players, id: \.puuid) { player in
+            let honored = player.honored || pending.contains(player.puuid)
+            HStack(spacing: 8) {
+                ChampIcon(championId: player.championId, size: 26)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(player.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                    if let champion = player.championName, !champion.isEmpty {
+                        Text(champion).font(.system(size: 10)).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                if honored {
+                    Label("honoré", systemImage: "heart.fill")            // écrit, pas qu'une couleur
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent)
+                } else if votesLeft > 0 {
+                    Button {
+                        pending.insert(player.puuid)
+                        client.send(["action": "honor", "puuid": player.puuid])
+                    } label: {
+                        Image(systemName: "heart").font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 34, height: 28)
+                            .background(Theme.accent, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Honorer \(player.name)")
+                    .disabled(client.busy)
+                }
+            }
+            .padding(.horizontal, 8).frame(minHeight: 36)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+        }
     }
 }
 

@@ -105,6 +105,25 @@ struct Game: Codable {
     let kill: KillInfo?
 }
 
+/// Fin de partie : bulletin d'honneurs (gameId non décodé : > Int32 sur arm64_32).
+struct HonorPlayer: Codable, Hashable {
+    let puuid: String
+    let name: String
+    let championId: Int
+    let championName: String?
+    let honored: Bool
+}
+
+struct Honor: Codable {
+    let votesLeft: Int
+    let allies: [HonorPlayer]
+    let opponents: [HonorPlayer]
+}
+
+struct PostGame: Codable {
+    let honor: Honor?
+}
+
 struct RemoteState: Codable {
     let v: Int
     let t: Double?              // horodatage Pi de la version (mesure de latence)
@@ -114,6 +133,7 @@ struct RemoteState: Codable {
     let champselect: ChampSelect?
     let home: Home?
     let game: Game?
+    let postgame: PostGame?
 }
 
 private struct ActionResult: Decodable {
