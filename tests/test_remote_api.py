@@ -14,6 +14,7 @@ import app as app_module
 from config import load_config
 from icon_cache import IconCache
 from modules.league import module as league_module
+import modules.transit as transit_module
 from push_apns import PushSender
 from remote_api import RemoteState
 from store import Store
@@ -30,6 +31,7 @@ CHAMPSELECT = {"players": [{"isSelf": True, "championId": 1, "championName": "An
 def app(tmp_path, free_port, monkeypatch):
     monkeypatch.setattr(league_module, "Store", lambda: Store(tmp_path / "t.db"))
     monkeypatch.setattr(league_module, "IconCache", lambda: IconCache(tmp_path / "i.db"))
+    monkeypatch.setattr(transit_module, "SETTINGS_DB", tmp_path / "s.db")
     monkeypatch.setattr(app_module, "PushSender",
                         lambda cfg: PushSender(cfg, db_path=tmp_path / "p.db"))
     cfg = load_config(app_module.__file__.replace("app.py", "config.toml"))
@@ -287,6 +289,8 @@ def test_horaires_des_trains_pour_la_montre(app):
     assert call(app, "GET", "/asset/transit/next")[0] == 404              # pas de flux (sans clé)
 
     class Feed:
+        api_key = "cle-idfm"
+
         def snapshot(self):
             dep = Departure(when=2000.0, aimed=1880.0, destination="Paris Saint-Lazare", mission="",
                             platform="2", status="delayed", at_stop=False, to_paris=True, line="L",
@@ -299,6 +303,14 @@ def test_horaires_des_trains_pour_la_montre(app):
     assert board["departures"] == [{"line": "L", "destination": "Paris St-Lazare", "time": 2000.0,
                                     "arrival": 1990.0, "delay": 2, "cancelled": False,
                                     "platform": "2", "toParis": True, "home": True}]
+    assert board["trip"] == {"key": "cle-idfm", "home": None}
+    # Domicile saisi sur la montre (marche PC éteint : pas de _connected ici).
+    home = {"lat": 48.8, "lon": 2.19, "label": "1 rue X, Ville"}
+    assert call(app, "POST", "/settings/transit/home", {**home, "lat": 123})[0] == 400
+    assert call(app, "POST", "/settings/transit/inconnu", home)[0] == 400
+    assert call(app, "POST", "/settings/transit/home", home, token="faux")[0] == 401
+    assert call(app, "POST", "/settings/transit/home", home)[0] == 200
+    assert call(app, "GET", "/asset/transit/next")[1]["trip"]["home"] == home
 
 
 def test_fermer_lobby_et_client_verifies(app):

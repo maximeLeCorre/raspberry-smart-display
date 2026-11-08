@@ -104,14 +104,12 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Réglages")
-                    if HomePlace.configured {
-                        Button { showTrip = true } label: {
-                            Image(systemName: "house.fill").font(.system(size: 15))
-                                .foregroundStyle(Theme.accent)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Rentrer")
+                    Button { showTrip = true } label: {
+                        Image(systemName: "house.fill").font(.system(size: 15))
+                            .foregroundStyle(Theme.accent)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Rentrer")
                     Text("LolRemote").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.accent)
                     Spacer()
                     Label(status.text, systemImage: status.filled ? "circle.fill" : "circle")

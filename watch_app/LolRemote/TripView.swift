@@ -46,7 +46,7 @@ struct TripView: View {
 
     private func load() async {
         guard HomePlace.configured else {
-            status = "Domicile non configuré (secret HOME_COORDS)"
+            status = "Domicile non défini : Réglages (roue dentée) › Domicile"
             return
         }
         location.requestPermission()

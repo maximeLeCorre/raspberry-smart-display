@@ -56,6 +56,12 @@ class Module:
         thread-safe (cache disque, téléchargement)."""
         return None
 
+    def remote_setting(self, name: str, body: dict) -> bool:
+        """Réglage envoyé par la montre (`POST /settings/<module>/<name>`), True si
+        accepté. ⚠️ Thread HTTP, comme `remote_asset` : que du thread-safe. Marche
+        PC éteint (contrairement aux actions)."""
+        return False
+
     def on_remote_action(self, body: dict) -> tuple[int, dict] | None:
         """Action reçue par l'API télécommande : (statut HTTP, réponse) si ce
         module la gère, sinon None."""

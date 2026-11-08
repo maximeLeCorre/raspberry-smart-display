@@ -26,6 +26,7 @@ struct Train: Codable, Hashable {
 
 struct Board: Codable {
     let homeLabel: String?
+    let trip: TripConfig?           // clé IDFM + domicile (trajet retour hors Wi-Fi)
     let updated: Double             // relevé PRIM du Pi (epoch, 0 = jamais)
     let departures: [Train]
 }
@@ -84,6 +85,7 @@ struct Provider: TimelineProvider {
               (result.1 as? HTTPURLResponse)?.statusCode == 200,
               let board = try? JSONDecoder().decode(Board.self, from: result.0) else { return nil }
         UserDefaults.standard.set(result.0, forKey: cacheKey)
+        if let trip = board.trip { HomePlace.store(trip) }
         return board
     }
 

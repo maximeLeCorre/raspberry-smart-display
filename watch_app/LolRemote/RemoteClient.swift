@@ -223,6 +223,7 @@ final class RemoteClient: ObservableObject {
                 if !connected {
                     message = nil
                     SoundStore.shared.sync()              // 1re connexion : sons à jour
+                    Task { await HomePlace.sync() }       // clé IDFM + domicile (trajet retour)
                 }
                 connected = true
                 failures = 0

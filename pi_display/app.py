@@ -98,7 +98,8 @@ class App:
                                            self.remote_state, self.net_queue,
                                            token=remote_token,
                                            assets=self._remote_asset,
-                                           push_register=self.push.register)
+                                           push_register=self.push.register,
+                                           settings=self._remote_setting)
                 self.remote.start()
             except OSError as exc:
                 print(f"[remote] API HTTP non démarrée : {exc}")
@@ -307,6 +308,11 @@ class App:
         """Fichier d'un module pour l'API (thread HTTP : cf. `Module.remote_asset`)."""
         owner = self.modules.get(module)
         return owner.remote_asset(name) if owner is not None else None
+
+    def _remote_setting(self, module: str, name: str, body: dict) -> bool:
+        """Réglage envoyé par la montre (thread HTTP : cf. `Module.remote_setting`)."""
+        owner = self.modules.get(module)
+        return owner.remote_setting(name, body) if owner is not None else False
 
     def _on_remote_action(self, request) -> None:
         if not self.agent_connected:

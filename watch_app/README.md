@@ -40,9 +40,10 @@ triple, fortes au quadra/penta).
 ## Complication « Prochain train » et trajet retour
 Chez toi (Pi joignable ou < 300 m) : trains pour St-Lazare. Ailleurs : trajet le
 plus court pour rentrer (calculateur IDFM, temps réel) ; appui = détail, puis
-« Guider » ouvre Plans. Il faut 2 secrets GitHub en plus : `IDFM_API_KEY` (la même
-clé que le Pi) et `HOME_COORDS` = `latitude,longitude` du domicile (ex. `48.80,2.19` ;
-jamais dans le dépôt, il est public). Sans eux : trains seulement.
+« Guider » ouvre Plans. Domicile : Réglages de la montre › Domicile (adresse ou
+position actuelle), depuis chez toi : enregistré sur le Pi (`settings.db`, hors
+Git), qui le donne avec sa clé IDFM à l'app et à la complication (gardés pour
+servir dehors). Rien dans la CI ni dans le dépôt.
 Cadran : appui long → Modifier → onglet Complications → un emplacement →
 LolRemote → Prochain train. Cadran sans emplacement : tourner la couronne depuis
 le cadran (pile intelligente) → Modifier → « + ». Elle lit le Pi en Wi-Fi seul
