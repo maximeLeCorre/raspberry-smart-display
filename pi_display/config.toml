@@ -29,8 +29,8 @@ port = 8766
 # Accepter/Refuser, app fermée. Clé APNs .p8 dans certs/ (secrète, copiée par
 # deploy) ; key_id/team_id ne sont pas secrets. sandbox = false : TestFlight.
 enabled = true
-team_id = "TEAMID"
-key_id = "KEYID"            # ID de la clé APNs (pas secret ; la clé .p8 l'est)
+team_id = ""                     # ID d'équipe Apple : dans config.local.toml
+key_id = ""                      # ID de la clé APNs : dans config.local.toml
 key_file = "certs/apns_key.p8"
 topic = "fr.maxime.lolremote.watchkitapp"
 sandbox = false
@@ -51,7 +51,8 @@ max_items = 15           # nombre d'articles gardés (liste France Info)
 # Météo sous l'horloge de l'accueil. Le Pi interroge Open-Meteo lui-même
 # (gratuit, sans clé ; marche PC éteint). enabled = false pour masquer.
 enabled = true
-city = "Ville"        # nom affiché
+# Ville réelle dans config.local.toml (hors Git) ; ici un exemple.
+city = "Paris"           # nom affiché
 latitude = 48.8566
 longitude = 2.3522
 refresh_minutes = 15
@@ -95,14 +96,16 @@ regional = "europe"   # région : europe, americas, asia
 [lol]
 # Ton Riot ID "Nom#TAG" : indispensable pour l'historique (le Pi tire les
 # parties de CE compte). Vide = historique désactivé.
-summoner = "Joueur#EUW"   # compte dont on tire l'historique
+# Valeurs personnelles (summoner, friends, compare, lobby_invite, nicknames) :
+# dans config.local.toml (hors Git), jamais ici.
+summoner = ""   # compte dont on tire l'historique
 # Amis (premade) mis en évidence en ROSE sur l'écran de fin. "Nom#TAG"
 # (insensible à la casse). Ajoute d'autres potes réguliers ici.
-friends = ["Ami#EUW"]
+friends = []
 # Ami comparé sur l'écran STATS (Historique → STATS) : toi seul / lui seul /
 # vous deux dans la même équipe. Riot ID "Nom#TAG" ; doit être dans tes amis LoL
 # (l'agent lit ses 20 dernières parties via la LCU). Vide = écran sans ami.
-compare = "Ami#EUW"
+compare = ""
 # Scan automatique de l'historique (minutes) : le Pi demande à l'agent les
 # nouvelles parties à ce rythme (en plus de l'ouverture de l'historique et de
 # la connexion). Insensible au délai d'indexation LCU. 0 = scan périodique off.
@@ -113,7 +116,9 @@ sync_minutes = 3
 # invité s'il est en ligne ; vide = aucune invitation. La LCU ne cherche plus
 # par nom -> l'invité doit être dans tes amis.
 lobby_queue = 2400
-lobby_invite = "Ami"
+lobby_invite = ""
+# Surnoms affichés à la place de pseudos (rose fluo), ex. { "pseudo" = "SURNOM" }.
+nicknames = {}
 
 [server]
 # Écran « Serveur » : le Pi se connecte LUI-MÊME en SSH (clé) pour relever les
@@ -154,16 +159,16 @@ minecraft_port = 25565
 # Écran « Trains » : le Pi interroge lui-même l'API PRIM d'Île-de-France Mobilités.
 # Clé gratuite (prim.iledefrance-mobilites.fr) dans le .env : IDFM_API_KEY=… (hors Git).
 # Identifiants : open data IDFM (jeux « zones-d-arrets » et « referentiel-des-lignes »).
-station = "Gare"
-stop_area = "00000"          # zone d'arrêt (ZdA) ferrée de la gare
+# Gare réelle dans config.local.toml (hors Git) : station, stop_area, lignes, sens.
+station = ""                 # nom affiché (vide = écran sans données)
+stop_area = ""               # zone d'arrêt (ZdA) ferrée de la gare
 # Destinations rangées dans la 1re colonne (« vers Paris »), insensible à la casse.
-# La L va à Saint-Lazare, la U à La Défense (même quai, voie 2).
-paris_destinations = ["saint-lazare", "la défense"]
-direction_labels = ["Vers Paris · La Défense", "Vers Versailles · La Verrière"]
+paris_destinations = ["paris"]
+direction_labels = ["Vers Paris", "Autre sens"]
 # À droite de l'horloge : temps avant l'ENTRÉE EN GARE du prochain train vers…
-home_destination = "saint-lazare"   # (sous-chaîne de la destination, insensible à la casse)
-home_label = "St-Lazare"
-home_line = "L"
+home_destination = ""        # (sous-chaîne de la destination, insensible à la casse)
+home_label = ""
+home_line = ""
 # ⚠️ Quota PRIM : 1 000 requêtes/jour par endpoint (remis à zéro à minuit UTC).
 # Le rythme des départs s'adapte au quota restant (≈ 1 relevé / 90 s) ;
 # refresh_seconds n'est que le plancher. La nuit, un relevé toutes les N minutes.
@@ -173,9 +178,8 @@ night_refresh_minutes = 15
 messages_minutes = 5         # info trafic (une requête par ligne : 2 × 288 = 576/j)
 
 [transit.lines]
-# Lignes de la gare : id IDFM = lettre affichée (info trafic suivie pour chacune).
-C01740 = "L"   # Paris Saint-Lazare <-> Versailles Rive Droite
-C01741 = "U"   # La Défense <-> La Verrière
+# Lignes de la gare : id IDFM = lettre affichée (info trafic suivie pour chacune),
+# ex. C01740 = "L". Dans config.local.toml.
 
 [gpio]
 # Broches BCM des boutons physiques (uniquement sur le Pi, ignorées sur PC).

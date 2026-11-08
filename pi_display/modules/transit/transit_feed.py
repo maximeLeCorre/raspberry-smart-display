@@ -12,8 +12,8 @@ thread de fond rafraîchit ; l'écran lit un ``snapshot()`` thread-safe.
     toutes les ``messages_minutes``.
 
 Identifiants (open data IDFM, jeux « zones-d-arrets » / « referentiel-des-lignes ») :
-Gare = zone d'arrêt 00000, desservie par la L (C01740, Saint-Lazare ↔
-Versailles RD) **et la U** (C01741, La Défense ↔ La Verrière).
+une zone d'arrêt (`stop_area`) et ses lignes (ex. C01740 = ligne L), dans
+config.local.toml.
 Tolérant : en cas d'erreur, garde les dernières données et expose ``error``.
 
 ⚠️ **Quota PRIM : 1 000 requêtes/jour PAR endpoint** (compteurs séparés), remis à

@@ -26,8 +26,8 @@ from sender import Sender, msg_data, msg_set_screen
 
 # Équipe fictive (5 joueurs, dont nous) pour la sélection de champions.
 FAKE_TEAM = [
-    {"riotId": "Ami#EUW", "championId": 86, "championName": "Garen",
-     "position": "Top", "gameName": "Ami", "tagLine": "EUW", "isSelf": False},
+    {"riotId": "Coequipier#EUW", "championId": 86, "championName": "Garen",
+     "position": "Top", "gameName": "Coequipier", "tagLine": "EUW", "isSelf": False},
     {"riotId": "GankMaster#EUW", "championId": 64, "championName": "Lee Sin",
      "position": "Jungle", "gameName": "GankMaster", "tagLine": "EUW", "isSelf": False},
     {"riotId": "Joueur#EUW", "championId": 103, "championName": "Ahri",

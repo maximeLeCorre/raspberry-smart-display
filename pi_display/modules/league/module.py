@@ -26,6 +26,7 @@ import pygame
 from config import load_riot_key
 from icon_cache import IconCache
 from modules.base import Module
+from modules.league import names
 from modules.league.champ_select_screen import ChampSelectScreen
 from modules.league.counters_screen import CountersScreen
 from modules.league.history_screen import MatchHistoryScreen
@@ -60,6 +61,7 @@ class LeagueModule(Module):
         # Accès internet « League » (le Pi est autonome : API Web + CDN).
         riot_cfg = app.config.get("riot", {})
         lol_cfg = app.config.get("lol", {})
+        names.set_nicknames(lol_cfg.get("nicknames"))
         self.champions = Champions()
         self.riot = RiotWeb(load_riot_key(), riot_cfg.get("platform", "euw1"),
                             riot_cfg.get("regional", "europe"))

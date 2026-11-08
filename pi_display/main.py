@@ -41,7 +41,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    config = load_config(args.config)
+    config = load_config(args.config, local=True)
 
     # Plein écran : explicite, ou auto sur le Pi (sauf --windowed).
     on_pi = is_raspberry_pi()

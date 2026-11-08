@@ -62,7 +62,7 @@ def test_retro_remplissage_des_anciens_bilans(tmp_path):
     st._conn.commit()
     st2 = Store(path)                            # réouverture → rétro-remplissage
     wins = dict(st2._conn.execute("SELECT riot_key, win FROM participations").fetchall())
-    assert wins == {"moi#euw": 0, "Ami#euw": 0, "e#1": 1}
+    assert wins == {"moi#euw": 0, "ami#euw": 0, "e#1": 1}
 
 
 def test_synchro_ami_saute_les_parties_connues():

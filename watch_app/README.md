@@ -22,7 +22,7 @@ Icône : `gen_icon.py`.
    New repository secret, nom `WATCH_SIGNING`, coller (déjà dans le presse-papiers).
 4. **Fiche de l'app** : App Store Connect → Apps → « + » Nouvelle app,
    plateforme **iOS**, identifiant de lot `fr.maxime.lolremote`, nom unique
-   sur l'App Store (ex. « LolRemote Maxime »), SKU libre.
+   sur l'App Store, SKU libre.
 5. Lancer **Actions → watch_app_testflight → Run workflow**.
 6. App Store Connect → l'app → **TestFlight** → Test interne → créer un groupe,
    s'y ajouter. Sur l'iPhone : app **TestFlight** → installer ; l'app arrive sur

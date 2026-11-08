@@ -32,10 +32,25 @@ def is_raspberry_pi() -> bool:
         return False
 
 
-def load_config(path: str | Path) -> dict:
-    """Charge le fichier config.toml et renvoie un dictionnaire."""
+def _merge(base: dict, extra: dict) -> dict:
+    """Fusion récursive : les tables de `extra` complètent celles de `base`."""
+    out = dict(base)
+    for key, value in extra.items():
+        out[key] = _merge(out[key], value) if isinstance(value, dict) and isinstance(out.get(key), dict) else value
+    return out
+
+
+def load_config(path: str | Path, local: bool = False) -> dict:
+    """Charge config.toml. `local` : fusionne aussi `config.local.toml` (même dossier,
+    hors Git, copié sur le Pi par deploy) = réglages PERSONNELS (ville, gare, pseudos…)
+    qui n'ont rien à faire dans le dépôt public."""
     with open(path, "rb") as f:
-        return tomllib.load(f)
+        config = tomllib.load(f)
+    extra = Path(path).with_name("config.local.toml")
+    if local and extra.exists():
+        with open(extra, "rb") as f:
+            config = _merge(config, tomllib.load(f))
+    return config
 
 
 def load_auth_token() -> str:

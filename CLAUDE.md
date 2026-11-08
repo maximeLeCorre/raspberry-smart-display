@@ -97,9 +97,9 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
 **Sauvegarde** (`backup.py`, `[server.backup]`) : 1×/jour, copie SQLite cohérente de `matches.db`+`weather.db` → SFTP `~/pi-display-backups/<base>-AAAA-MM-JJ.db`, rotation `keep_days`.
 Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` TOFU). ⚠️ paramiko dans `requirements.txt` **et** le `pip` de `deploy_pi.py`.
 ### Trains (`transit`, Pi-only) — API **PRIM** IDFM, clé `IDFM_API_KEY` (.env), en-tête `apikey`
-`transit_feed.py` : `stop-monitoring` (ZdA `[transit] stop_area`, Ville RD = 00000) + `general-message` par ligne /5 min, SIRI Lite. ⚠️ **Quota 1 000 req/jour PAR endpoint** (RAZ minuit UTC) → rythme des départs calé sur `x-ratelimit-remaining-day` (`next_delay`), nuit 15 min, 429 = pause jusqu'au `retry-after`.
-⚠️ **2 lignes** : L (C01740) **et U** (C01741) → `[transit.lines]` ; 2 colonnes par direction (`paris_destinations`), états **écrits** ;
-**pas de tuile** (place libre, Actus via le bandeau) : on ouvre l'écran en touchant, à droite de l'horloge, l'**arrivée en gare** du prochain St-Lazare (`home_*`).
+`transit_feed.py` : `stop-monitoring` (ZdA `[transit] stop_area`) + `general-message` par ligne /5 min, SIRI Lite. ⚠️ **Quota 1 000 req/jour PAR endpoint** (RAZ minuit UTC) → rythme des départs calé sur `x-ratelimit-remaining-day` (`next_delay`), nuit 15 min, 429 = pause jusqu'au `retry-after`.
+plusieurs lignes possibles → `[transit.lines]` ; 2 colonnes par direction (`paris_destinations`), états **écrits** ;
+**pas de tuile** (place libre, Actus via le bandeau) : on ouvre l'écran en touchant, à droite de l'horloge, l'**arrivée en gare** du prochain train vers `home_destination` (`home_*`).
 
 ## API Riot & pièges
 - **LCU** (`pc_agent/lcu.py`, agent, client ouvert) : phase, sélection, historique, **actions**
@@ -140,7 +140,7 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
 - **Fonds** : PNG 800×480 dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres **dans le PNG** (code au pixel ;
   `default.png` = `tools/gen_default_bg.py` sur `default_base.png`). Code-drawn : `news`, `weather`, `transit`, `postgame`, `history`, `stats`, `server`.
 - **Tests** : **pytest** (`tests/`) → `.\.venv\Scripts\python -m pytest` **avant chaque déploiement** ; headless (`conftest.py`). Rendus : scripts jetables `_`.
-- **Git** : repo **public** `maximeLeCorre/raspberry-smart-display` (rien de sensible commité), branche `main`. Commits **en français**
+- **Git** : repo **public** (rien de sensible ni de personnel commité : réglages perso dans `pi_display/config.local.toml`, hors Git), branche `main`. Commits **en français**
   co-signés `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. **Pas de commit/push sans demande.**
 - **Déploiement** : `deploy/deploy_pi.py` (~10 s ; clé SSH `~/.ssh/id_ed25519`, repli `PI_PASS` ; empreinte Pi épinglée
   `deploy/known_hosts`). Deps apt/pip réinstallées **seulement si leur liste change** (`--full` force). Archive
