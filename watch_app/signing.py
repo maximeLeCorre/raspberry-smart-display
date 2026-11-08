@@ -1,7 +1,7 @@
 """Prépare la signature TestFlight de l'app montre, depuis Windows (sans Mac).
 
 Via l'API App Store Connect (clé « Admin » créée sur le site d'Apple) :
-identifiants d'app (coquille + montre + complication), certificat Apple Distribution (clé
+identifiants d'app (coquille + montre), certificat Apple Distribution (clé
 privée générée ici), profils App Store. Le tout est emballé (tar.gz → base64)
 dans UN secret GitHub, `WATCH_SIGNING`, copié dans le presse-papiers.
 
@@ -39,7 +39,6 @@ PI_URL = "http://192.168.1.52:8766"
 APPS = {
     "fr.maxime.lolremote": ("LolRemote", "LolRemote App Store"),
     "fr.maxime.lolremote.watchkitapp": ("LolRemote Watch", "LolRemote Watch App Store"),
-    "fr.maxime.lolremote.watchkitapp.trains": ("LolRemote Trains", "LolRemote Trains App Store"),
 }
 
 
@@ -190,8 +189,7 @@ def main() -> None:
            f"P12_PASSWORD={p12_password}\nREMOTE_API_TOKEN={token}\nPI_URL={PI_URL}\n")
     files = {"AuthKey.p8": key_p8, "dist.p12": p12, "signing.env": env.encode(),
              "app.mobileprovision": profiles["fr.maxime.lolremote"],
-             "watch.mobileprovision": profiles["fr.maxime.lolremote.watchkitapp"],
-             "trains.mobileprovision": profiles["fr.maxime.lolremote.watchkitapp.trains"]}
+             "watch.mobileprovision": profiles["fr.maxime.lolremote.watchkitapp"]}
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for name, data in files.items():

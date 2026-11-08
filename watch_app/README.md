@@ -7,9 +7,8 @@ Developer **payant** requis (TestFlight).
 
 Structure imposée par Apple : coquille iOS vide `LolRemote`
 (`fr.maxime.lolremote`) qui embarque l'app montre seule `LolRemoteWatch`
-(`fr.maxime.lolremote.watchkitapp`), qui embarque la complication « Prochain
-train » `LolRemoteTrains` (`….watchkitapp.trains`, WidgetKit, `Trains/`). Code
-commun app + complication : `Shared/`. Icône : `gen_icon.py`.
+(`fr.maxime.lolremote.watchkitapp`). Accès au Pi (Wi-Fi seul) : `Shared/`.
+Icône : `gen_icon.py`.
 
 ## Une seule fois (depuis le PC Windows)
 1. **Clé d'API** : appstoreconnect.apple.com → Utilisateurs et accès →
@@ -36,19 +35,6 @@ redéployer le Pi. La montre les télécharge une fois et les garde (nouvelle bu
 inutile pour en changer). Trop faibles ? Originaux dans `sounds/originals/`, puis
 `pi_display/tools/boost_sounds.py` (WAV normalisés et poussés). Sans fichier : vibrations seules (douces jusqu'au
 triple, fortes au quadra/penta).
-
-## Complication « Prochain train » et trajet retour
-Chez toi (Pi joignable ou < 300 m) : trains pour St-Lazare. Ailleurs : trajet le
-plus court pour rentrer (calculateur IDFM, temps réel) ; appui = détail, puis
-« Guider » ouvre Plans. Sans le Pi : domicile saisi sur la montre (Réglages ›
-Domicile), partagé avec la complication par l'App Group `group.fr.maxime.lolremote`
-(créé UNE fois à la main : developer.apple.com › Identifiers › « + » App Groups, puis
-cocher App Groups › ce groupe sur `….watchkitapp` et `….watchkitapp.trains`).
-Secret GitHub `IDFM_API_KEY` (même clé que le Pi) ; sans lui : trains seulement.
-Cadran : appui long → Modifier → onglet Complications → un emplacement →
-LolRemote → Prochain train. Cadran sans emplacement : tourner la couronne depuis
-le cadran (pile intelligente) → Modifier → « + ». Elle lit le Pi en Wi-Fi seul
-(hors maison : dernier relevé, « màj HH:MM »).
 
 ## Ensuite
 - Nouvelle version = relancer le workflow (build valable **90 jours**).

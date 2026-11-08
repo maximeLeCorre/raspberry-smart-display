@@ -282,25 +282,6 @@ def test_reponse_a_un_message(app):
             "body": "J'arrive !"} in app.sent
 
 
-def test_horaires_des_trains_pour_la_montre(app):
-    from modules.transit.transit_feed import Departure
-    assert call(app, "GET", "/asset/transit/next")[0] == 404              # pas de flux (sans clé)
-
-    class Feed:
-        def snapshot(self):
-            dep = Departure(when=2000.0, aimed=1880.0, destination="Paris Saint-Lazare", mission="",
-                            platform="2", status="delayed", at_stop=False, to_paris=True, line="L",
-                            arrival=1990.0)
-            return {"departures": [dep], "messages": [], "updated": 1900.0, "error": ""}
-    app._transit_feed = Feed()
-    status, board = call(app, "GET", "/asset/transit/next")
-    assert status == 200 and board["updated"] == 1900.0
-    assert board["homeLabel"] == "St-Lazare"
-    assert board["departures"] == [{"line": "L", "destination": "Paris St-Lazare", "time": 2000.0,
-                                    "arrival": 1990.0, "delay": 2, "cancelled": False,
-                                    "platform": "2", "toParis": True, "home": True}]
-
-
 def test_fermer_lobby_et_client_verifies(app):
     push(app, type="_connected")
     time.sleep(0.1)

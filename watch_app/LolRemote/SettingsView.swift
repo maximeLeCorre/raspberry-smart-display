@@ -1,9 +1,6 @@
-// Réglages, gardés sur la montre : retours de kill (vibrations, son) et domicile du
-// trajet retour (adresse → coordonnées, dans l'App Group : la complication le lit).
-import CoreLocation
+// Réglages des retours de kill (vibrations, son), gardés sur la montre (@AppStorage).
 import SwiftUI
 import WatchKit
-import WidgetKit
 
 /// Clés et valeurs par défaut, partagées avec KillFeedback.
 enum KillSettings {
@@ -33,10 +30,6 @@ struct SettingsView: View {
     @AppStorage(KillSettings.repeatKey) private var repeats = 2
     @AppStorage(KillSettings.soundKey) private var soundOn = true
     @AppStorage(KillSettings.volumeKey) private var volume = 1.0
-    @AppStorage("homeLabel", store: UserDefaults(suiteName: HomePlace.group)) private var homeLabel = ""
-    @State private var address = ""
-    @State private var homeStatus: String?
-    @State private var location = LocationOnce()
 
     var body: some View {
         NavigationStack {
@@ -64,22 +57,6 @@ struct SettingsView: View {
                 } footer: {
                     Text("Au maximum, le son suit le volume de la montre (Réglages › Sons et vibrations).")
                 }
-                Section {
-                    Text(homeLabel.isEmpty ? "Non défini" : homeLabel)
-                        .font(.system(size: 13)).foregroundStyle(homeLabel.isEmpty ? Theme.muted : .white)
-                    TextField("Saisir l'adresse", text: $address)
-                        .onSubmit { Task { await saveAddress() } }
-                    Button { Task { await saveHere() } } label: {
-                        Label("Ma position actuelle", systemImage: "location.fill")
-                    }
-                    if let homeStatus {
-                        Text(homeStatus).font(.system(size: 12)).foregroundStyle(Theme.muted)
-                    }
-                } header: {
-                    Text("Domicile")
-                } footer: {
-                    Text("Pour le trajet retour (complication et écran Rentrer).")
-                }
                 Section("Tester") {
                     ForEach(1...5, id: \.self) { level in
                         Button(["Kill", "Double kill", "Triple kill", "Quadrakill", "Pentakill"][level - 1]) {
@@ -90,45 +67,5 @@ struct SettingsView: View {
             }
             .navigationTitle("Réglages")
         }
-    }
-
-    private func saveAddress() async {
-        let query = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return }
-        homeStatus = "Recherche…"
-        guard let place = try? await CLGeocoder().geocodeAddressString(query).first,
-              let found = place.location else {
-            homeStatus = "Adresse introuvable"
-            WKInterfaceDevice.current().play(.failure)
-            return
-        }
-        save(found, label: describe(place) ?? query)
-    }
-
-    private func saveHere() async {
-        location.requestPermission()
-        homeStatus = "Localisation…"
-        guard let here = await location.current(maxAge: 60) else {
-            homeStatus = location.authorized ? "Position introuvable" : "Autorise la localisation"
-            WKInterfaceDevice.current().play(.failure)
-            return
-        }
-        let place = try? await CLGeocoder().reverseGeocodeLocation(here).first
-        save(here, label: place.flatMap(describe) ?? "Ma position")
-    }
-
-    private func save(_ place: CLLocation, label: String) {
-        HomePlace.setHome(lat: place.coordinate.latitude, lon: place.coordinate.longitude, label: label)
-        homeLabel = label
-        address = ""
-        homeStatus = "Enregistré"
-        WKInterfaceDevice.current().play(.success)
-        WidgetCenter.shared.reloadAllTimelines()      // la complication en tient compte tout de suite
-    }
-
-    /// « 12 rue X, Ville ».
-    private func describe(_ place: CLPlacemark) -> String? {
-        let text = [place.name, place.locality].compactMap { $0 }.joined(separator: ", ")
-        return text.isEmpty ? nil : text
     }
 }

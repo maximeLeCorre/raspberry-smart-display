@@ -1,6 +1,5 @@
 import SwiftUI
 import WatchKit
-import WidgetKit
 
 @main
 struct LolRemoteApp: App {
@@ -18,7 +17,6 @@ struct LolRemoteApp: App {
             if phase == .active {
                 client.resume()
                 WKApplication.shared().registerForRemoteNotifications()   // jeton renvoyé au Pi
-                WidgetCenter.shared.reloadAllTimelines()   // complication train : relevé frais
             } else if phase == .background {
                 client.stop()
             }

@@ -69,18 +69,12 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Connexion au Pi
-        NSLocationWhenInUseUsageDescription: Trajet le plus court pour rentrer chez toi
-        CFBundleURLTypes:   # lolremote://trip = appui sur la complication
-          - CFBundleURLName: fr.maxime.lolremote.watchkitapp
-            CFBundleURLSchemes: [lolremote]
         # Session longue (GameSession.swift) : vibrer à nos kills poignet baissé.
         WKBackgroundModes: [physical-therapy]
     entitlements:
       path: build/LolRemote.entitlements
       properties:
         aps-environment: production   # notifications push (builds TestFlight)
-        # Domicile partagé avec la complication (groupe créé à la main, cf. README).
-        com.apple.security.application-groups: [group.fr.maxime.lolremote]
     settings:
       base:
         PRODUCT_NAME: LolRemote
@@ -92,36 +86,3 @@ targets:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: Apple Distribution
           PROVISIONING_PROFILE_SPECIFIER: LolRemote Watch App Store
-    dependencies:
-      - target: LolRemoteTrains   # complication, embarquée dans PlugIns/
-  # Complication / widget « Prochain train » (WidgetKit) : trains (Pi) ou trajet retour (IDFM).
-  LolRemoteTrains:
-    type: app-extension
-    platform: watchOS
-    sources: [Trains, Shared, LolRemote/Secrets.swift]
-    info:
-      path: build/Trains-Info.plist
-      properties:
-        CFBundleDisplayName: Prochain train
-        CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.widgetkit-extension
-        NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: Horaires des trains lus sur le Pi
-        NSLocationWhenInUseUsageDescription: Trajet le plus court pour rentrer chez toi
-        NSWidgetWantsLocation: true   # hors de chez soi : trajet retour
-    entitlements:
-      path: build/Trains.entitlements
-      properties:
-        com.apple.security.application-groups: [group.fr.maxime.lolremote]
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: fr.maxime.lolremote.watchkitapp.trains
-        SKIP_INSTALL: true
-      configs:
-        Release:
-          CODE_SIGN_STYLE: Manual
-          CODE_SIGN_IDENTITY: Apple Distribution
-          PROVISIONING_PROFILE_SPECIFIER: LolRemote Trains App Store

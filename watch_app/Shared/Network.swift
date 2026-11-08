@@ -1,4 +1,4 @@
-// Accès au Pi, partagé par l'app et la complication « Prochain train » (Trains/).
+// Accès au Pi (Wi-Fi seul), pour l'app montre.
 import Foundation
 
 /// Session vers le Pi en **Wi-Fi seul**. Près de l'iPhone, watchOS fait passer le

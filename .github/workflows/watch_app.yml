@@ -52,4 +52,3 @@ jobs:
           # Attendu : ApplicationProperties (= archive d'app) et la montre dans Watch/.
           plutil -extract ApplicationProperties.ApplicationPath raw build/LolRemote.xcarchive/Info.plist
           test -d build/LolRemote.xcarchive/Products/Applications/LolRemote.app/Watch/LolRemote.app
-          test -d build/LolRemote.xcarchive/Products/Applications/LolRemote.app/Watch/LolRemote.app/PlugIns/LolRemoteTrains.appex
