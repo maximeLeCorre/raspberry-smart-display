@@ -1,26 +1,19 @@
 // Trajet retour (hors de chez soi) : position de la montre → calculateur
 // d'itinéraires d'IDFM (Navitia via PRIM, temps réel) → domicile. Partagé par
 // l'app (TripView) et la complication. Appel DIRECT à Internet (pas le Pi : il
-// n'est joignable que de la maison). Clé IDFM et domicile viennent du Pi
-// (`trip` de /asset/transit/next ; domicile saisi dans les Réglages de la montre) et
-// sont gardés sur la montre pour servir dehors. Quota PRIM : 1 000 trajets / jour.
+// n'est joignable que de la maison) : marche sans le Pi. Domicile saisi dans les
+// Réglages, gardé dans l'App Group (partagé app ↔ complication) ; clé IDFM =
+// Secrets (secret GitHub IDFM_API_KEY). Quota PRIM : 1 000 trajets / jour.
 import CoreLocation
 import Foundation
 
-/// `trip` de /asset/transit/next : clé IDFM du Pi + domicile enregistré.
-struct TripConfig: Codable {
-    struct Place: Codable { let lat: Double; let lon: Double; let label: String }
-    let key: String
-    let home: Place?
-}
-
-/// Domicile et clé, gardés dans les UserDefaults de CHAQUE processus (app et
-/// complication n'en partagent pas : chacun les reçoit du Pi).
 enum HomePlace {
-    private static let defaults = UserDefaults.standard
-    static var idfmKey: String { defaults.string(forKey: "tripKey") ?? "" }
+    /// Groupe partagé app + complication (créé sur developer.apple.com, cf. README).
+    static let group = "group.fr.maxime.lolremote"
+    private static var defaults: UserDefaults { UserDefaults(suiteName: group) ?? .standard }
+
     static var label: String? { defaults.string(forKey: "homeLabel") }
-    static var configured: Bool { !idfmKey.isEmpty && defaults.object(forKey: "homeLat") != nil }
+    static var configured: Bool { !Secrets.idfmKey.isEmpty && defaults.object(forKey: "homeLat") != nil }
     static var location: CLLocation {
         CLLocation(latitude: defaults.double(forKey: "homeLat"), longitude: defaults.double(forKey: "homeLon"))
     }
@@ -31,21 +24,6 @@ enum HomePlace {
         defaults.set(lat, forKey: "homeLat")
         defaults.set(lon, forKey: "homeLon")
         defaults.set(label, forKey: "homeLabel")
-    }
-
-    static func store(_ config: TripConfig) {
-        if !config.key.isEmpty { defaults.set(config.key, forKey: "tripKey") }
-        if let home = config.home { setHome(lat: home.lat, lon: home.lon, label: home.label) }
-    }
-
-    /// Relit clé et domicile sur le Pi (Wi-Fi de la maison) ; sans effet ailleurs.
-    static func sync() async {
-        struct Reply: Decodable { let trip: TripConfig? }
-        let session = wifiSession(.ephemeral, timeout: 8)
-        guard let result = try? await session.data(for: apiRequest("/asset/transit/next")),
-              (result.1 as? HTTPURLResponse)?.statusCode == 200,
-              let trip = (try? JSONDecoder().decode(Reply.self, from: result.0))?.trip else { return }
-        store(trip)
     }
 }
 
@@ -134,7 +112,7 @@ func fetchTripHome(from here: CLLocation) async -> Trip? {
         URLQueryItem(name: "disable_geojson", value: "true"),
     ]
     var req = URLRequest(url: parts.url!)
-    req.setValue(HomePlace.idfmKey, forHTTPHeaderField: "apikey")
+    req.setValue(Secrets.idfmKey, forHTTPHeaderField: "apikey")
     guard let result = try? await tripSession.data(for: req),
           (result.1 as? HTTPURLResponse)?.statusCode == 200,
           let response = try? JSONDecoder().decode(NavitiaResponse.self, from: result.0),

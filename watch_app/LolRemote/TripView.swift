@@ -46,7 +46,8 @@ struct TripView: View {
 
     private func load() async {
         guard HomePlace.configured else {
-            status = "Domicile non défini : Réglages (roue dentée) › Domicile"
+            status = Secrets.idfmKey.isEmpty ? "Clé IDFM absente (secret GitHub IDFM_API_KEY)"
+                                             : "Domicile non défini : Réglages (roue dentée) › Domicile"
             return
         }
         location.requestPermission()

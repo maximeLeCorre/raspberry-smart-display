@@ -1,9 +1,9 @@
-// Réglages : retours de kill (vibrations, son, gardés sur la montre) et domicile
-// du trajet retour (adresse → coordonnées, enregistrées sur le Pi : la
-// complication les y reprend).
+// Réglages, gardés sur la montre : retours de kill (vibrations, son) et domicile du
+// trajet retour (adresse → coordonnées, dans l'App Group : la complication le lit).
 import CoreLocation
 import SwiftUI
 import WatchKit
+import WidgetKit
 
 /// Clés et valeurs par défaut, partagées avec KillFeedback.
 enum KillSettings {
@@ -33,7 +33,7 @@ struct SettingsView: View {
     @AppStorage(KillSettings.repeatKey) private var repeats = 2
     @AppStorage(KillSettings.soundKey) private var soundOn = true
     @AppStorage(KillSettings.volumeKey) private var volume = 1.0
-    @AppStorage("homeLabel") private var homeLabel = ""
+    @AppStorage("homeLabel", store: UserDefaults(suiteName: HomePlace.group)) private var homeLabel = ""
     @State private var address = ""
     @State private var homeStatus: String?
     @State private var location = LocationOnce()
@@ -78,7 +78,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Domicile")
                 } footer: {
-                    Text("Pour le trajet retour. À enregistrer depuis chez toi (Wi-Fi du Pi).")
+                    Text("Pour le trajet retour (complication et écran Rentrer).")
                 }
                 Section("Tester") {
                     ForEach(1...5, id: \.self) { level in
@@ -99,9 +99,10 @@ struct SettingsView: View {
         guard let place = try? await CLGeocoder().geocodeAddressString(query).first,
               let found = place.location else {
             homeStatus = "Adresse introuvable"
+            WKInterfaceDevice.current().play(.failure)
             return
         }
-        await save(found, label: describe(place) ?? query)
+        save(found, label: describe(place) ?? query)
     }
 
     private func saveHere() async {
@@ -109,27 +110,20 @@ struct SettingsView: View {
         homeStatus = "Localisation…"
         guard let here = await location.current(maxAge: 60) else {
             homeStatus = location.authorized ? "Position introuvable" : "Autorise la localisation"
-            return
-        }
-        let place = try? await CLGeocoder().reverseGeocodeLocation(here).first
-        await save(here, label: place.flatMap(describe) ?? "Ma position")
-    }
-
-    /// Enregistré sur le Pi (pour la complication) ET sur la montre (pour l'app).
-    private func save(_ place: CLLocation, label: String) async {
-        let lat = place.coordinate.latitude, lon = place.coordinate.longitude
-        let code = await postToPi("/settings/transit/home", ["lat": lat, "lon": lon, "label": label])
-        guard code == 200 else {
-            homeStatus = code == 0 ? "Pi injoignable : enregistre depuis chez toi" : "Refusé par le Pi (\(code))"
             WKInterfaceDevice.current().play(.failure)
             return
         }
-        HomePlace.setHome(lat: lat, lon: lon, label: label)
+        let place = try? await CLGeocoder().reverseGeocodeLocation(here).first
+        save(here, label: place.flatMap(describe) ?? "Ma position")
+    }
+
+    private func save(_ place: CLLocation, label: String) {
+        HomePlace.setHome(lat: place.coordinate.latitude, lon: place.coordinate.longitude, label: label)
         homeLabel = label
         address = ""
         homeStatus = "Enregistré"
         WKInterfaceDevice.current().play(.success)
-        await HomePlace.sync()              // clé IDFM, si pas encore reçue
+        WidgetCenter.shared.reloadAllTimelines()      // la complication en tient compte tout de suite
     }
 
     /// « 12 rue X, Ville ».

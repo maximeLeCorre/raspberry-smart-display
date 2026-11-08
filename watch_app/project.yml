@@ -79,6 +79,8 @@ targets:
       path: build/LolRemote.entitlements
       properties:
         aps-environment: production   # notifications push (builds TestFlight)
+        # Domicile partagé avec la complication (groupe créé à la main, cf. README).
+        com.apple.security.application-groups: [group.fr.maxime.lolremote]
     settings:
       base:
         PRODUCT_NAME: LolRemote
@@ -110,6 +112,10 @@ targets:
         NSLocalNetworkUsageDescription: Horaires des trains lus sur le Pi
         NSLocationWhenInUseUsageDescription: Trajet le plus court pour rentrer chez toi
         NSWidgetWantsLocation: true   # hors de chez soi : trajet retour
+    entitlements:
+      path: build/Trains.entitlements
+      properties:
+        com.apple.security.application-groups: [group.fr.maxime.lolremote]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fr.maxime.lolremote.watchkitapp.trains

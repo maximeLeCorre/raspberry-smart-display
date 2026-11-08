@@ -80,11 +80,10 @@ class RemoteServer:
     """Serveur HTTP/1.1 (keep-alive) en thread démon."""
 
     def __init__(self, host: str, port: int, state: RemoteState, event_queue,
-                 token: str = "", assets=None, push_register=None, settings=None):
+                 token: str = "", assets=None, push_register=None):
         self.state = state
         self.assets = assets      # (module, nom) -> (octets, type MIME) | None
         self.push_register = push_register   # jeton APNs -> bool (thread-safe)
-        self.settings = settings  # (module, nom, corps) -> bool : réglage venu de la montre
         self.event_queue = event_queue
         self.token = token or ""
         self._httpd = ThreadingHTTPServer((host, port), self._handler_class())
@@ -173,7 +172,7 @@ class RemoteServer:
 
             def do_POST(self):
                 path = urlparse(self.path).path
-                if path not in ("/action", "/push/register") and not path.startswith("/settings/"):
+                if path not in ("/action", "/push/register"):
                     return self._send(404, {"ok": False, "error": "route inconnue"})
                 if not self._authorized():
                     return
@@ -184,11 +183,6 @@ class RemoteServer:
                     body = json.loads(self.rfile.read(length) or b"{}")
                 except json.JSONDecodeError:
                     return self._send(400, {"ok": False, "error": "JSON invalide"})
-                if path.startswith("/settings/"):     # /settings/<module>/<nom>
-                    module, _, name = path[len("/settings/"):].partition("/")
-                    ok = bool(isinstance(body, dict) and server.settings and name
-                              and server.settings(module, name, body))
-                    return self._send(200 if ok else 400, {"ok": ok})
                 if path == "/push/register":
                     ok = bool(isinstance(body, dict) and server.push_register
                               and server.push_register(str(body.get("token", ""))))

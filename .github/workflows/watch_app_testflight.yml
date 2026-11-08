@@ -54,12 +54,15 @@ jobs:
               cp "$profile" "$dir/$uuid.mobileprovision"
             done
           done
-      - name: Jeton du Pi dans Secrets.swift
+      - name: Jeton du Pi et clé IDFM dans Secrets.swift
+        env:
+          IDFM_API_KEY: ${{ secrets.IDFM_API_KEY }}   # trajet retour (vide = désactivé)
         run: |
           cat > watch_app/LolRemote/Secrets.swift <<EOF
           enum Secrets {
               static let baseURL = "$PI_URL"
               static let token = "$REMOTE_API_TOKEN"
+              static let idfmKey = "$IDFM_API_KEY"
           }
           EOF
       - name: XcodeGen

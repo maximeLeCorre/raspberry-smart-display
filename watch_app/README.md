@@ -40,10 +40,11 @@ triple, fortes au quadra/penta).
 ## Complication « Prochain train » et trajet retour
 Chez toi (Pi joignable ou < 300 m) : trains pour St-Lazare. Ailleurs : trajet le
 plus court pour rentrer (calculateur IDFM, temps réel) ; appui = détail, puis
-« Guider » ouvre Plans. Domicile : Réglages de la montre › Domicile (adresse ou
-position actuelle), depuis chez toi : enregistré sur le Pi (`settings.db`, hors
-Git), qui le donne avec sa clé IDFM à l'app et à la complication (gardés pour
-servir dehors). Rien dans la CI ni dans le dépôt.
+« Guider » ouvre Plans. Sans le Pi : domicile saisi sur la montre (Réglages ›
+Domicile), partagé avec la complication par l'App Group `group.fr.maxime.lolremote`
+(créé UNE fois à la main : developer.apple.com › Identifiers › « + » App Groups, puis
+cocher App Groups › ce groupe sur `….watchkitapp` et `….watchkitapp.trains`).
+Secret GitHub `IDFM_API_KEY` (même clé que le Pi) ; sans lui : trains seulement.
 Cadran : appui long → Modifier → onglet Complications → un emplacement →
 LolRemote → Prochain train. Cadran sans emplacement : tourner la couronne depuis
 le cadran (pile intelligente) → Modifier → « + ». Elle lit le Pi en Wi-Fi seul
