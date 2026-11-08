@@ -1,6 +1,6 @@
 // Réponse à un message privé du client League : réponses rapides directement
-// dans la notification, ou « Répondre… » qui ouvre cet écran (réponses rapides +
-// dictée / gribouillage / clavier). Envoi : action `chat_reply` du Pi → agent →
+// dans la notification, ou « Répondre… » qui ouvre cet écran (dictée en tête, puis
+// réponses rapides ; gribouillage / clavier aussi). Envoi : action `chat_reply` du Pi → agent →
 // LCU. (Pas de champ de texte DANS la notification : indisponible sur watchOS.)
 import SwiftUI
 import UserNotifications
@@ -49,19 +49,25 @@ struct ReplyView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Dictée en tête : le champ ouvre la saisie de watchOS (micro, gribouillage,
+                // clavier) ; une app ne peut pas lancer la dictée elle-même. « OK » = envoi.
                 Section {
-                    ForEach(QuickReplies.all, id: \.self) { reply in
-                        Button(reply) { send(reply) }
+                    TextField(text: $text) {
+                        Label("Dicter un message", systemImage: "mic.fill")
                     }
-                }
-                Section {
-                    TextField("Écrire…", text: $text)
-                        .onSubmit { send(text) }
+                    .onSubmit { send(text) }
                 } footer: {
                     if failed {
                         Label("Non envoyé : PC ou Pi injoignable", systemImage: "exclamationmark.triangle.fill")
                     } else if sending {
                         Label("Envoi…", systemImage: "paperplane")
+                    } else {
+                        Text("Touche, puis le micro. Envoyé dès que tu valides.")
+                    }
+                }
+                Section("Réponses rapides") {
+                    ForEach(QuickReplies.all, id: \.self) { reply in
+                        Button(reply) { send(reply) }
                     }
                 }
             }
