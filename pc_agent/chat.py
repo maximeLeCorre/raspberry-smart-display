@@ -24,13 +24,15 @@ def _timestamp(value: str) -> float:
 
 def build_last_message(lcu: LcuClient, since: float) -> dict | None:
     """Message privé non lu le plus récent, reçu après `since` (epoch s), sinon None.
-    `since` évite de notifier au démarrage de l'agent un vieux message non lu."""
+    `since` évite de notifier au démarrage de l'agent un vieux message non lu.
+    `isHistorical` est ignoré : la LCU le met à true même sur un message reçu en direct
+    (constaté le 9 nov. 2026), il bloquait toutes les notifications."""
     me = (lcu.get_json(ME_PATH) or {}).get("id")
     best = None
     for conv in lcu.get_json(CONVERSATIONS_PATH) or []:
         msg = conv.get("lastMessage") or {}
         if (conv.get("type") != "chat" or not conv.get("unreadMessageCount")
-                or not msg.get("id") or msg.get("fromId") == me or msg.get("isHistorical")):
+                or not msg.get("id") or msg.get("fromId") == me):
             continue
         sent = _timestamp(msg.get("timestamp", ""))
         if sent < since or (best and sent <= best["t"]):
