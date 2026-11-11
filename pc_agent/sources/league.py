@@ -23,6 +23,7 @@ from lobby import (INVITES_PATH, LOBBY_PATH, SEARCH_PATH, SEND_INVITES_PATH,
                    build_invitation, build_lobby_payload)
 from lcu import LcuClient, find_lcu_credentials
 from lcu_events import LcuEventListener
+from live_events import LiveEventWatcher
 from riot_client import RiotClient
 from phases import (build_lcu_detail, build_lcu_timeline, build_queue_payload,
                     find_friend_puuid, iter_lcu_sync, iter_player_sync)
@@ -88,6 +89,7 @@ class LeagueSource(Source):
         lol_cfg = config.get("lol", {})
         self._launch_exe = (lol_cfg.get("launch_exe") or "").strip()
         self._launch_args = list(lol_cfg.get("launch_args", []))
+        self._live_events: LiveEventWatcher | None = None   # kills en partie
 
         # (prédicat sur la phase, écran, constructeur du payload)
         self._rules = [
@@ -112,9 +114,13 @@ class LeagueSource(Source):
 
     def start(self, wake) -> None:
         LcuEventListener(wake).start()
+        self._live_events = LiveEventWatcher(wake)   # kills : réveil en ~250 ms
+        self._live_events.start()
 
     def poll(self):
         phase = self.lcu.gameflow_phase()
+        if self._live_events is not None:
+            self._live_events.set_active(phase == "InProgress")
         if phase is None:             # client fermé -> League inactif
             if self._client_sent:     # (une fois) effacer le lobby affiché
                 self._client_sent = False

@@ -16,6 +16,10 @@ from objectives import compute_objectives
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 ALL_GAME_DATA_URL = "https://127.0.0.1:2999/liveclientdata/allgamedata"
+# Connexion TLS gardée ouverte d'un relevé à l'autre (~1/s en partie) ; utilisée
+# par la boucle principale seulement (live_events.py a la sienne).
+_session = requests.Session()
+_session.verify = False
 
 
 def get_all_game_data(timeout: float = 1.0) -> dict | None:
@@ -24,7 +28,7 @@ def get_all_game_data(timeout: float = 1.0) -> dict | None:
     None signifie : pas en partie, API pas encore prête, ou erreur réseau.
     """
     try:
-        response = requests.get(ALL_GAME_DATA_URL, verify=False, timeout=timeout)
+        response = _session.get(ALL_GAME_DATA_URL, timeout=timeout)
     except requests.RequestException:
         return None
     if response.status_code != 200:
