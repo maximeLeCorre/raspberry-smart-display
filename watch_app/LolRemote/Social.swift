@@ -26,7 +26,83 @@ struct FriendsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                NavigationLink { AllFriendsView() } label: {
+                    MenuRow(icon: "bell.badge", title: "Tous les amis", value: "suivre", dimmed: true)
+                }
+                .buttonStyle(.plain)
             }
+        }
+    }
+}
+
+struct DirectoryFriend: Codable, Hashable, Identifiable {
+    let name: String
+    let riotId: String
+    var id: String { riotId }
+}
+
+private struct DirectoryResponse: Codable {
+    let friends: [DirectoryFriend]
+}
+
+private let directorySession = wifiSession(.ephemeral, timeout: 10)
+
+/// Every friend, offline ones included: the Pi keeps the last list seen, so it
+/// works with the PC off. nil = Pi unreachable.
+func loadFriendDirectory() async -> [DirectoryFriend]? {
+    guard let result = try? await directorySession.data(for: apiRequest("/asset/league/friends")),
+          (result.1 as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+    return (try? JSONDecoder().decode(DirectoryResponse.self, from: result.0))?.friends
+}
+
+/// Every friend (connected or not), to choose who to follow.
+struct AllFriendsView: View {
+    @EnvironmentObject var client: RemoteClient
+    @State private var directory: [DirectoryFriend]?
+    @State private var failed = false
+
+    private var followed: Set<String> {
+        Set((client.state?.settings?.follows ?? []).map { $0.riotId.lowercased() })
+    }
+    private var online: [String: String] {
+        (client.state?.home?.friends ?? []).reduce(into: [:]) { $0[$1.riotId.lowercased()] = $1.state }
+    }
+
+    var body: some View {
+        List {
+            if let directory {
+                Section {
+                    ForEach(directory) { friend in
+                        let key = friend.riotId.lowercased()
+                        NavigationLink { FollowDetailView(riotId: friend.riotId) } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(friend.name).lineLimit(1)
+                                    Text(online[key] ?? "hors ligne").font(.system(size: 11))
+                                        .foregroundStyle(Theme.muted)
+                                }
+                                Spacer(minLength: 4)
+                                if followed.contains(key) {
+                                    Label("suivi", systemImage: "bell.fill").labelStyle(.iconOnly)
+                                        .foregroundStyle(Theme.accent).accessibilityLabel("suivi")
+                                }
+                            }
+                        }
+                    }
+                } footer: {
+                    Text(directory.isEmpty ? "Liste vide : ouvre League une fois sur le PC."
+                                           : "Touche un ami pour choisir ce qui le notifie.")
+                }
+            } else if failed {
+                Text("Pi injoignable").foregroundStyle(Theme.muted)
+            } else {
+                ProgressView()
+            }
+        }
+        .navigationTitle("Tous les amis")
+        .task {
+            directory = await loadFriendDirectory()
+            failed = directory == nil
         }
     }
 }
@@ -211,7 +287,7 @@ struct FollowsView: View {
                         }
                     }
                 }
-                NavigationLink { AddFollowView() } label: {
+                NavigationLink { AllFriendsView() } label: {
                     Label("Ajouter un ami", systemImage: "plus.circle.fill").foregroundStyle(Theme.accent)
                 }
             } footer: {
@@ -219,39 +295,6 @@ struct FollowsView: View {
             }
         }
         .navigationTitle("Amis suivis")
-    }
-}
-
-/// Connected friends not followed yet (the list comes from the open League client).
-struct AddFollowView: View {
-    @EnvironmentObject var client: RemoteClient
-    @Environment(\.dismiss) private var dismiss
-
-    private var candidates: [OnlineFriend] {
-        (client.state?.home?.friends ?? []).filter { $0.followed != true }
-    }
-
-    var body: some View {
-        List {
-            Section {
-                ForEach(candidates) { friend in
-                    Button {
-                        client.send(["action": "set_follow", "riotId": friend.riotId,
-                                     "online": true, "leave": true, "enter": false])
-                        dismiss()
-                    } label: {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(friend.name)
-                            Text(friend.state).font(.system(size: 11)).foregroundStyle(Theme.muted)
-                        }
-                    }
-                }
-            } footer: {
-                Text(candidates.isEmpty ? "Ouvre League sur le PC : seuls les amis connectés sont listés."
-                                        : "Suivi : connexion + sortie de partie (modifiable ensuite).")
-            }
-        }
-        .navigationTitle("Ajouter")
     }
 }
 

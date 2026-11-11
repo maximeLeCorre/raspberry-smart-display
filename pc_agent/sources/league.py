@@ -129,7 +129,7 @@ class LeagueSource(Source):
             if self._client_sent:     # (une fois) effacer le lobby affiché
                 self._client_sent = False
                 return ("default", {"client": False, "lobby": None, "invitation": None, "chat": None,
-                                    "friendsOnline": None, "rewards": None, "reconnect": False})
+                                    "friendList": None, "rewards": None, "reconnect": False})
             return None
         for matches, screen, build in self._rules:
             if matches(phase):
@@ -143,7 +143,7 @@ class LeagueSource(Source):
         message = chat.build_last_message(self.lcu, self._started)   # message privé reçu
         self._client_sent = True
         return ("default", {"client": True, "lobby": lobby, "invitation": invitation,
-                            "chat": message, "friendsOnline": social.build_friends(self.lcu),
+                            "chat": message, "friendList": social.build_friends(self.lcu),
                             "rewards": self._rewards.get(self.lcu), "reconnect": phase == "Reconnect"})
 
     def handle_request(self, message: dict, sender) -> bool:

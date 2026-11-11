@@ -1,6 +1,8 @@
 """Settings made from the watch, kept on the Pi (`watch.db`): followed friends
-(notifications) and the Play button (queue + invited friends). Stored as one
-JSON row, rewritten on every change. Main-thread only.
+(notifications), the Play button (queue + invited friends) and the last known
+friend list (so friends can be followed with the PC off). Stored as one JSON
+row, rewritten on every change. Written from the main thread only; `directory`
+is replaced as a whole, so the HTTP thread can read it.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ class WatchSettings:
         self.follows: dict[str, dict] = {}       # lowercase riotId -> {riotId, online, leave, enter}
         self.queue_id = default_queue
         self.invites = [r for r in default_invites if r]
+        self.directory: tuple = ()               # ({name, riotId}, ...) sorted by name
         row = self._db.execute("SELECT value FROM kv WHERE key = 'settings'").fetchone()
         if row:
             try:
@@ -44,9 +47,11 @@ class WatchSettings:
             self.follows = {k: v for k, v in (saved.get("follows") or {}).items() if isinstance(v, dict)}
             self.queue_id = int(saved.get("queueId") or default_queue)
             self.invites = [r for r in saved.get("invites") or [] if isinstance(r, str)]
+            self.directory = tuple(d for d in saved.get("directory") or [] if isinstance(d, dict))
 
     def _save(self) -> None:
-        data = json.dumps({"follows": self.follows, "queueId": self.queue_id, "invites": self.invites})
+        data = json.dumps({"follows": self.follows, "queueId": self.queue_id, "invites": self.invites,
+                           "directory": list(self.directory)})
         self._db.execute("INSERT OR REPLACE INTO kv VALUES ('settings', ?)", (data,))
         self._db.commit()
 
@@ -81,6 +86,15 @@ class WatchSettings:
         resolved = list(dict.fromkeys(resolved))
         if resolved != self.invites:
             self.invites = resolved
+            self._save()
+
+    def set_directory(self, friends: list[dict]) -> None:
+        """Remembers the friend list (names only, no status); saved when it changes."""
+        directory = tuple(sorted(({"name": f.get("name") or "?", "riotId": f["riotId"]}
+                                  for f in friends if "#" in (f.get("riotId") or "")),
+                                 key=lambda d: d["name"].lower()))
+        if directory != self.directory:
+            self.directory = directory
             self._save()
 
     def follow(self, riot_id: str) -> dict | None:

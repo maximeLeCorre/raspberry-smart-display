@@ -224,7 +224,7 @@ class LeagueModule(Module):
         de partie ou y entre. Rien au 1er relevé (ouverture du client), ni sans
         liste (client fermé, PC éteint). En partie, la liste n'est plus relue par
         l'agent : un changement pendant ce temps est notifié au retour au menu."""
-        raw = (self.app.agent_data.get("default") or {}).get("friendsOnline")
+        raw = (self.app.agent_data.get("default") or {}).get("friendList")
         if raw is self._friends_raw:
             return
         self._friends_raw = raw
@@ -232,6 +232,7 @@ class LeagueModule(Module):
             self._friend_states = None
             return
         self.settings.resolve_invites([f.get("riotId") or "" for f in raw])
+        self.settings.set_directory(raw)
         states = {(f.get("riotId") or "").lower(): (_connected(f), f.get("gameStatus") == "inGame",
                                                     f.get("name") or "?") for f in raw}
         before, self._friend_states = self._friend_states, states
@@ -591,7 +592,7 @@ class LeagueModule(Module):
                             "playBusy": bool(home.get("playBusy")),
                             "playInvite": ", ".join(r.split("#")[0] for r in self.settings.invites),
                             "playQueue": PLAY_QUEUES.get(self.settings.queue_id, ""),
-                            "friends": self._friends_view(home.get("friendsOnline")),
+                            "friends": self._friends_view(home.get("friendList")),
                             "rewards": home.get("rewards"),
                             "reconnect": bool(home.get("reconnect"))}
         return view
@@ -607,6 +608,8 @@ class LeagueModule(Module):
             return None
         out = []
         for f in raw:
+            if (f.get("availability") or "offline") == "offline":
+                continue
             status = f.get("gameStatus") or ""
             if f.get("availability") == "mobile":
                 state = "sur mobile"
@@ -703,6 +706,8 @@ class LeagueModule(Module):
         **réduite** pour la montre (~4 Ko au lieu de ~30 : le lien montre ↔ iPhone
         en Bluetooth est lent). Le verrou sérialise aussi pygame (thread HTTP)."""
         kind, _, ident = name.partition("/")
+        if kind == "friends":     # every friend, even with the PC off (last list seen)
+            return json.dumps({"friends": list(self.settings.directory)}).encode(), "application/json"
         if kind == "sounds":
             return json.dumps(_kill_sounds()).encode(), "application/json"
         if kind == "sound":       # nom exact de la liste : pas de chemin arbitraire

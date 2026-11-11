@@ -69,7 +69,9 @@ struct SettingsView: View {
                 Picker("Force", selection: $haptic) {
                     ForEach(KillSettings.strengths, id: \.id) { Text($0.label).tag($0.id) }
                 }
-                Stepper("Répéter ×\(repeats)", value: $repeats, in: 1...3)
+                Picker("Répéter", selection: $repeats) {
+                    ForEach(1...3, id: \.self) { Text("×\($0)").tag($0) }
+                }
             } header: {
                 Text("Vibrations")
             } footer: {

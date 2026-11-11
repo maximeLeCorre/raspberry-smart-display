@@ -22,19 +22,17 @@ EVENTS_PATH = "/lol-event-hub/v1/events"
 RECONNECT_PATH = "/lol-gameflow/v1/reconnect"
 SEARCH_STATE_PATH = "/lol-lobby/v2/lobby/matchmaking/search-state"
 REWARDS_TTL = 30.0
-MAX_FRIENDS = 40
+MAX_FRIENDS = 300
 MAX_REWARDS = 20
 
 
 def build_friends(lcu: LcuClient) -> list[dict]:
-    """Connected friends (game client or mobile), sorted by name."""
+    """Every friend (offline ones too: they can be followed), sorted by name."""
     out = []
     for f in lcu.get_json(FRIENDS_PATH) or []:
         if not isinstance(f, dict):
             continue
-        availability = (f.get("availability") or "").lower()
-        if availability in ("", "offline"):
-            continue
+        availability = (f.get("availability") or "").lower() or "offline"
         lol = f.get("lol") or {}
         name = f.get("gameName") or f.get("name") or "?"
         try:

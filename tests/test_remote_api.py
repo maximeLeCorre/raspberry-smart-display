@@ -344,6 +344,8 @@ FRIENDS = [{"name": "Ami", "riotId": "Ami#EUW", "summonerId": 9, "pid": "ami@pvp
            {"name": "Zoé", "riotId": "Zoé#EUW", "summonerId": 5, "pid": "zoe@pvp", "availability": "away",
             "gameStatus": "outOfGame", "gameMode": "", "since": 0},
            {"name": "Tel", "riotId": "Tel#EUW", "summonerId": 7, "pid": "t@pvp", "availability": "mobile",
+            "gameStatus": "", "gameMode": "", "since": 0},
+           {"name": "Bob", "riotId": "Bob#EUW", "summonerId": 8, "pid": "b@pvp", "availability": "offline",
             "gameStatus": "", "gameMode": "", "since": 0}]
 
 
@@ -355,7 +357,7 @@ def test_amis_etat_ecrit_et_suivi(app, monkeypatch):
     assert call(app, "POST", "/action", {"action": "set_follow", "riotId": "pas-un-id"})[0] == 400
     assert call(app, "POST", "/action", {"action": "set_follow", "riotId": "Ami#EUW",
                                          "online": True, "leave": True})[0] == 200
-    push(app, type="data", screen="default", payload={"friendsOnline": FRIENDS})
+    push(app, type="data", screen="default", payload={"friendList": FRIENDS})
     time.sleep(0.1)
     league.tick()                                    # 1er relevé : aucune notification
     state = call(app, "GET", "/state?wait=0")[1]
@@ -367,7 +369,7 @@ def test_amis_etat_ecrit_et_suivi(app, monkeypatch):
                                              "enter": False}]
     # L'ami sort de partie → « a fini sa partie », avec son Riot ID (Jouer ensemble).
     out = [{**FRIENDS[0], "gameStatus": "outOfGame"}] + FRIENDS[1:]
-    push(app, type="data", screen="default", payload={"friendsOnline": out})
+    push(app, type="data", screen="default", payload={"friendList": out})
     time.sleep(0.1)
     league.tick()
     league.tick()
@@ -451,3 +453,17 @@ def test_reglages_possibles_pc_eteint(app):
     # Agent absent : les réglages (gardés sur le Pi) passent, les actions du client non.
     assert call(app, "POST", "/action", {"action": "set_play", "queueId": 450, "invites": []})[0] == 200
     assert call(app, "POST", "/action", {"action": "play"})[0] == 503
+
+
+def test_liste_complete_des_amis_gardee_pc_eteint(app):
+    push(app, type="_connected")
+    push(app, type="data", screen="default", payload={"friendList": FRIENDS})
+    time.sleep(0.1)
+    app.modules["league"].tick()
+    assert "Bob" not in [f["name"] for f in call(app, "GET", "/state?wait=0")[1]["home"]["friends"]]
+    push(app, type="_disconnected")                   # PC éteint : la liste reste servie
+    time.sleep(0.1)
+    names = [f["name"] for f in call(app, "GET", "/asset/league/friends")[1]["friends"]]
+    assert names == ["Ami", "Bob", "Tel", "Zoé"]
+    assert call(app, "POST", "/action", {"action": "set_follow", "riotId": "Bob#EUW",
+                                         "online": True})[0] == 200

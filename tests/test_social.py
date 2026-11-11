@@ -42,9 +42,10 @@ class FakeLcu:
         return True
 
 
-def test_amis_connectes_seulement_avec_leur_etat():
+def test_tous_les_amis_avec_leur_etat():
     friends = social.build_friends(FakeLcu())
-    assert [f["name"] for f in friends] == ["Ami", "Zoé"]          # hors ligne exclu, trié
+    assert [(f["name"], f["availability"]) for f in friends] == [
+        ("Ami", "dnd"), ("Parti", "offline"), ("Zoé", "away")]   # hors ligne inclus, trié
     ami = friends[0]
     assert ami["riotId"] == "Ami#EUW" and ami["pid"] == "ami@pvp"
     assert ami["gameStatus"] == "inGame" and ami["gameMode"] == "KIWI" and ami["since"] == 1794355985
