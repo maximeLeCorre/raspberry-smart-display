@@ -169,4 +169,12 @@ def summarize_full(data: dict, id_resolver=None) -> dict:
         "objectives": objectives,
         "self": {"gold": int(active.get("currentGold", 0) or 0)},
         "myKill": my_last_kill(raw_events, me_name),   # vibration de la montre
+        "result": game_result(raw_events),             # « Win »/« Lose » à la fin, sinon ""
     }
+
+
+def game_result(events: list) -> str:
+    """Résultat de NOTRE équipe (événement `GameEnd`, posé à la destruction du
+    Nexus, juste avant que l'API ferme) : « Win », « Lose », ou "" en cours."""
+    end = next((e for e in reversed(events or []) if e.get("EventName") == "GameEnd"), None)
+    return str((end or {}).get("Result") or "")

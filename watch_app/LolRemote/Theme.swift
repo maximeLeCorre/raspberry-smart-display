@@ -10,6 +10,7 @@ enum Theme {
     static let card = Color(white: 0.11)          // #1C1C1E
     static let raised = Color(white: 0.17)        // #2C2C2E : boutons secondaires
     static let muted = Color(white: 0.63)         // #A1A1A6 : texte secondaire (contraste > 7:1)
+    static let leader = Color(red: 0xF2 / 255, green: 0xC9 / 255, blue: 0x4C / 255)  // #F2C94C : chef du lobby
 }
 
 /// Bouton principal : capsule pleine accent, toute la largeur.

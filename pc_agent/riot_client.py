@@ -44,9 +44,6 @@ class RiotClient:
         self.session = requests.Session()
         self.session.verify = False
 
-    def is_running(self) -> bool:
-        return read_lockfile() is not None
-
     def is_logged_in(self) -> bool:
         """Vrai si un compte est authentifié (donc prêt à lancer un jeu)."""
         creds = read_lockfile()

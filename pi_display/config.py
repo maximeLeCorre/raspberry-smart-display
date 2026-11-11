@@ -53,69 +53,41 @@ def load_config(path: str | Path, local: bool = False) -> dict:
     return config
 
 
-def load_auth_token() -> str:
-    """Jeton partagé Pi <-> agent (DISPLAY_AUTH_TOKEN), lu dans .env.
-
-    Vide si non défini (authentification désactivée). Fonctionne sans
-    python-dotenv installé : on retombe alors sur les variables d'environnement.
-    """
+def _env(name: str) -> str:
+    """Value from the repo-root .env (or the environment); '' if unset.
+    Works without python-dotenv installed."""
     try:
         from dotenv import load_dotenv
         load_dotenv(ENV_PATH)
     except ImportError:
         pass
-    return (os.getenv("DISPLAY_AUTH_TOKEN") or "").strip()
+    return (os.getenv(name) or "").strip()
+
+
+def load_auth_token() -> str:
+    """Pi <-> agent shared token; empty = authentication disabled."""
+    return _env("DISPLAY_AUTH_TOKEN")
 
 
 def load_riot_key() -> str:
-    """Clé de l'API Web Riot (RIOT_API_KEY), lue dans le .env du Pi.
-
-    Le Pi est désormais autonome pour l'enrichissement Web (rangs, winrate,
-    historique) : la clé vit ici, pas sur l'agent. Vide si non définie.
-    """
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(ENV_PATH)
-    except ImportError:
-        pass
-    return (os.getenv("RIOT_API_KEY") or "").strip()
+    """Riot Web API key (lives on the Pi, never on the agent)."""
+    return _env("RIOT_API_KEY")
 
 
 def load_server_host() -> str:
-    """Hôte SSH de l'écran « Serveur » (SERVER_HOST), lu dans le .env du Pi.
-
-    Garde l'IP du serveur hors de Git ; prioritaire sur ``[server] host``.
-    """
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(ENV_PATH)
-    except ImportError:
-        pass
-    return (os.getenv("SERVER_HOST") or "").strip()
+    """SSH host of the "Serveur" screen; takes precedence over `[server] host`."""
+    return _env("SERVER_HOST")
 
 
 def load_idfm_key() -> str:
-    """Clé de l'API PRIM d'Île-de-France Mobilités (IDFM_API_KEY), .env du Pi.
-
-    Écran « Trains » ; vide = module non configuré.
-    """
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(ENV_PATH)
-    except ImportError:
-        pass
-    return (os.getenv("IDFM_API_KEY") or "").strip()
+    """IDFM PRIM API key ("Trains" screen); empty = module not configured."""
+    return _env("IDFM_API_KEY")
 
 
 def load_remote_token() -> str:
-    """Jeton de l'API télécommande (REMOTE_API_TOKEN), .env du Pi. Distinct du
-    jeton de l'agent : la montre ne peut pas se faire passer pour l'agent."""
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(ENV_PATH)
-    except ImportError:
-        pass
-    return (os.getenv("REMOTE_API_TOKEN") or "").strip()
+    """Remote API token. Distinct from the agent token: the watch cannot
+    impersonate the agent."""
+    return _env("REMOTE_API_TOKEN")
 
 
 def build_server_ssl(config: dict) -> ssl.SSLContext | None:

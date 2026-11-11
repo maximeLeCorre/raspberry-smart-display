@@ -7,6 +7,8 @@ import WatchKit
 
 /// Erreur réseau en clair, avec son code (diagnostic quand la montre ne joint pas le Pi).
 func describe(_ error: Error) -> String {
+    // The Pi answered but the state does not decode: app and Pi versions differ.
+    if error is DecodingError { return "réponse du Pi illisible (mettre à jour l'app ou le Pi)" }
     guard let error = error as? URLError else { return "Pi injoignable" }
     let reason: String
     switch error.code {
@@ -77,6 +79,77 @@ struct Lobby: Codable {
     let isLeader: Bool?
     let canStart: Bool?
     let friends: [Friend]?
+    let penaltyEnds: Double?    // fin de pénalité de file (epoch s), 0 = aucune
+}
+
+/// Ami connecté (liste du client), état ÉCRIT par le Pi (« en partie », « absent »…).
+struct OnlineFriend: Codable, Hashable, Identifiable {
+    let name: String
+    let riotId: String
+    let pid: String             // id de conversation (message privé)
+    let state: String
+    let inGame: Bool?
+    let free: Bool?             // connecté au jeu et hors partie : on peut jouer ensemble
+    let since: Double?          // début de sa partie (epoch s), 0 = inconnu
+    let mode: String?
+    let followed: Bool?
+    var id: String { riotId }
+}
+
+struct RewardOption: Codable, Hashable, Identifiable {
+    let id: String
+    let title: String
+    let details: String?
+}
+
+/// Récompense à récupérer : une option = « Prendre » ; plusieurs = à choisir (`max`).
+struct RewardGrant: Codable, Hashable, Identifiable {
+    let grantId: String
+    let options: [RewardOption]
+    let max: Int?
+    var id: String { grantId }
+}
+
+/// Passe d'événement : récupérable seulement en bloc (« Tout récupérer »).
+struct RewardEvent: Codable, Hashable, Identifiable {
+    let eventId: String
+    let name: String
+    let count: Int
+    var id: String { eventId }
+}
+
+struct Rewards: Codable {
+    let grants: [RewardGrant]?
+    let events: [RewardEvent]?
+    var count: Int { (grants ?? []).count + (events ?? []).reduce(0) { $0 + $1.count } }
+}
+
+/// Ami suivi : ce qui déclenche une notification.
+struct Follow: Codable, Hashable, Identifiable {
+    let riotId: String
+    let online: Bool
+    let leave: Bool
+    let enter: Bool
+    var id: String { riotId }
+    var name: String { riotId.components(separatedBy: "#").first ?? riotId }
+    var summary: String {
+        let parts = [online ? "connexion" : nil, leave ? "sortie de partie" : nil,
+                     enter ? "entrée en partie" : nil].compactMap { $0 }
+        return parts.isEmpty ? "rien" : parts.joined(separator: " + ")
+    }
+}
+
+struct QueueOption: Codable, Hashable, Identifiable {
+    let id: Int
+    let name: String
+}
+
+/// Réglages gardés sur le Pi (amis suivis, bouton Jouer).
+struct PiSettings: Codable {
+    let follows: [Follow]?
+    let queueId: Int?
+    let invites: [String]?
+    let queues: [QueueOption]?
 }
 
 struct Invitation: Codable {
@@ -92,7 +165,11 @@ struct Home: Codable {
     let invitation: Invitation?
     let playStatus: String?
     let playBusy: Bool?
-    let playInvite: String?     // ami invité par le bouton Jouer (`[lol] lobby_invite`)
+    let playInvite: String?     // amis invités par le bouton Jouer (réglage), « A, B »
+    let playQueue: String?      // file du bouton Jouer (« ARAM Chaos »)
+    let friends: [OnlineFriend]?
+    let rewards: Rewards?
+    let reconnect: Bool?        // jeu planté pendant une partie : « Reconnecter »
 }
 
 /// Notre dernier kill en partie (`streak` 1..5 : simple → pentakill).
@@ -101,8 +178,29 @@ struct KillInfo: Codable, Equatable {
     let streak: Int
 }
 
+/// Ma partie : le Pi n'envoie que ce qui change aux événements ; les durées sont
+/// des échéances (epoch s) que la montre décompte elle-même.
 struct Game: Codable {
     let kill: KillInfo?
+    let championId: Int?
+    let champion: String?
+    let level: Int?
+    let kda: [Int]?
+    let kills: [Int]?           // [nous, eux]
+    let goldGap: Int?           // or estimé (objets) : nous − eux
+    let startedAt: Double?
+    let dead: Bool?
+    let respawnAt: Double?
+    let gold: Int?              // or à dépenser (seulement mort)
+}
+
+struct GameResult: Codable {
+    let win: Bool?              // nil : pas encore connu
+    let kda: [Int]?
+    let championId: Int?
+    let champion: String?
+    let duration: Int?
+    let mode: String?
 }
 
 /// Fin de partie : bulletin d'honneurs (gameId non décodé : > Int32 sur arm64_32).
@@ -122,6 +220,7 @@ struct Honor: Codable {
 
 struct PostGame: Codable {
     let honor: Honor?
+    let result: GameResult?
 }
 
 struct RemoteState: Codable {
@@ -134,6 +233,7 @@ struct RemoteState: Codable {
     let home: Home?
     let game: Game?
     let postgame: PostGame?
+    let settings: PiSettings?
 }
 
 private struct ActionResult: Decodable {

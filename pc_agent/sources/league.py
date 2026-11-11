@@ -18,9 +18,10 @@ import psutil
 
 import chat
 import endgame
+import social
 from champ_select import build_champ_select_payload, my_champion, my_pending_pick
 from lobby import (INVITES_PATH, LOBBY_PATH, SEARCH_PATH, SEND_INVITES_PATH,
-                   build_invitation, build_lobby_payload)
+                   build_invitation, build_lobby_payload, queue_name)
 from lcu import LcuClient, find_lcu_credentials
 from lcu_events import LcuEventListener
 from live_events import LiveEventWatcher
@@ -41,6 +42,7 @@ LCU_ACTIONS = {
     # Fermeture PROPRE du client (comme sa croix) : jamais taskkill (Vanguard).
     "quit_client": "/process-control/v1/process/quit",
     "play_again": endgame.PLAY_AGAIN_PATH,   # fin de partie → lobby (mêmes joueurs)
+    "reconnect": social.RECONNECT_PATH,      # jeu planté, partie en cours → la rejoindre
 }
 
 # Démarrage à froid du client (Riot Client -> maj -> League -> login -> menu) :
@@ -90,6 +92,8 @@ class LeagueSource(Source):
         self._launch_exe = (lol_cfg.get("launch_exe") or "").strip()
         self._launch_args = list(lol_cfg.get("launch_args", []))
         self._live_events: LiveEventWatcher | None = None   # kills en partie
+        self._rewards = social.RewardsCache()          # récompenses (relues /30 s)
+        self._penalty = social.StableDeadline()                # fin de pénalité de file
 
         # (prédicat sur la phase, écran, constructeur du payload)
         self._rules = [
@@ -124,18 +128,23 @@ class LeagueSource(Source):
         if phase is None:             # client fermé -> League inactif
             if self._client_sent:     # (une fois) effacer le lobby affiché
                 self._client_sent = False
-                return ("default", {"client": False, "lobby": None, "invitation": None, "chat": None})
+                return ("default", {"client": False, "lobby": None, "invitation": None, "chat": None,
+                                    "friendsOnline": None, "rewards": None, "reconnect": False})
             return None
         for matches, screen, build in self._rules:
             if matches(phase):
                 return (screen, build(phase))
         # Menu / lobby : accueil, avec le lobby (montre : joueurs, « Lancer »).
+        # « Reconnect » : le jeu a planté pendant une partie (montre : Reconnecter).
         lobby = build_lobby_payload(self.lcu) if phase == "Lobby" else None
+        if lobby is not None:
+            lobby["penaltyEnds"] = self._penalty.update(social.queue_penalty(self.lcu))
         invitation = build_invitation(self.lcu)   # on m'invite (menu ou lobby)
         message = chat.build_last_message(self.lcu, self._started)   # message privé reçu
         self._client_sent = True
         return ("default", {"client": True, "lobby": lobby, "invitation": invitation,
-                            "chat": message})
+                            "chat": message, "friendsOnline": social.build_friends(self.lcu),
+                            "rewards": self._rewards.get(self.lcu), "reconnect": phase == "Reconnect"})
 
     def handle_request(self, message: dict, sender) -> bool:
         """Requêtes du Pi : synchro de l'historique (LCU) et actions (accepter…)."""
@@ -191,11 +200,13 @@ class LeagueSource(Source):
                 ok = endgame.honor_player(self.lcu, str(message.get("puuid") or ""))
                 print(f"[league] Honneur -> {'OK' if ok else 'échec'}")
                 return True
-            if action == "chat_reply":     # réponse à un message privé (montre)
+            if action == "chat_reply":     # message privé (réponse, ou à un ami : montre)
                 conv, text = str(message.get("conversationId") or ""), str(message.get("body") or "")
-                ok = bool(conv and text) and self.lcu.post(chat.reply_path(conv),
-                                                           {"body": text, "type": "chat"})
-                print(f"[league] Réponse au message -> {'OK' if ok else 'échec'}")
+                ok = bool(conv and text) and social.send_message(self.lcu, conv, text)
+                print(f"[league] Message privé -> {'OK' if ok else 'échec'}")
+                return True
+            if action in ("reward_claim", "reward_claim_all"):   # several LCU calls: off the receiver
+                threading.Thread(target=self._claim_rewards, daemon=True, args=(message,)).start()
                 return True
             if action == "leave_lobby":    # quitter / fermer le lobby
                 ok = self.lcu.delete(LOBBY_PATH)
@@ -233,7 +244,7 @@ class LeagueSource(Source):
                     print(f"[league] Banc : {champion_id} pris (essai {attempt})")
                     return
                 bench = {c.get("championId") for c in session.get("benchChampions") or []}
-                if not session or champion_id not in bench and attempt > 1:
+                if not session or (champion_id not in bench and attempt > 1):
                     print(f"[league] Banc : {champion_id} n'est plus disponible")
                     return
                 time.sleep(0.2)
@@ -251,8 +262,8 @@ class LeagueSource(Source):
     # -------------------------------------------------------------- jouer (1 clic)
     def _play(self, sender, queue_id, invite) -> None:
         """Bouton unique : lance le client s'il est fermé, crée le lobby `queue_id`
-        s'il n'est pas déjà le bon, puis invite l'ami `invite` s'il n'est pas déjà
-        présent/invité. Chaque étape déjà faite est sautée (idempotent). Pousse un
+        s'il n'est pas déjà le bon, puis invite les amis `invite` (liste de Riot ID,
+        ou un seul nom) qui ne sont pas déjà présents/invités. Chaque étape déjà faite est sautée (idempotent). Pousse un
         message d'étape au Pi (`playStatus`) : confirmation + avancement."""
         self._playing = True
         self._cancel.clear()
@@ -263,7 +274,9 @@ class LeagueSource(Source):
             sender.send_safe(msg_data("default", {"playStatus": text, "playBusy": busy}))
 
         status("Instruction reçue…")
-        final = "Lobby ARAM Chaos prêt"
+        names = ([invite] if isinstance(invite, str) else list(invite or []))
+        names = [n.strip() for n in names if isinstance(n, str) and n.strip()]
+        final = "Lobby prêt"
         try:
             if self.lcu.gameflow_phase() is None:          # client fermé -> lancer
                 status("Lancement de League…")
@@ -275,14 +288,18 @@ class LeagueSource(Source):
                 if not self._wait_ready(READY_TIMEOUT):
                     final = "Client non prêt (abandon)"
                     return
-            status("Création du lobby ARAM Chaos…")
+            label = queue_name(self.lcu, queue_id) if queue_id else "lobby"
+            status(f"Création du lobby {label}…")
             if not self._ensure_lobby(queue_id):
                 final = "Échec de création du lobby"
                 return
-            name = (invite or "").strip()
-            if name:
+            final = f"Lobby {label} prêt"
+            results = []
+            for name in names:
                 status(f"Invitation de {name}…")
-                final = self._invite_if_needed(name)
+                results.append(self._invite_if_needed(name))
+            if results:
+                final = " · ".join(results)
         except PlayCancelled:
             # On arrête seulement NOS demandes : jamais tuer League (Vanguard).
             final = "Lancement annulé"
@@ -291,6 +308,24 @@ class LeagueSource(Source):
             time.sleep(4)          # laisse le message final lisible sur le Pi
             sender.send_safe(msg_data("default", {"playStatus": ""}))
             self._playing = False
+
+    def _claim_rewards(self, message: dict) -> None:
+        """Une récompense (`grantId` + `selections`), ou toutes (choix = 1re option ;
+        passes d'événement en bloc). Relue juste après : la montre voit le résultat."""
+        rewards = social.build_rewards(self.lcu)
+        if message.get("action") == "reward_claim":
+            grant = next((g for g in rewards["grants"] if g["grantId"] == message.get("grantId")), None)
+            picks = [str(s) for s in message.get("selections") or []]
+            ok = bool(grant and picks) and social.claim_grant(self.lcu, grant, picks)
+            print(f"[league] Récompense {message.get('grantId')} -> {'OK' if ok else 'échec'}")
+        else:
+            for grant in rewards["grants"]:
+                if len(grant["options"]) == 1:          # un choix à faire : laissé à l'utilisateur
+                    social.claim_grant(self.lcu, grant, [grant["options"][0]["id"]])
+            for event in rewards["events"]:
+                social.claim_event(self.lcu, event["eventId"])
+            print("[league] Toutes les récompenses récupérées.")
+        self._rewards.invalidate()
 
     def _pause(self, seconds: float) -> None:
         """Attente de l'enchaînement « jouer », interrompue par une annulation."""
@@ -307,10 +342,10 @@ class LeagueSource(Source):
                     print(f"[league] Lobby queueId={queue_id} déjà ouvert : rien à créer.")
                 return True
             if self.lcu.post("/lol-lobby/v2/lobby", {"queueId": queue_id}):
-                print(f"[league] Lobby ARAM Chaos (queueId={queue_id}) créé.")
+                print(f"[league] Lobby queueId={queue_id} créé.")
                 return True
             self._pause(3)
-        print(f"[league] Lobby ARAM Chaos (queueId={queue_id}) -> échec (plusieurs essais).")
+        print(f"[league] Lobby queueId={queue_id} -> échec (plusieurs essais).")
         return False
 
     def _launch_client(self) -> bool:
@@ -388,14 +423,14 @@ class LeagueSource(Source):
         summoner_id = self._online_friend_id(name)
         if summoner_id is None:
             print(f"[league] Invitation : « {name} » introuvable ou hors ligne.")
-            return f"Lobby prêt - {name} hors ligne"
+            return f"{name} hors ligne"
         if self._in_lobby(summoner_id):
             print(f"[league] « {name} » est déjà dans le lobby / invité.")
-            return f"Lobby prêt - {name} déjà présent"
+            return f"{name} déjà là"
         ok = self.lcu.post("/lol-lobby/v2/lobby/invitations",
                            [{"toSummonerId": summoner_id}])
         print(f"[league] Invitation de « {name} » -> {'OK' if ok else 'échec'}")
-        return f"{name} invité !" if ok else "Lobby prêt - invitation échouée"
+        return f"{name} invité" if ok else f"invitation de {name} échouée"
 
     def _in_lobby(self, summoner_id) -> bool:
         """L'ami est-il déjà membre du lobby ou déjà invité (en attente/accepté) ?"""

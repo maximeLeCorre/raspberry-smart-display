@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import time
 
 from sources import league
@@ -48,3 +47,18 @@ def test_annuler_sans_enchainement_ne_fait_rien():
     src = LeagueSource({})
     assert src.handle_request({"type": "lcu_action", "action": "play_cancel"}, FakeSender())
     assert not src._cancel.is_set()
+
+
+def test_jouer_invite_plusieurs_amis(monkeypatch):
+    src = LeagueSource({})
+    monkeypatch.setattr(src.lcu, "gameflow_phase", lambda: "None")      # client ouvert
+    monkeypatch.setattr(src, "_ensure_lobby", lambda q: True)
+    monkeypatch.setattr(league, "queue_name", lambda lcu, q: "ARAM")
+    invited = []
+    monkeypatch.setattr(src, "_invite_if_needed", lambda name: invited.append(name) or f"{name} invité")
+    monkeypatch.setattr(league.time, "sleep", lambda s: None)
+    sender = FakeSender()
+    src._play(sender, 450, ["Ami#EUW", "Zoé#EUW"])
+    assert invited == ["Ami#EUW", "Zoé#EUW"]
+    statuses = [m["payload"]["playStatus"] for m in sender.sent if m.get("type") == "data"]
+    assert "Création du lobby ARAM…" in statuses and "Ami#EUW invité · Zoé#EUW invité" in statuses

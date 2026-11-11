@@ -176,9 +176,13 @@ class RemoteServer:
                     return self._send(404, {"ok": False, "error": "route inconnue"})
                 if not self._authorized():
                     return
-                length = int(self.headers.get("Content-Length") or 0)
-                if length > MAX_BODY:
-                    return self._send(413, {"ok": False, "error": "corps trop gros"})
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = -1
+                if not 0 <= length <= MAX_BODY:   # a negative length would block the read
+                    return self._send(413 if length > 0 else 400,
+                                      {"ok": False, "error": "corps invalide"})
                 try:
                     body = json.loads(self.rfile.read(length) or b"{}")
                 except json.JSONDecodeError:

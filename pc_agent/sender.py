@@ -24,6 +24,9 @@ class Sender:
         # Les envois viennent de 2 threads (boucle principale + récepteur, qui
         # répond aux requêtes du Pi) : on sérialise pour ne pas entrelacer.
         self._send_lock = threading.Lock()
+        # (Re)connection is serialized too: two threads failing together would
+        # otherwise each open a socket, and the Pi keeps only the last one.
+        self._conn_lock = threading.RLock()
 
     @property
     def connected(self) -> bool:
@@ -63,22 +66,24 @@ class Sender:
 
     def send(self, obj: dict) -> None:
         """Envoie un objet (sérialisé en JSON)."""
-        if self._ws is None:
+        ws = self._ws
+        if ws is None:
             raise ConnectionError("non connecté")
         with self._send_lock:
-            self._ws.send(json.dumps(obj))
+            ws.send(json.dumps(obj))
 
     def send_safe(self, obj: dict) -> bool:
         """Envoie en (re)connectant si besoin. Renvoie True si succès."""
         for attempt in range(2):
             try:
-                if not self.connected:
-                    self.connect()
+                with self._conn_lock:
+                    if not self.connected:
+                        self.connect()
                 self.send(obj)
                 return True
             except Exception as exc:
-                # Connexion perdue : on ferme et on retentera au prochain tour.
-                self.close()
+                with self._conn_lock:
+                    self.close()
                 if attempt == 0:
                     continue
                 print(f"[envoi] Échec d'envoi : {exc}")

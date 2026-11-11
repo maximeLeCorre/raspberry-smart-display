@@ -76,20 +76,3 @@ class Screen:
     def clear_region(self, surface: pygame.Surface, rect: pygame.Rect) -> None:
         """Efface une zone en y recopiant le fond d'origine."""
         surface.blit(self.bg, rect, rect)
-
-    def draw_centered_line(
-        self,
-        surface: pygame.Surface,
-        text: str,
-        font: pygame.font.Font,
-        color: tuple[int, int, int],
-        y: int,
-    ) -> pygame.Rect:
-        """Affiche une ligne centrée horizontalement, en effaçant d'abord une
-        bande pleine largeur à cette hauteur. Renvoie le rect de la bande."""
-        rendered = font.render(text, True, color)
-        text_rect = rendered.get_rect(center=(self.width // 2, y))
-        band = pygame.Rect(0, text_rect.top - 4, self.width, text_rect.height + 8)
-        self.clear_region(surface, band)
-        surface.blit(rendered, text_rect)
-        return band

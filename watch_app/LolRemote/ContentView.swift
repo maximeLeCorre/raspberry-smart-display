@@ -1,6 +1,7 @@
 // Écrans de la montre (cf. Theme.swift et les maquettes). Un écran = une chose à
 // faire ; états toujours ÉCRITS (pas seulement colorés).
 import SwiftUI
+import WatchKit
 
 struct ContentView: View {
     @EnvironmentObject var client: RemoteClient
@@ -13,6 +14,7 @@ struct ContentView: View {
             if let state = client.state, client.connected || state.screen == "default" {
                 switch state.screen {
                 case "queue": QueueView(queue: state.queue)
+                case "lol": GameView(game: state.game)
                 case "postgame": PostGameView(post: state.postgame)
                 case "champselect":
                     // Choix de départ d'abord (tant qu'aucun n'est demandé), puis le banc.
@@ -69,37 +71,40 @@ struct ConnectingView: View {
 
 // MARK: - Accueil
 
-/// Accueil : « Jouer » (comme sur le Pi), sinon le lobby ; invitation reçue en plein écran.
+/// Accueil = menu en liste (une ligne par destination, défilable à la couronne) ;
+/// invitation reçue, lobby, lancement ou reconnexion en plein écran.
 struct HomeView: View {
     @EnvironmentObject var client: RemoteClient
     let state: RemoteState
     @State private var confirmQuit = false
-    @State private var showSettings = false
 
     /// Pi joint (état frais) ET PC connecté au Pi : sans le 1er, l'état affiché est
     /// celui du cache et on ne sait rien du PC.
     private var online: Bool { client.connected && state.agent == true }
+    private var home: Home? { state.home }
     private var status: (text: String, filled: Bool) {
         if !client.connected { return (client.lastError ?? "connexion au Pi…", false) }
         return state.agent == true ? ("PC connecté", true) : ("PC hors ligne", false)
     }
 
     var body: some View {
-        if online, let invitation = state.home?.invitation, state.screen == "default" {
+        if online, home?.reconnect == true, state.screen == "default" {
+            ReconnectView()
+        } else if online, let invitation = home?.invitation, state.screen == "default" {
             InvitationView(invitation: invitation)
-        } else if online, let lobby = state.home?.lobby, state.screen == "default" {
+        } else if online, let lobby = home?.lobby, state.screen == "default" {
             LobbyView(lobby: lobby)
-        } else if online, state.home?.playBusy == true {
-            LaunchingView(status: state.home?.playStatus ?? "…")
+        } else if online, home?.playBusy == true {
+            LaunchingView(status: home?.playStatus ?? "…")
         } else {
-            VStack(spacing: 8) {
+            NavigationStack { menu }
+        }
+    }
+
+    private var menu: some View {
+        ScrollView {
+            VStack(spacing: 6) {
                 HStack {
-                    Button { showSettings = true } label: {
-                        Image(systemName: "gearshape.fill").font(.system(size: 15))
-                            .foregroundStyle(Theme.accent)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Réglages")
                     Text("LolRemote").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.accent)
                     Spacer()
                     Label(status.text, systemImage: status.filled ? "circle.fill" : "circle")
@@ -108,58 +113,126 @@ struct HomeView: View {
                         .lineLimit(1).minimumScaleFactor(0.6)
                 }
                 .padding(.horizontal, 6)
-                Spacer(minLength: 0)
                 if !client.connected {
-                    ProgressView().tint(Theme.accent)
-                    Text("Connexion au Pi…").font(.system(size: 14)).foregroundStyle(Theme.muted)
+                    ProgressView().tint(Theme.accent).padding(.vertical, 8)
                 } else if !online {
                     Text("Allume le PC pour jouer").font(.system(size: 14)).foregroundStyle(Theme.muted)
-                } else if state.screen == "lol" || state.screen == "postgame" {
-                    Image(systemName: "gamecontroller.fill").font(.system(size: 30)).foregroundStyle(Theme.accent)
-                    Text(state.screen == "lol" ? "En partie" : "Fin de partie")
-                        .font(.system(size: 18, weight: .bold))
+                        .padding(.vertical, 8)
                 } else {
                     Button { client.send(["action": "play"]) } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: "play.fill").font(.system(size: 24))
+                            Image(systemName: "play.fill").font(.system(size: 18))
                             VStack(alignment: .leading, spacing: 1) {
-                                Text("Jouer").font(.system(size: 19, weight: .bold))
-                                Text(playSubtitle).font(.system(size: 12, weight: .medium))
+                                Text("Jouer").font(.system(size: 17, weight: .bold))
+                                Text(playSubtitle).font(.system(size: 11, weight: .semibold))
                                     .lineLimit(1).minimumScaleFactor(0.7)
                             }
                             Spacer(minLength: 0)
                         }
-                        .padding(.horizontal, 14)
+                        .padding(.horizontal, 12)
                     }
-                    .buttonStyle(PrimaryButtonStyle(height: 72))
+                    .buttonStyle(PrimaryButtonStyle(height: 52))
+                    .doubleTapAction()
                     .disabled(client.busy)
-                    if let status = state.home?.playStatus, !status.isEmpty {
+                    if let status = home?.playStatus, !status.isEmpty {
                         Text(status).font(.system(size: 12)).foregroundStyle(Theme.muted)   // message final
                     }
-                    if state.home?.client == true {
-                        Button { confirmQuit = true } label: {
-                            Label("Fermer League", systemImage: "power")
+                    if let friends = home?.friends {
+                        NavigationLink { FriendsView() } label: {
+                            MenuRow(icon: "person.2.fill", title: "Amis",
+                                    value: "\(friends.filter { $0.free == true }.count) dispo")
                         }
-                        .buttonStyle(SecondaryButtonStyle(height: 32))
+                        .buttonStyle(.plain)
+                    }
+                    if let rewards = home?.rewards {
+                        NavigationLink { RewardsView() } label: {
+                            MenuRow(icon: "gift.fill", title: "Récompenses",
+                                    value: rewards.count == 0 ? "aucune" : "",
+                                    badge: rewards.count > 0 ? "\(rewards.count)" : nil)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if home?.client == true {
+                        Button { confirmQuit = true } label: {
+                            MenuRow(icon: "power", title: "Fermer League", dimmed: true)
+                        }
+                        .buttonStyle(.plain)
                         .disabled(client.busy)
                     }
                 }
-                Spacer(minLength: 0)
-                LatencyFooter()
+                NavigationLink { SettingsView() } label: {
+                    MenuRow(icon: "gearshape.fill", title: "Réglages", dimmed: true)
+                }
+                .buttonStyle(.plain)
+                LatencyFooter().padding(.top, 2)
             }
-            .sheet(isPresented: $showSettings) { SettingsView() }
-            .confirmationDialog("Fermer League ?", isPresented: $confirmQuit) {
-                Button("Fermer League", role: .destructive) { client.send(["action": "quit_client"]) }
-                Button("Annuler", role: .cancel) {}
-            } message: {
-                Text("Le client se ferme proprement (comme sa croix).")
-            }
+        }
+        .confirmationDialog("Fermer League ?", isPresented: $confirmQuit) {
+            Button("Fermer League", role: .destructive) { client.send(["action": "quit_client"]) }
+            Button("Annuler", role: .cancel) {}
+        } message: {
+            Text("Le client se ferme proprement (comme sa croix).")
         }
     }
 
     private var playSubtitle: String {
-        let friend = state.home?.playInvite ?? ""
-        return friend.isEmpty ? "ARAM Chaos" : "ARAM Chaos + \(friend)"
+        let queue = home?.playQueue ?? ""
+        let friends = home?.playInvite ?? ""
+        let base = queue.isEmpty ? "Lobby" : queue
+        return friends.isEmpty ? base : "\(base) + \(friends)"
+    }
+}
+
+/// Ligne du menu : icône, titre, valeur (ou pastille chiffrée) à droite.
+struct MenuRow: View {
+    let icon: String
+    let title: String
+    var value: String = ""
+    var badge: String? = nil
+    var dimmed = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).font(.system(size: 15))
+                .foregroundStyle(dimmed ? Theme.muted : Theme.accent).frame(width: 20)
+            Text(title).font(.system(size: 15, weight: .medium)).lineLimit(1)
+            Spacer(minLength: 4)
+            if let badge {
+                Text(badge).font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 5))
+            } else if !value.isEmpty {
+                Text(value).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+        .contentShape(Rectangle())
+    }
+}
+
+/// Le jeu a planté pendant une partie : la rejoindre depuis le poignet.
+struct ReconnectView: View {
+    @EnvironmentObject var client: RemoteClient
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ScreenHeader(title: "Jeu fermé")
+            Spacer(minLength: 0)
+            Image(systemName: "arrow.clockwise").font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 58, height: 58).background(Theme.card, in: Circle())
+            Text("La partie continue sans toi").font(.system(size: 15, weight: .bold))
+                .multilineTextAlignment(.center)
+            Spacer(minLength: 0)
+            Button { client.send(["action": "reconnect"]) } label: {
+                Label("Reconnecter", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(PrimaryButtonStyle(height: 46))
+            .doubleTapAction()
+            .disabled(client.busy)
+        }
     }
 }
 
@@ -214,34 +287,72 @@ struct InvitationView: View {
 
 // MARK: - Fin de partie
 
-/// Honorer des joueurs (cœur, comme le client) puis « Retour au lobby » (mêmes joueurs).
+/// Résultat d'abord (victoire/défaite écrite, score), puis Honorer et Retour au lobby.
 struct PostGameView: View {
     @EnvironmentObject var client: RemoteClient
     let post: PostGame?
-    @State private var pending: Set<String> = []      // honorés, en attente de l'état du Pi
+    @State private var showHonor = false
 
-    private var votesLeft: Int { max(0, (post?.honor?.votesLeft ?? 0) - pending.count) }
+    private var result: GameResult? { post?.result }
+    private var votesLeft: Int { post?.honor?.votesLeft ?? 0 }
 
     var body: some View {
-        VStack(spacing: 6) {
-            ScrollView {
-                VStack(spacing: 5) {
-                    ScreenHeader(title: "Fin de partie",
-                                 trailing: post?.honor == nil ? "" : "\(votesLeft) vote\(votesLeft > 1 ? "s" : "")")
-                    if let honor = post?.honor {
-                        group("Ton équipe", honor.allies)
-                        if !honor.opponents.isEmpty { group("Adversaires", honor.opponents) }
-                    } else {
-                        Text("Honneurs pas encore disponibles").font(.system(size: 12)).foregroundStyle(Theme.muted)
-                    }
+        VStack(spacing: 5) {
+            ScreenHeader(title: "Fin de partie", trailing: result?.mode ?? "")
+            Spacer(minLength: 0)
+            switch result?.win {
+            case true?: Text("VICTOIRE").font(.system(size: 26, weight: .heavy)).kerning(1)
+            case false?: Text("DÉFAITE").font(.system(size: 26, weight: .heavy)).kerning(1)
+            case nil: Text("Résultat en attente…").font(.system(size: 15, weight: .semibold))
+            }
+            if let duration = result?.duration, duration > 0 {
+                Text(clock(duration)).font(.system(size: 11)).foregroundStyle(Theme.muted).monospacedDigit()
+            }
+            if let kda = result?.kda, kda.count == 3 {
+                HStack(spacing: 8) {
+                    if let id = result?.championId, id > 0 { ChampIcon(championId: id, size: 32) }
+                    Text("\(kda[0])/\(kda[1])/\(kda[2])").font(.system(size: 20, weight: .bold)).monospacedDigit()
                 }
+                .padding(.top, 4)
+            }
+            Spacer(minLength: 0)
+            if post?.honor != nil {
+                Button { showHonor = true } label: {
+                    Label(votesLeft > 0 ? "Honorer · \(votesLeft) vote\(votesLeft > 1 ? "s" : "")" : "Honneurs donnés",
+                          systemImage: "heart")
+                }
+                .buttonStyle(SecondaryButtonStyle(height: 32))
             }
             Button { client.send(["action": "play_again"]) } label: {
                 Label("Retour au lobby", systemImage: "arrow.uturn.backward")
             }
-            .buttonStyle(PrimaryButtonStyle(height: 42))
+            .buttonStyle(PrimaryButtonStyle(height: 40))
             .doubleTapAction()
             .disabled(client.busy)
+        }
+        .sheet(isPresented: $showHonor) { HonorView() }
+    }
+}
+
+/// Honorer des joueurs (cœur, comme le client) ; lit l'état courant du client.
+struct HonorView: View {
+    @EnvironmentObject var client: RemoteClient
+    @State private var pending: Set<String> = []      // honorés, en attente de l'état du Pi
+
+    private var honor: Honor? { client.state?.postgame?.honor }
+    private var votesLeft: Int { max(0, (honor?.votesLeft ?? 0) - pending.count) }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 5) {
+                ScreenHeader(title: "Honorer", trailing: "\(votesLeft) vote\(votesLeft > 1 ? "s" : "")")
+                if let honor {
+                    group("Ton équipe", honor.allies)
+                    if !honor.opponents.isEmpty { group("Adversaires", honor.opponents) }
+                } else {
+                    Text("Honneurs plus disponibles").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                }
+            }
         }
         .onChange(of: client.message) { _, message in if message != nil { pending.removeAll() } }  // refusé
     }
@@ -285,8 +396,140 @@ struct PostGameView: View {
     }
 }
 
+// MARK: - En partie
+
+/// Vivant : K/D/A et écarts écrits. Mort : réapparition (décomptée ici) et or à
+/// dépenser. Vibration 3 s avant la réapparition.
+struct GameView: View {
+    let game: Game?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let now = context.date.timeIntervalSince1970
+            if let game, game.kda != nil {
+                if game.dead == true, let at = game.respawnAt, at > now {
+                    DeadView(game: game, remaining: Int((at - now).rounded(.up)), now: now)
+                } else {
+                    AliveView(game: game, now: now)
+                }
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "gamecontroller.fill").font(.system(size: 30)).foregroundStyle(Theme.accent)
+                    Text("En partie").font(.system(size: 18, weight: .bold))
+                }
+            }
+        }
+        .task(id: game?.respawnAt) { await warnBeforeRespawn() }
+    }
+
+    private func warnBeforeRespawn() async {
+        guard game?.dead == true, let at = game?.respawnAt else { return }
+        let wait = at - 3 - Date().timeIntervalSince1970
+        guard wait > 0 else { return }
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+        if !Task.isCancelled { WKInterfaceDevice.current().play(.directionUp) }
+    }
+}
+
+private struct AliveView: View {
+    let game: Game
+    let now: Double
+
+    var body: some View {
+        VStack(spacing: 5) {
+            ScreenHeader(title: "\(game.champion ?? "") · niv. \(game.level ?? 0)",
+                         trailing: elapsed(game.startedAt, now))
+            if let kda = game.kda, kda.count == 3 {
+                Text("\(kda[0])/\(kda[1])/\(kda[2])").font(.system(size: 36, weight: .heavy)).monospacedDigit()
+                Text("tués / morts / assists").font(.system(size: 10)).foregroundStyle(Theme.muted)
+            }
+            if let kills = game.kills, kills.count == 2 {
+                GapRow(title: "Kills", value: "\(kills[0]) – \(kills[1])", gap: signed(kills[0] - kills[1]))
+            }
+            if let gap = game.goldGap {
+                GapRow(title: "Or (estimé)", value: "", gap: signedGold(gap))
+            }
+            Spacer(minLength: 0)
+            if let gap = game.goldGap {
+                Text(gap > 0 ? "en avance" : gap < 0 ? "en retard" : "à égalité")
+                    .font(.system(size: 11)).foregroundStyle(Theme.muted)
+            }
+        }
+    }
+}
+
+private struct DeadView: View {
+    let game: Game
+    let remaining: Int
+    let now: Double
+    @State private var total = 1.0     // durée de la mort, vue à son début (anneau)
+
+    var body: some View {
+        VStack(spacing: 5) {
+            ScreenHeader(title: "Mort", trailing: elapsed(game.startedAt, now))
+            Spacer(minLength: 0)
+            CountdownRing(fraction: Double(remaining) / total, label: "\(remaining)", size: 88)
+            Text("réapparition").font(.system(size: 10)).foregroundStyle(Theme.muted)
+            Spacer(minLength: 0)
+            if let gold = game.gold {
+                GapRow(title: "Or à dépenser", value: "", gap: "\(gold)")
+            }
+            if let kills = game.kills, kills.count == 2 {
+                Text("Kills \(kills[0]) – \(kills[1])" + (game.goldGap.map { " · Or \(signedGold($0))" } ?? ""))
+                    .font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.7)
+            }
+        }
+        .onAppear { total = max(1, Double(remaining)) }
+        .onChange(of: game.respawnAt) { _, _ in total = max(1, Double(remaining)) }
+    }
+}
+
+/// Ligne « titre … valeur  ▲ +5 » : l'écart porte toujours son signe écrit.
+private struct GapRow: View {
+    let title: String
+    let value: String
+    let gap: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title).font(.system(size: 12))
+            Spacer(minLength: 4)
+            if !value.isEmpty { Text(value).font(.system(size: 12, weight: .bold)).monospacedDigit() }
+            Text(gap).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.accent).monospacedDigit()
+        }
+        .padding(.horizontal, 9).frame(minHeight: 32)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+/// « ▲ +5 », « ▼ −3 », « = 0 ».
+func signed(_ value: Int) -> String {
+    value > 0 ? "▲ +\(value)" : value < 0 ? "▼ −\(-value)" : "= 0"
+}
+
+/// Or : « ▲ +1,2k », « ▼ −800 ».
+func signedGold(_ value: Int) -> String {
+    let size = abs(value)
+    let text = size >= 1000 ? String(format: "%.1fk", Double(size) / 1000).replacingOccurrences(of: ".", with: ",")
+                            : "\(size)"
+    return value > 0 ? "▲ +\(text)" : value < 0 ? "▼ −\(text)" : "= 0"
+}
+
+/// Durée « m:ss ».
+func clock(_ seconds: Int) -> String {
+    String(format: "%d:%02d", seconds / 60, seconds % 60)
+}
+
+/// Temps de jeu depuis `startedAt` (epoch s), « m:ss ».
+func elapsed(_ startedAt: Double?, _ now: Double) -> String {
+    guard let startedAt, startedAt > 0 else { return "" }
+    return clock(max(0, Int(now - startedAt)))
+}
+
 // MARK: - Lobby
 
+/// Lobby : chaque joueur avec son état écrit ; le chef entouré en jaune ET écrit
+/// « chef ». Quitter (rond) à gauche de Lancer.
 struct LobbyView: View {
     @EnvironmentObject var client: RemoteClient
     let lobby: Lobby
@@ -300,30 +543,39 @@ struct LobbyView: View {
                 VStack(spacing: 5) {
                     ScreenHeader(title: lobby.queueName ?? "Lobby", trailing: "\(count)/5")
                     ForEach(lobby.members ?? [], id: \.self) { member in
+                        let leader = member.isLeader == true
                         HStack(spacing: 8) {
-                            Avatar(name: member.name)
-                            (Text(member.name).font(.system(size: 13, weight: .medium))
-                             + Text(member.isSelf == true ? " (toi)" : "").font(.system(size: 13))
-                                .foregroundColor(Theme.muted))
-                                .lineLimit(1)
+                            Text(String(member.name.prefix(1)).uppercased())
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(leader ? Theme.ink : .white)
+                                .frame(width: 22, height: 22)
+                                .background(leader ? Theme.leader : Color(white: 0.23), in: Circle())
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(member.name + (member.isSelf == true ? " (toi)" : ""))
+                                    .font(.system(size: 13, weight: .medium)).lineLimit(1)
+                                Text(leader ? "chef · prêt" : "prêt")
+                                    .font(.system(size: 10, weight: leader ? .semibold : .regular))
+                                    .foregroundStyle(leader ? Theme.leader : Theme.muted)
+                            }
                             Spacer(minLength: 0)
-                            if member.isLeader == true {
-                                Text("chef").font(.system(size: 10, weight: .semibold))   // écrit, pas une couleur
-                                    .foregroundStyle(Theme.ink)
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 5))
+                            if !leader {
+                                Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(Theme.accent).accessibilityHidden(true)
                             }
                         }
-                        .padding(.horizontal, 8).frame(minHeight: 32)
+                        .padding(.horizontal, 8).frame(minHeight: 36)
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(leader ? Theme.leader : .clear, lineWidth: 2))
                     }
                     ForEach(lobby.invites ?? [], id: \.self) { invite in
                         HStack(spacing: 8) {
                             Circle().strokeBorder(Color(white: 0.4), style: StrokeStyle(lineWidth: 1.5, dash: [3]))
                                 .frame(width: 22, height: 22)
-                            Text(invite.name).font(.system(size: 13)).foregroundStyle(Color(white: 0.78)).lineLimit(1)
+                            Text(invite.name).font(.system(size: 13)).foregroundStyle(Color(white: 0.82)).lineLimit(1)
                             Spacer(minLength: 0)
-                            Text("invité…").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                            Text("invité, pas encore là").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                                .lineLimit(1).minimumScaleFactor(0.7)
                         }
                         .padding(.horizontal, 8).frame(minHeight: 32)
                         .overlay(RoundedRectangle(cornerRadius: 12)
@@ -345,22 +597,17 @@ struct LobbyView: View {
                     }
                 }
             }
-            Button { client.send(["action": "leave_lobby"]) } label: {
-                Label(lobby.isLeader == true ? "Fermer le lobby" : "Quitter le lobby", systemImage: "xmark")
-            }
-            .buttonStyle(SecondaryButtonStyle(height: 30))
-            .disabled(client.busy)
-            if lobby.isLeader == true {
-                Button { client.send(["action": "start_queue"]) } label: {
-                    Label(lobby.canStart == true ? "Lancer la partie" : "Pas encore possible",
-                          systemImage: "play.fill")
+            HStack(spacing: 6) {
+                Button { client.send(["action": "leave_lobby"]) } label: {
+                    Image(systemName: "xmark").font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .background(Theme.raised, in: Circle())
                 }
-                .buttonStyle(PrimaryButtonStyle(height: 42))
-                .doubleTapAction()
-                .disabled(client.busy || lobby.canStart != true)
-                .opacity(lobby.canStart == true ? 1 : 0.5)
-            } else {
-                Text("Le chef lance la partie").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                .buttonStyle(.plain)
+                .accessibilityLabel(lobby.isLeader == true ? "Fermer le lobby" : "Quitter le lobby")
+                .disabled(client.busy)
+                launch
             }
         }
         .sheet(isPresented: $choosingFriend) {
@@ -368,6 +615,30 @@ struct LobbyView: View {
                 client.send(["action": "invite", "summonerId": friend.summonerId])
                 choosingFriend = false
             }
+        }
+    }
+
+    /// Lancer (chef), ou pourquoi on ne peut pas : pénalité de file, pas chef.
+    @ViewBuilder private var launch: some View {
+        if let ends = lobby.penaltyEnds, ends > Date().timeIntervalSince1970 {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let left = max(0, Int(ends - context.date.timeIntervalSince1970))
+                Text("File bloquée · \(clock(left))").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.muted).monospacedDigit()
+                    .frame(maxWidth: .infinity, minHeight: 42)
+                    .background(Theme.card, in: Capsule())
+            }
+        } else if lobby.isLeader == true {
+            Button { client.send(["action": "start_queue"]) } label: {
+                Label(lobby.canStart == true ? "Lancer" : "Pas encore", systemImage: "play.fill")
+            }
+            .buttonStyle(PrimaryButtonStyle(height: 42))
+            .doubleTapAction()
+            .disabled(client.busy || lobby.canStart != true)
+            .opacity(lobby.canStart == true ? 1 : 0.5)
+        } else {
+            Text("Le chef lance").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                .frame(maxWidth: .infinity, minHeight: 42)
         }
     }
 }
@@ -435,13 +706,10 @@ struct QueueView: View {
             }
         }
     }
-
-    private func clock(_ seconds: Int) -> String {
-        String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
 }
 
-/// Partie trouvée : anneau qui se vide, Accepter énorme, Refuser plus petit.
+/// Partie trouvée : anneau qui se vide, Accepter seul en gros ; Refuser en
+/// simple lien dessous (impossible à toucher par erreur).
 struct ReadyCheckView: View {
     @EnvironmentObject var client: RemoteClient
     let queue: QueueInfo?
@@ -465,10 +733,12 @@ struct ReadyCheckView: View {
                 Text("Partie trouvée !").font(.system(size: 17, weight: .bold))
                 Spacer(minLength: 0)
                 Button { client.accept(true) } label: { Label("Accepter", systemImage: "checkmark") }
-                    .buttonStyle(PrimaryButtonStyle(height: 46))
+                    .buttonStyle(PrimaryButtonStyle(height: 50))
                     .doubleTapAction()
-                Button { client.accept(false) } label: { Label("Refuser", systemImage: "xmark") }
-                    .buttonStyle(SecondaryButtonStyle(height: 32))
+                Button("Refuser") { client.accept(false) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.vertical, 2)
             }
         }
         .disabled(client.busy)

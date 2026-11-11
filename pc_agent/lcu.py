@@ -30,30 +30,18 @@ CHAMPION_SUMMARY_URL = (
     "rcp-be-lol-game-data/global/default/v1/champion-summary.json"
 )
 
-# Région (LCU) -> routing plateforme (API Web Riot) -> routing régional.
-PLATFORM_BY_REGION = {
-    "NA": "na1", "EUW": "euw1", "EUNE": "eun1", "KR": "kr", "BR": "br1",
-    "LA1": "la1", "LA2": "la2", "OCE": "oc1", "TR": "tr1", "RU": "ru",
-    "JP": "jp1", "PH": "ph2", "SG": "sg2", "TH": "th2", "TW": "tw2", "VN": "vn2",
-}
-REGIONAL_BY_PLATFORM = {
-    "na1": "americas", "br1": "americas", "la1": "americas", "la2": "americas",
-    "oc1": "americas", "euw1": "europe", "eun1": "europe", "tr1": "europe",
-    "ru": "europe", "kr": "asia", "jp1": "asia", "ph2": "asia", "sg2": "asia",
-    "th2": "asia", "tw2": "asia", "vn2": "asia",
-}
-
 
 def find_lcu_credentials() -> tuple[int, str] | None:
     """Retrouve (port, token) dans les arguments du process LeagueClientUx.
 
     Renvoie None si le client n'est pas lancé.
     """
-    for proc in psutil.process_iter(["name", "cmdline"]):
+    # Name only: reading every process's command line is slow on Windows.
+    for proc in psutil.process_iter(["name"]):
         try:
             if (proc.info["name"] or "").lower() != CLIENT_PROCESS:
                 continue
-            args = proc.info["cmdline"] or []
+            args = proc.cmdline() or []
             port = token = None
             for arg in args:
                 if arg.startswith("--app-port="):
@@ -77,8 +65,8 @@ class LcuClient:
         self.session.verify = False
         self._champions: dict[int, str] | None = None      # cache id -> nom
         self._champion_ids: dict[str, int] | None = None   # cache nom/alias (minuscule) -> id
-        self._champion_alias: dict[int, str] | None = None  # cache id -> alias (ex. "MissFortune")
         self._summary_retry_at = 0.0   # échec de chargement -> nouvel essai après ce délai
+        self._summoners: dict = {}     # summonerId -> summoner (names are stable)
 
     @property
     def connected(self) -> bool:
@@ -116,45 +104,25 @@ class LcuClient:
         except ValueError:
             return None
 
-    def get_bytes(self, path: str, timeout: float = 3.0) -> bytes | None:
-        resp = self._request(path, timeout)
-        if resp is None or resp.status_code != 200:
-            return None
-        return resp.content
+    def _send(self, method: str, path: str, payload=None, timeout: float = 3.0) -> bool:
+        """Sends a command to the client; True on a 2xx answer."""
+        if not self.connected and not self.connect():
+            return False
+        try:
+            resp = self.session.request(method, self._url(path), json=payload, timeout=timeout)
+        except requests.RequestException:
+            self.port = None  # client closed: reconnect on next call
+            return False
+        return 200 <= resp.status_code < 300
 
     def post(self, path: str, payload=None, timeout: float = 3.0) -> bool:
-        """Envoie une COMMANDE au client (ex. accepter un ready-check).
-        Renvoie True si le client a répondu 2xx."""
-        if not self.connected and not self.connect():
-            return False
-        try:
-            resp = self.session.post(self._url(path), json=payload, timeout=timeout)
-        except requests.RequestException:
-            self.port = None  # client fermé : reconnexion au prochain appel
-            return False
-        return 200 <= resp.status_code < 300
+        return self._send("POST", path, payload, timeout)
 
     def patch(self, path: str, payload=None, timeout: float = 3.0) -> bool:
-        """Comme `post`, en PATCH (ex. verrouiller une action de sélection)."""
-        if not self.connected and not self.connect():
-            return False
-        try:
-            resp = self.session.patch(self._url(path), json=payload, timeout=timeout)
-        except requests.RequestException:
-            self.port = None
-            return False
-        return 200 <= resp.status_code < 300
+        return self._send("PATCH", path, payload, timeout)
 
     def delete(self, path: str, timeout: float = 3.0) -> bool:
-        """Comme `post`, en DELETE (ex. quitter la file)."""
-        if not self.connected and not self.connect():
-            return False
-        try:
-            resp = self.session.delete(self._url(path), timeout=timeout)
-        except requests.RequestException:
-            self.port = None
-            return False
-        return 200 <= resp.status_code < 300
+        return self._send("DELETE", path, None, timeout)
 
     # ----------------------------------------------------------- endpoints
     def gameflow_phase(self) -> str | None:
@@ -173,23 +141,12 @@ class LcuClient:
         """Infos d'un summoner par son id local (gameName/tagLine si visibles)."""
         if not summoner_id:
             return None
-        return self.get_json(f"/lol-summoner/v1/summoners/{summoner_id}")
-
-    def region_platform(self) -> tuple[str | None, str | None]:
-        """Déduit (platform, regional) depuis la LCU. (None, None) si inconnu."""
-        data = self.get_json("/riotclient/region-locale")
-        if not data:
-            return None, None
-        region = (data.get("region") or "").upper()
-        platform = PLATFORM_BY_REGION.get(region)
-        regional = REGIONAL_BY_PLATFORM.get(platform) if platform else None
-        return platform, regional
-
-    def champion_icon(self, champion_id: int) -> bytes | None:
-        """Icône carrée du champion (PNG), servie localement par le client."""
-        if not champion_id or champion_id <= 0:
-            return None
-        return self.get_bytes(f"/lol-game-data/assets/v1/champion-icons/{champion_id}.png")
+        if summoner_id not in self._summoners:
+            found = self.get_json(f"/lol-summoner/v1/summoners/{summoner_id}")
+            if not found:
+                return None
+            self._summoners[summoner_id] = found
+        return self._summoners[summoner_id]
 
     def champion_name(self, champion_id: int) -> str:
         """Nom du champion depuis le résumé des champions (mis en cache)."""
@@ -214,14 +171,6 @@ class LcuClient:
         alias = (raw_name or "").rsplit("_", 1)[-1]
         return ids.get(alias.lower(), 0) or ids.get((name or "").lower(), 0)
 
-    def champion_alias(self, champion_id: int) -> str:
-        """Alias d'un champion (ex. 'MissFortune'), pour les URL d'art."""
-        if not champion_id or champion_id <= 0:
-            return ""
-        if self._summary_due():
-            self._load_champion_summary()
-        return (self._champion_alias or {}).get(champion_id, "")
-
     def _summary_due(self) -> bool:
         """Table à (re)charger : jamais chargée, ou dernier essai raté il y a plus
         d'une minute. ⚠️ Lancé à l'ouverture de session, l'agent démarre souvent
@@ -232,7 +181,6 @@ class LcuClient:
         self._summary_retry_at = time.monotonic() + 60
         self._champions = {}
         self._champion_ids = {}
-        self._champion_alias = {}
         try:
             resp = requests.get(CHAMPION_SUMMARY_URL, timeout=8)
         except requests.RequestException:
@@ -252,7 +200,6 @@ class LcuClient:
             alias = champ.get("alias", "")
             if isinstance(cid, int) and cid > 0:
                 self._champions[cid] = name
-                self._champion_alias[cid] = alias
                 for key in (name, alias):
                     if key:
                         self._champion_ids.setdefault(key.lower(), cid)

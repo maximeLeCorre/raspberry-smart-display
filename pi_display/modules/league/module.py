@@ -37,8 +37,19 @@ from modules.league.stats_screen import StatsScreen
 from riot_web import (PATCH_TTL, Champions, ItemPrices, RiotWeb, build_player_info,
                       current_patch, icon_bytes, normalize_riot_id, splash_bytes)
 from store import Store
+from watch_settings import WatchSettings
 
 LIVE_STEP = 10                         # s de jeu entre deux points en direct
+# Files proposées au bouton Jouer (réglage de la montre) : id LCU → nom écrit.
+PLAY_QUEUES = {2400: "ARAM Chaos", 450: "ARAM", 490: "Partie rapide", 400: "Normale (draft)",
+               420: "Classée solo/duo", 440: "Classée flexible", 1700: "Arène"}
+# `lol.gameMode` des amis → nom écrit (le reste : vide).
+GAME_MODES = {"KIWI": "ARAM Chaos", "ARAM": "ARAM", "CLASSIC": "Faille", "CHERRY": "Arène",
+              "URF": "URF", "TFT": "TFT"}
+# État de jeu d'un ami (`lol.gameStatus`) → libellé écrit.
+FRIEND_STATUS = {"inGame": "en partie", "championSelect": "en sélection", "inQueue": "en file",
+                 "hostingNormalGame": "dans un lobby", "hostingRankedGame": "dans un lobby",
+                 "hostingCoopVsAIGame": "dans un lobby", "hostingPracticeGame": "dans un lobby"}
 TEAM_IDS = {"ORDER": 100, "CHAOS": 200}
 TIMELINE_BACKFILL = 20                 # parties récentes dont on veut la timeline
 
@@ -55,6 +66,7 @@ class LeagueModule(Module):
     name = "league"
     screens = [QueueScreen, ChampSelectScreen, LolScreen, CountersScreen, PostGameScreen,
                MatchHistoryScreen, StatsScreen]
+    offline_actions = frozenset({"set_follow", "set_play"})
 
     def __init__(self, app):
         super().__init__(app)
@@ -68,10 +80,17 @@ class LeagueModule(Module):
         self.summoner_rid = (lol_cfg.get("summoner") or "").strip()
         # Ami comparé (écran Stats : moi seul / lui seul / ensemble), « Nom#TAG ».
         self.compare_rid = (lol_cfg.get("compare") or "").strip()
-        # Bouton « créer un lobby » du défaut : file toujours ARAM Chaos (2400),
-        # et ami invité s'il est en ligne (vide = pas d'invitation).
+        # Bouton « Jouer » : valeurs de DÉPART (file, ami invité) ; ensuite c'est
+        # le réglage fait sur la montre qui compte (`self.settings`, watch.db).
         self.lobby_queue = int(lol_cfg.get("lobby_queue", 2400) or 2400)
         self.lobby_invite = (lol_cfg.get("lobby_invite") or "").strip()
+        # Réglages faits sur la montre (amis suivis, file + amis du bouton Jouer) ;
+        # la config ci-dessus ne sert que de valeur de départ.
+        self.settings = WatchSettings(self.lobby_queue, [self.lobby_invite] if self.lobby_invite else [])
+        self._friend_states: dict | None = None    # riotId → (connecté, en partie, nom) déjà vus
+        self._friends_raw = None                   # dernière liste traitée (même objet = rien)
+        self._started_at = 0            # epoch du début de la partie (stable, pour la montre)
+        self._respawn_at = 0            # epoch de réapparition (stable)
         self.friends = {
             normalize_riot_id(*rid.split("#", 1))
             for rid in lol_cfg.get("friends", [])
@@ -79,6 +98,8 @@ class LeagueModule(Module):
         }
         # Base locale des parties (historique consultable PC éteint).
         self.store = Store()
+        # Newest stored game BEFORE the current one (a newer id = its result is in).
+        self._result_baseline = self.store.newest_id()
         # Icônes sur disque (icons.db) : pas de re-téléchargement au redémarrage.
         self.icon_cache = IconCache()
         self._remote_icons: dict[int, bytes] = {}   # icônes réduites pour la montre
@@ -131,6 +152,7 @@ class LeagueModule(Module):
     def tick(self) -> None:
         self._maybe_sync()
         self._maybe_push_ready_check()
+        self._maybe_push_friends()
         if time.monotonic() - self._patch_check >= PATCH_TTL:
             self._patch_check = time.monotonic()
             self.app.async_call(current_patch, lambda _: None)
@@ -197,11 +219,49 @@ class LeagueModule(Module):
                 extra={"conversationId": msg.get("conv") or "", "from": msg.get("from") or ""})
         self._chat_pushed = msg.get("id") or self._chat_pushed
 
+    def _maybe_push_friends(self) -> None:
+        """Amis suivis (réglage montre) : notification quand l'un se connecte, sort
+        de partie ou y entre. Rien au 1er relevé (ouverture du client), ni sans
+        liste (client fermé, PC éteint). En partie, la liste n'est plus relue par
+        l'agent : un changement pendant ce temps est notifié au retour au menu."""
+        raw = (self.app.agent_data.get("default") or {}).get("friendsOnline")
+        if raw is self._friends_raw:
+            return
+        self._friends_raw = raw
+        if raw is None or not self.app.agent_connected:
+            self._friend_states = None
+            return
+        self.settings.resolve_invites([f.get("riotId") or "" for f in raw])
+        states = {(f.get("riotId") or "").lower(): (_connected(f), f.get("gameStatus") == "inGame",
+                                                    f.get("name") or "?") for f in raw}
+        before, self._friend_states = self._friend_states, states
+        if before is None:
+            return
+        for key, follow in self.settings.follows.items():
+            was = before.get(key, (False, False, ""))
+            now = states.get(key, (False, False, ""))
+            name = now[2] or was[2] or follow["riotId"].split("#")[0]
+            if follow.get("online") and now[0] and not was[0]:
+                title, category = f"{name} est en ligne", "FRIEND_FREE"
+            elif follow.get("leave") and was[1] and not now[1] and now[0]:
+                title, category = f"{name} a fini sa partie", "FRIEND_FREE"
+            elif follow.get("enter") and now[1] and not was[1]:
+                title, category = f"{name} entre en partie", "FRIEND_INFO"
+            else:
+                continue
+            body = "Jouer ensemble ?" if category == "FRIEND_FREE" else ""
+            self.app.push.notify({"alert": {"title": title, "body": body}, "sound": "default",
+                                  "category": category},
+                                 collapse_id=f"friend-{key}"[:64], ttl=600,
+                                 extra={"riotId": follow["riotId"]})
+
     def on_agent_screen(self, screen: str, shown: bool) -> None:
         # Un écran poussé par l'agent (vraie partie) sort du mode « revue ».
         self.postgame_return = None
         if screen == "lol":                   # nouvelle partie : écarts à zéro
             self.live = _new_series()
+            self._result_baseline = self.store.newest_id()
+            self._started_at = self._respawn_at = 0
         # Fin de partie : on tente une synchro immédiate (+ re-synchros
         # différées : la LCU met parfois quelques secondes à indexer).
         # Le scan périodique reste le filet. `_postgame_baseline` =
@@ -516,27 +576,122 @@ class LeagueModule(Module):
                 "rerolls": cs.get("rerolls", 0),
                 "timer": cs.get("timer", {}),
             }}
-        if screen == "lol":       # en partie : seulement notre dernier kill (vibration)
-            return {"game": {"kill": (data.get("lol") or {}).get("myKill")}}
-        if screen == "postgame":  # honneurs + « Retour au lobby »
-            return {"postgame": {"honor": (data.get("postgame") or {}).get("honor")}}
-        if screen == "default":   # accueil : bouton Jouer + lobby (joueurs, Lancer)
+        view = {"settings": self._settings_view()}
+        if screen == "lol":       # en partie : résumé (change aux événements, pas chaque seconde)
+            view["game"] = self._game_view(data.get("lol") or {})
+        elif screen == "postgame":  # résultat, honneurs, « Retour au lobby »
+            view["postgame"] = {"honor": (data.get("postgame") or {}).get("honor"),
+                                "result": self._result_view(data.get("lol") or {})}
+        elif screen == "default":   # accueil : bouton Jouer, lobby, amis, récompenses
             home = data.get("default") or {}
-            return {"home": {"client": bool(home.get("client")),
-                             "lobby": self._lobby_with_default_friend(home.get("lobby")),
-                             "invitation": home.get("invitation"),
-                             "playStatus": home.get("playStatus") or "",
-                             "playBusy": bool(home.get("playBusy")),
-                             "playInvite": self.lobby_invite}}
-        return {}
+            view["home"] = {"client": bool(home.get("client")),
+                            "lobby": self._lobby_with_default_friend(home.get("lobby")),
+                            "invitation": home.get("invitation"),
+                            "playStatus": home.get("playStatus") or "",
+                            "playBusy": bool(home.get("playBusy")),
+                            "playInvite": ", ".join(r.split("#")[0] for r in self.settings.invites),
+                            "playQueue": PLAY_QUEUES.get(self.settings.queue_id, ""),
+                            "friends": self._friends_view(home.get("friendsOnline")),
+                            "rewards": home.get("rewards"),
+                            "reconnect": bool(home.get("reconnect"))}
+        return view
+
+    def _settings_view(self) -> dict:
+        return {"follows": sorted(self.settings.follows.values(), key=lambda f: f["riotId"].lower()),
+                "queueId": self.settings.queue_id, "invites": self.settings.invites,
+                "queues": [{"id": q, "name": n} for q, n in PLAY_QUEUES.items()]}
+
+    def _friends_view(self, raw) -> list[dict] | None:
+        """Amis connectés, état ÉCRIT ; ceux avec qui on peut jouer tout de suite d'abord."""
+        if raw is None:
+            return None
+        out = []
+        for f in raw:
+            status = f.get("gameStatus") or ""
+            if f.get("availability") == "mobile":
+                state = "sur mobile"
+            elif status in FRIEND_STATUS:
+                state = FRIEND_STATUS[status]
+            else:
+                state = {"away": "absent", "dnd": "occupé"}.get(f.get("availability"), "hors partie")
+            out.append({"name": f.get("name") or "?", "riotId": f.get("riotId") or "",
+                        "summonerId": f.get("summonerId") or 0, "pid": f.get("pid") or "",
+                        "state": state, "inGame": status == "inGame",
+                        "free": _connected(f) and status not in FRIEND_STATUS,
+                        "since": f.get("since") or 0, "mode": GAME_MODES.get(f.get("gameMode") or "", ""),
+                        "followed": self.settings.follow(f.get("riotId") or "") is not None})
+        out.sort(key=lambda f: (not f["free"], f["state"] == "sur mobile", f["name"].lower()))
+        return out
+
+    def _game_view(self, lol: dict) -> dict:
+        """Ma partie (montre) : K/D/A, kills et or des équipes, mort + réapparition.
+        Échéances en epoch STABLES (début, réapparition) : la montre décompte
+        elle-même, l'état ne change qu'aux événements (pas à chaque relevé)."""
+        players = lol.get("players") or []
+        me = next((p for p in players if p.get("isSelf")), None)
+        view = {"kill": lol.get("myKill")}
+        if me is None:
+            return view
+        now = time.time()
+        started = int(now - (lol.get("game_time") or 0))
+        if abs(started - self._started_at) > 3:
+            self._started_at = started
+        dead = bool(me.get("isDead"))
+        respawn = int(now + (me.get("respawn") or 0)) if dead else 0
+        if not dead or abs(respawn - self._respawn_at) > 2:
+            self._respawn_at = respawn
+        scores = lol.get("scores") or {}
+        mine = (me.get("team") or "").lower()
+        theirs = "chaos" if mine == "order" else "order"
+        view.update({
+            "championId": me.get("championId") or 0, "champion": me.get("champion") or "",
+            "level": me.get("level") or 0, "kda": [me.get("k", 0), me.get("d", 0), me.get("a", 0)],
+            "kills": [scores.get(mine, 0), scores.get(theirs, 0)],
+            "goldGap": self._gold_gap(me.get("team")), "startedAt": self._started_at,
+            "dead": dead, "respawnAt": self._respawn_at,
+            # Or à dépenser : seulement mort (en ARAM on n'achète qu'à la mort), arrondi.
+            "gold": int((lol.get("self") or {}).get("gold", 0) // 50 * 50) if dead else None,
+        })
+        return view
+
+    def _gold_gap(self, team: str | None) -> int | None:
+        """Écart d'or ESTIMÉ (valeur des objets, comme l'écran Écarts), arrondi à 100."""
+        current = self.live.get("current") or {}
+        golds = current.get("gold") or []
+        team_id = TEAM_IDS.get(team or "")
+        if not golds or not team_id:
+            return None
+        pairs = list(zip(golds, self.live["players"]))
+        ours = sum(g or 0 for g, p in pairs if p["team"] == team_id)
+        others = sum(g or 0 for g, p in pairs if p["team"] != team_id)
+        return int(round((ours - others) / 100) * 100)
+
+    def _result_view(self, lol: dict) -> dict:
+        """Résultat de la partie qui vient de finir : depuis le store dès que la
+        synchro l'a apportée (exact), sinon depuis le dernier relevé en direct."""
+        newest = self.store.newest_id()
+        if newest and newest != self._result_baseline:
+            row = (self.store.query(limit=1) or [{}])[0]
+            return {"win": row.get("win"), "kda": row.get("kda"), "championId": row.get("championId", 0),
+                    "champion": row.get("championName") or "", "duration": row.get("duration", 0),
+                    "mode": row.get("queue") or ""}
+        me = next((p for p in lol.get("players") or [] if p.get("isSelf")), None)
+        if me is None:
+            return {}
+        return {"win": {"Win": True, "Lose": False}.get(lol.get("result") or ""),
+                "kda": [me.get("k", 0), me.get("d", 0), me.get("a", 0)],
+                "championId": me.get("championId") or 0, "champion": me.get("champion") or "",
+                "duration": int(lol.get("game_time") or 0),
+                "mode": GAME_MODES.get(lol.get("game_mode") or "", "")}
 
     def _lobby_with_default_friend(self, lobby: dict | None) -> dict | None:
-        """Ami par défaut (`[lol] lobby_invite`, comme le bouton Jouer) marqué et en tête."""
+        """Amis du bouton Jouer (réglage montre) marqués et en tête."""
         if not lobby:
             return lobby
-        want = self.lobby_invite.lower()
-        friends = [{**f, "isDefault": bool(want) and want in (f.get("name", "").lower(),
-                                                             f.get("riotId", "").lower())}
+        wanted = {r.lower() for r in self.settings.invites} | {
+            r.split("#")[0].lower() for r in self.settings.invites}
+        friends = [{**f, "isDefault": bool({f.get("name", "").lower(),
+                                            f.get("riotId", "").lower()} & wanted)}
                    for f in lobby.get("friends") or []]
         friends.sort(key=lambda f: not f["isDefault"])     # tri stable : reste dans l'ordre
         return {**lobby, "friends": friends}
@@ -580,11 +735,30 @@ class LeagueModule(Module):
             self.lcu_action(action)
             return 200, {"ok": True}
         if action in ("play", "play_cancel"):        # = bouton Jouer de l'accueil du Pi
-            if action == "play":
-                self.play()
-            else:
+            if action == "play_cancel":
                 self.play_cancel()
+                return 200, {"ok": True}
+            invite = body.get("invite")             # « Jouer ensemble » avec un ami précis
+            if invite is not None and not (isinstance(invite, list) and len(invite) <= 4
+                                           and all(isinstance(r, str) and 0 < len(r) <= 40
+                                                   for r in invite)):
+                return 400, {"ok": False, "error": "invitation invalide"}
+            self.play(invite)
             return 200, {"ok": True}
+        if action == "set_follow":                   # réglage : ami suivi (notifications)
+            ok = self.settings.set_follow(body.get("riotId"), body)
+            return (200, {"ok": True}) if ok else (400, {"ok": False, "error": "ami invalide"})
+        if action == "set_play":                     # réglage : file + amis du bouton Jouer
+            try:
+                queue_id = int(body.get("queueId") or 0)
+            except (TypeError, ValueError):
+                queue_id = 0
+            if queue_id not in PLAY_QUEUES or not isinstance(body.get("invites"), list):
+                return 400, {"ok": False, "error": "réglage invalide"}
+            ok = self.settings.set_play(queue_id, body["invites"])
+            return (200, {"ok": True}) if ok else (400, {"ok": False, "error": "amis invalides"})
+        if action in ("reward_claim", "reward_claim_all", "reconnect"):
+            return self._client_action(action, body, data.get("default") or {})
         if action in ("invite_accept", "invite_decline"):
             inv = (data.get("default") or {}).get("invitation") or {}
             if not inv or str(body.get("invitationId") or "") != inv.get("id"):
@@ -670,20 +844,47 @@ class LeagueModule(Module):
             return 200, {"ok": True}
         return None
 
+    def _client_action(self, action: str, body: dict, home: dict) -> tuple[int, dict]:
+        """Récompenses et reconnexion, vérifiées sur le dernier état du client."""
+        if action == "reconnect":
+            if not home.get("reconnect"):
+                return 409, {"ok": False, "error": "pas de partie à rejoindre"}
+            self.lcu_action("reconnect")
+            return 200, {"ok": True}
+        rewards = home.get("rewards") or {}
+        if action == "reward_claim_all":
+            if not rewards.get("grants") and not rewards.get("events"):
+                return 409, {"ok": False, "error": "rien à récupérer"}
+            self.lcu_action("reward_claim_all")
+            return 200, {"ok": True}
+        grant = next((g for g in rewards.get("grants") or [] if g.get("grantId") == body.get("grantId")), None)
+        if grant is None:
+            return 409, {"ok": False, "error": "récompense déjà récupérée"}
+        picks = body.get("selections")
+        options = {o.get("id") for o in grant.get("options") or []}
+        if (not isinstance(picks, list) or not picks or len(picks) > grant.get("max", 1)
+                or not set(picks) <= options):
+            return 400, {"ok": False, "error": "choix invalide"}
+        self.app.server.send({"type": "lcu_action", "action": "reward_claim",
+                              "grantId": grant["grantId"], "selections": picks})
+        return 200, {"ok": True}
+
     # --------------------------------------------------------- actions client
     def lcu_action(self, action: str) -> None:
         """Envoie une commande au client via l'agent (ex. accepter un ready-check)."""
         self.app.server.send({"type": "lcu_action", "action": action})
 
-    def play(self) -> None:
+    def play(self, invite: list[str] | None = None) -> None:
         """Bouton unique : demande à l'agent de lancer le client s'il est fermé,
-        créer le lobby ARAM Chaos s'il n'est pas déjà le bon, puis inviter l'ami
-        configuré (`lobby_invite`) — chaque étape déjà faite étant sautée côté
-        agent. Sans effet si l'agent est déconnecté."""
+        créer le lobby de la file réglée s'il n'est pas déjà le bon, puis inviter
+        les amis réglés (ou `invite` : « Jouer ensemble » depuis une notification)
+        — chaque étape déjà faite étant sautée côté agent. Sans effet si l'agent
+        est déconnecté."""
         if not self.app.agent_connected:
             return
         self.app.server.send({"type": "lcu_action", "action": "play",
-                              "queueId": self.lobby_queue, "invite": self.lobby_invite})
+                              "queueId": self.settings.queue_id,
+                              "invite": self.settings.invites if invite is None else invite})
 
     def play_cancel(self) -> None:
         """Ré-appui sur « Jouer » pendant l'enchaînement : l'agent arrête ses
@@ -748,6 +949,11 @@ class LeagueModule(Module):
             self._show_postgame({})      # « en attente du bilan… »
             if self.app.agent_connected and game_id:
                 self.app.server.send({"type": "request_lcu_detail", "gameId": game_id})
+
+
+def _connected(friend: dict) -> bool:
+    """Ami connecté AU JEU (le client mobile ne permet pas de jouer)."""
+    return (friend.get("availability") or "") not in ("", "offline", "mobile")
 
 
 REMOTE_ICON_SIZE = 96    # px : 48 pt × 2 (écran Retina de la montre)

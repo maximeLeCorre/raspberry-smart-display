@@ -231,7 +231,7 @@ def test_invitation_notifiee_et_acceptee(app, monkeypatch):
 
 
 def test_inviter_ami_par_defaut_en_tete(app):
-    app.modules["league"].lobby_invite = "Ami"
+    app.modules["league"].settings.invites = ["Ami#EUW"]
     push(app, type="_connected")
     lob = {"members": [], "invites": [], "isLeader": True, "canStart": True,
            "friends": [{"name": "Bob", "riotId": "Bob#EUW", "summonerId": 6, "status": "en ligne"},
@@ -337,3 +337,117 @@ def test_honneurs_et_retour_au_lobby(app):
     assert call(app, "POST", "/action", {"action": "play_again"})[0] == 200
     assert {"type": "lcu_action", "action": "honor", "puuid": "a2"} in app.sent
     assert {"type": "lcu_action", "action": "play_again"} in app.sent
+
+
+FRIENDS = [{"name": "Ami", "riotId": "Ami#EUW", "summonerId": 9, "pid": "ami@pvp", "availability": "chat",
+            "gameStatus": "inGame", "gameMode": "KIWI", "since": 1700000000},
+           {"name": "Zoé", "riotId": "Zoé#EUW", "summonerId": 5, "pid": "zoe@pvp", "availability": "away",
+            "gameStatus": "outOfGame", "gameMode": "", "since": 0},
+           {"name": "Tel", "riotId": "Tel#EUW", "summonerId": 7, "pid": "t@pvp", "availability": "mobile",
+            "gameStatus": "", "gameMode": "", "since": 0}]
+
+
+def test_amis_etat_ecrit_et_suivi(app, monkeypatch):
+    sent = []
+    monkeypatch.setattr(app.push, "notify", lambda aps, **kw: sent.append((aps, kw)))
+    league = app.modules["league"]
+    push(app, type="_connected")
+    assert call(app, "POST", "/action", {"action": "set_follow", "riotId": "pas-un-id"})[0] == 400
+    assert call(app, "POST", "/action", {"action": "set_follow", "riotId": "Ami#EUW",
+                                         "online": True, "leave": True})[0] == 200
+    push(app, type="data", screen="default", payload={"friendsOnline": FRIENDS})
+    time.sleep(0.1)
+    league.tick()                                    # 1er relevé : aucune notification
+    state = call(app, "GET", "/state?wait=0")[1]
+    friends = state["home"]["friends"]
+    assert [(f["name"], f["state"], f["followed"]) for f in friends] == [
+        ("Zoé", "absent", False), ("Ami", "en partie", True), ("Tel", "sur mobile", False)]
+    assert friends[1]["mode"] == "ARAM Chaos"
+    assert state["settings"]["follows"] == [{"riotId": "Ami#EUW", "online": True, "leave": True,
+                                             "enter": False}]
+    # L'ami sort de partie → « a fini sa partie », avec son Riot ID (Jouer ensemble).
+    out = [{**FRIENDS[0], "gameStatus": "outOfGame"}] + FRIENDS[1:]
+    push(app, type="data", screen="default", payload={"friendsOnline": out})
+    time.sleep(0.1)
+    league.tick()
+    league.tick()
+    assert [(a["alert"]["title"], a["category"]) for a, _ in sent] == [("Ami a fini sa partie", "FRIEND_FREE")]
+    assert sent[0][1]["extra"] == {"riotId": "Ami#EUW"}
+    assert call(app, "POST", "/action", {"action": "set_follow", "riotId": "Ami#EUW"})[0] == 200
+    assert call(app, "GET", "/state?wait=0")[1]["settings"]["follows"] == []      # tout faux = retiré
+
+
+def test_bouton_jouer_configurable(app):
+    push(app, type="_connected")
+    time.sleep(0.1)
+    assert call(app, "POST", "/action", {"action": "set_play", "queueId": 999, "invites": []})[0] == 400
+    assert call(app, "POST", "/action", {"action": "set_play", "queueId": 450,
+                                         "invites": ["Ami#EUW", "Zoé#EUW"]})[0] == 200
+    state = call(app, "GET", "/state?wait=0")[1]
+    assert state["home"]["playQueue"] == "ARAM" and state["home"]["playInvite"] == "Ami, Zoé"
+    assert call(app, "POST", "/action", {"action": "play"})[0] == 200
+    assert {"type": "lcu_action", "action": "play", "queueId": 450,
+            "invite": ["Ami#EUW", "Zoé#EUW"]} in app.sent
+    # « Jouer ensemble » (notification) : un seul ami, même file.
+    assert call(app, "POST", "/action", {"action": "play", "invite": ["Bob#EUW"]})[0] == 200
+    assert app.sent[-1]["invite"] == ["Bob#EUW"]
+    assert call(app, "POST", "/action", {"action": "play", "invite": "Bob"})[0] == 400
+
+
+def test_recompenses_et_reconnexion(app):
+    rewards = {"grants": [{"grantId": "g1", "rewardGroupId": "rg", "max": 1,
+                           "options": [{"id": "r1", "title": "750 essences bleues", "details": ""},
+                                       {"id": "r2", "title": "Capsule", "details": ""}]}],
+               "events": []}
+    push(app, type="_connected")
+    push(app, type="data", screen="default", payload={"client": True, "rewards": rewards,
+                                                       "reconnect": False})
+    time.sleep(0.1)
+    assert call(app, "GET", "/state?wait=0")[1]["home"]["rewards"] == rewards
+    assert call(app, "POST", "/action", {"action": "reward_claim", "grantId": "zz",
+                                         "selections": ["r1"]})[0] == 409
+    assert call(app, "POST", "/action", {"action": "reward_claim", "grantId": "g1",
+                                         "selections": ["r1", "r2"]})[0] == 400   # 1 choix max
+    assert call(app, "POST", "/action", {"action": "reward_claim", "grantId": "g1",
+                                         "selections": ["r2"]})[0] == 200
+    assert {"type": "lcu_action", "action": "reward_claim", "grantId": "g1",
+            "selections": ["r2"]} in app.sent
+    assert call(app, "POST", "/action", {"action": "reconnect"})[0] == 409
+    push(app, type="data", screen="default", payload={"reconnect": True})
+    time.sleep(0.1)
+    assert call(app, "POST", "/action", {"action": "reconnect"})[0] == 200
+
+
+def test_partie_resume_et_mort(app):
+    lol = {"game_time": 600, "game_mode": "KIWI", "scores": {"order": 12, "chaos": 9},
+           "self": {"gold": 2473}, "myKill": {"id": 3, "streak": 1},
+           "players": [{"name": "Moi", "isSelf": True, "team": "ORDER", "champion": "Jinx",
+                        "championId": 222, "level": 11, "k": 7, "d": 2, "a": 9,
+                        "isDead": True, "respawn": 12, "items": []}]}
+    push(app, type="_connected")
+    push(app, type="set_screen", screen="lol")
+    push(app, type="data", screen="lol", payload=lol)
+    time.sleep(0.1)
+    game = call(app, "GET", "/state?wait=0")[1]["game"]
+    assert game["kda"] == [7, 2, 9] and game["kills"] == [12, 9] and game["level"] == 11
+    assert game["dead"] and game["gold"] == 2450
+    assert abs(game["respawnAt"] - (time.time() + 12)) < 3
+    assert abs(game["startedAt"] - (time.time() - 600)) < 3
+    # Relevé suivant (1 s plus tard) : mêmes échéances → pas de nouvelle version.
+    v = call(app, "GET", "/state?wait=0")[1]["v"]
+    push(app, type="data", screen="lol", payload={**lol, "game_time": 601,
+                                                  "players": [{**lol["players"][0], "respawn": 11}]})
+    time.sleep(0.1)
+    assert call(app, "GET", "/state?wait=0")[1]["v"] == v
+    # Fin de partie : résultat tiré du dernier relevé (store pas encore synchronisé).
+    push(app, type="data", screen="lol", payload={**lol, "result": "Win"})
+    push(app, type="set_screen", screen="postgame")
+    time.sleep(0.1)
+    result = call(app, "GET", "/state?wait=0")[1]["postgame"]["result"]
+    assert result["win"] is True and result["kda"] == [7, 2, 9] and result["mode"] == "ARAM Chaos"
+
+
+def test_reglages_possibles_pc_eteint(app):
+    # Agent absent : les réglages (gardés sur le Pi) passent, les actions du client non.
+    assert call(app, "POST", "/action", {"action": "set_play", "queueId": 450, "invites": []})[0] == 200
+    assert call(app, "POST", "/action", {"action": "play"})[0] == 503

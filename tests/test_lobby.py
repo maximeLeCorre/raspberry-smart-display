@@ -73,14 +73,18 @@ def test_poll_lobby_puis_client_ferme():
     src.lcu = FakeLcu("Lobby")
     screen, payload = src.poll()
     assert screen == "default" and payload["lobby"]["members"]
+    assert payload["lobby"]["penaltyEnds"] == 0 and not payload["reconnect"]
+    assert [f["name"] for f in payload["friendsOnline"]] == ["Ami", "Bob", "Joue", "Tel", "Zoé"]
     src.lcu.phase = "None"                                  # retour au menu
-    assert src.poll() == ("default", {"client": True, "lobby": None, "invitation": None,
-                                      "chat": None})
-    src.lcu.phase = "Lobby"
-    src.poll()
+    _, payload = src.poll()
+    assert {k: payload[k] for k in ("client", "lobby", "invitation", "chat")} == {
+        "client": True, "lobby": None, "invitation": None, "chat": None}
+    src.lcu.phase = "Reconnect"                             # jeu planté en partie
+    assert src.poll()[1]["reconnect"]
     src.lcu.phase = None                                    # client fermé : effacé une fois
     assert src.poll() == ("default", {"client": False, "lobby": None, "invitation": None,
-                                      "chat": None})
+                                      "chat": None, "friendsOnline": None, "rewards": None,
+                                      "reconnect": False})
     assert src.poll() is None
 
 

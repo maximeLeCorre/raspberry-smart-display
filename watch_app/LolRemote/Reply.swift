@@ -1,6 +1,7 @@
-// Réponse à un message privé du client League : réponses rapides directement
-// dans la notification, ou « Répondre… » qui ouvre cet écran (dictée en tête, puis
-// réponses rapides ; gribouillage / clavier aussi). Envoi : action `chat_reply` du Pi → agent →
+// Message privé du client League : réponse (réponses rapides directement dans la
+// notification, ou « Répondre… » qui ouvre cet écran) ou nouveau message à un ami
+// (fiche ami). Dictée en tête (gribouillage / clavier aussi), texte RELU avant
+// l'envoi (la dictée se trompe sur les noms de jeu), puis phrases toutes faites. Envoi : action `chat_reply` du Pi → agent →
 // LCU. (Pas de champ de texte DANS la notification : indisponible sur watchOS.)
 import SwiftUI
 import UserNotifications
@@ -9,11 +10,14 @@ import WatchKit
 enum QuickReplies {
     static let all = ["J'arrive !", "2 min", "Pas dispo", "Ok 👍"]
     static let inNotification = 3          // les premières, en boutons de notification
+    /// Pour écrire en premier à un ami (fiche ami).
+    static let starters = ["On se fait une ARAM ?", "Je lance dans 5 min", "Tu finis bientôt ?"]
 }
 
 struct ReplyTarget: Identifiable {
-    let conversationId: String
+    let conversationId: String      // = id (pid) de l'ami pour un nouveau message
     let from: String
+    var starters = false            // nouveau message : phrases d'ouverture
     var id: String { conversationId }
 }
 
@@ -43,36 +47,55 @@ struct ReplyView: View {
     let target: ReplyTarget
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
+    @State private var draft: String?       // texte dicté, à relire avant l'envoi
     @State private var sending = false
     @State private var failed = false
 
     var body: some View {
         NavigationStack {
             List {
-                // Dictée en tête : le champ ouvre la saisie de watchOS (micro, gribouillage,
-                // clavier) ; une app ne peut pas lancer la dictée elle-même. « OK » = envoi.
-                Section {
-                    TextField(text: $text) {
-                        Label("Dicter un message", systemImage: "mic.fill")
+                if let draft {
+                    Section {
+                        Text(draft).font(.system(size: 15))
+                        Button { send(draft) } label: { Label("Envoyer", systemImage: "paperplane.fill") }
+                            .foregroundStyle(Theme.accent)
+                        Button { self.draft = nil; text = "" } label: { Label("Redicter", systemImage: "mic.fill") }
+                    } footer: {
+                        status(idle: "Dicté : vérifie avant d'envoyer.")
                     }
-                    .onSubmit { send(text) }
-                } footer: {
-                    if failed {
-                        Label("Non envoyé : PC ou Pi injoignable", systemImage: "exclamationmark.triangle.fill")
-                    } else if sending {
-                        Label("Envoi…", systemImage: "paperplane")
-                    } else {
-                        Text("Touche, puis le micro. Envoyé dès que tu valides.")
+                } else {
+                    // Dictée en tête : le champ ouvre la saisie de watchOS (micro, gribouillage,
+                    // clavier) ; une app ne peut pas lancer la dictée elle-même. « OK » = relecture.
+                    Section {
+                        TextField(text: $text) {
+                            Label("Dicter un message", systemImage: "mic.fill")
+                        }
+                        .onSubmit {
+                            let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !body.isEmpty { draft = body }
+                        }
+                    } footer: {
+                        status(idle: "Touche, puis le micro. Tu relis avant l'envoi.")
                     }
-                }
-                Section("Réponses rapides") {
-                    ForEach(QuickReplies.all, id: \.self) { reply in
-                        Button(reply) { send(reply) }
+                    Section(target.starters ? "Messages rapides" : "Réponses rapides") {
+                        ForEach(target.starters ? QuickReplies.starters : QuickReplies.all, id: \.self) { reply in
+                            Button(reply) { send(reply) }
+                        }
                     }
                 }
             }
             .disabled(sending)
             .navigationTitle(target.from.isEmpty ? "Répondre" : "À \(target.from)")
+        }
+    }
+
+    @ViewBuilder private func status(idle: String) -> some View {
+        if failed {
+            Label("Non envoyé : PC ou Pi injoignable", systemImage: "exclamationmark.triangle.fill")
+        } else if sending {
+            Label("Envoi…", systemImage: "paperplane")
+        } else {
+            Text(idle)
         }
     }
 

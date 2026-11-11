@@ -26,6 +26,13 @@ os.environ["IDFM_API_KEY"] = ""          # écran « Trains » sans appel résea
 os.environ["RIOT_API_KEY"] = ""          # API Web Riot sans clé réelle
 
 
+@pytest.fixture(autouse=True)
+def _watch_settings_isoles(tmp_path, monkeypatch):
+    """Réglages de la montre (watch.db) : jamais le vrai fichier du Pi."""
+    import watch_settings
+    monkeypatch.setattr(watch_settings, "DB_PATH", tmp_path / "watch.db")
+
+
 @pytest.fixture
 def free_port() -> int:
     with socket.socket() as s:

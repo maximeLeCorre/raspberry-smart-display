@@ -18,6 +18,7 @@ class Module:
     name = "base"          # identifiant du module (clé de config)
     always_on = False      # True = toujours actif, non désactivable (ex. système)
     screens: list = []     # classes Screen fournies par ce module
+    offline_actions: frozenset = frozenset()   # remote actions handled without the agent
 
     def __init__(self, app):
         self.app = app

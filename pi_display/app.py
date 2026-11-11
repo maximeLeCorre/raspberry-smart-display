@@ -309,12 +309,16 @@ class App:
         return owner.remote_asset(name) if owner is not None else None
 
     def _on_remote_action(self, request) -> None:
-        if not self.agent_connected:
-            return request.reply(503, {"ok": False, "error": "PC non connecté"})
+        action = request.body.get("action")
         for module in self.modules.values():
+            # Pi-side settings work with the PC off; everything else needs the agent.
+            if not self.agent_connected and action not in module.offline_actions:
+                continue
             answer = module.on_remote_action(request.body)
             if answer is not None:
                 return request.reply(*answer)
+        if not self.agent_connected:
+            return request.reply(503, {"ok": False, "error": "PC non connecté"})
         request.reply(400, {"ok": False, "error": "action inconnue"})
 
     def _on_network(self, msg: dict) -> None:

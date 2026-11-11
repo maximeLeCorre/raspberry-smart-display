@@ -16,10 +16,6 @@ cert_file = "certs/pi-display.crt"
 update_interval = 1.0
 
 [lol]
-# Noms des processus à surveiller (Windows).
-client_process = "LeagueClientUx.exe"
-game_process = "League of Legends.exe"
-
 # Lancement du client si fermé (bouton unique « Jouer » du Pi). On passe par le
 # Riot Client : il sait où League est installé (même sur un autre disque). Chaîne
 # TOML littérale (guillemets simples) pour garder les antislash Windows.
