@@ -99,12 +99,15 @@ class PushScreen(Screen):
             last = next((h["hour"] for h in reversed(hours) if h["pushed"]), None)
             self._tile(surface, 2, "Envois 24 h", str(sent),
                        f"dernier vers {w.hhmm(last * 3600)}" if last else "aucun envoi")
-            self._tile(surface, 3, "Installations", str(st.get("installs", 0)),
-                       f"{st.get('grants', 0)} iPhone(s) attesté(s)")
+            # installs = relais PC (Wardlink) ; grants = jetons APNs attestés, pas des iPhones :
+            # un jeton remplacé (app réinstallée, build Xcode/TestFlight) reste valide 90 j.
+            n = st.get("grants", 0)
+            self._tile(surface, 3, "Relais PC", str(st.get("installs", 0)),
+                       f"{n} jeton{'s' if n > 1 else ''} iPhone valide{'s' if n > 1 else ''}")
         else:
             msg = pp.get("stats_error") or "PUSH_STATS_TOKEN absent"
             self._tile(surface, 2, "Envois 24 h", "—", msg, w.GREY)
-            self._tile(surface, 3, "Installations", "—", msg, w.GREY)
+            self._tile(surface, 3, "Relais PC", "—", msg, w.GREY)
 
     def _chart(self, surface, hours, have_stats, pp) -> None:
         f = self.fonts
@@ -148,7 +151,7 @@ class PushScreen(Screen):
         rows = [("Refus d'Apple (24 h)", str(sum(h["refused"] for h in hours))),
                 ("Limités, anti-abus (24 h)", str(sum(h["limited"] for h in hours))),
                 ("Échecs (24 h)", str(sum(h["failed"] for h in hours))),
-                ("Bannis", f"{st.get('banned', 0)} installation(s)" if st else "—"),
+                ("Bannis", f"{st.get('banned', 0)} relais" if st else "—"),
                 ("Certificat TLS", f"{pp['cert_days']} j" if pp.get("cert_days") is not None else "—")]
         if st.get("started"):
             rows.append(("Compteurs depuis", time.strftime("%d/%m %H:%M", time.localtime(st["started"]))))

@@ -5,7 +5,7 @@ HTTPS ; marche PC éteint). Activable en config ([modules] server), paramétré 
 Pi-only : pas de moitié `sources/` côté agent.
 
 Écrans : `server` (vue d'ensemble, entrée de la tuile Serveur) → `server_machine`
-(VM + Minecraft), `server_rentrer`, `server_push`.
+(VM + Minecraft), `server_rentrer` (→ `server_container`, courbes d'un conteneur), `server_push`.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import time
 
 from modules.base import Module
 from modules.server.machine_screen import MachineScreen
+from modules.server.container_screen import ContainerScreen
 from modules.server.monitor import CARD_NAMES, CRIT, Inputs, Monitor, Settings, WORDS
 from modules.server.push_screen import PushScreen
 from modules.server.rentrer_screen import RentrerScreen
@@ -25,7 +26,7 @@ EVAL_SECONDS = 5
 
 class ServerModule(Module):
     name = "server"
-    screens = [ServicesScreen, MachineScreen, RentrerScreen, PushScreen]
+    screens = [ServicesScreen, MachineScreen, RentrerScreen, ContainerScreen, PushScreen]
 
     def __init__(self, app):
         super().__init__(app)
@@ -45,6 +46,8 @@ class ServerModule(Module):
         self._eval_ts = 0.0
         self._push_stats_ts = 0.0
         self._canary_ts = 0.0
+        self._report_ts = 0.0
+        self.selected_container = ""     # conteneur ouvert par l'écran Rentrer
 
     def tick(self) -> None:
         if self.link is None or time.monotonic() - self._eval_ts < EVAL_SECONDS:
@@ -55,8 +58,13 @@ class ServerModule(Module):
     def evaluate(self, now: float) -> None:
         probes = self.probes.snapshot() if self.probes else None
         report = self.link.report()
-        if self.history is not None and probes:
-            self._record(probes, now)
+        if self.history is not None:
+            if probes:
+                self._record(probes, now)
+            containers = (report.get("data") or {}).get("containers")
+            if containers and report.get("ts") != self._report_ts:
+                self._report_ts = report.get("ts")
+                self.history.record_containers(containers, report.get("ts") or now)
         hours = self.history.push_hours(now) if self.history is not None else []
         inp = Inputs(now=now, link=self.link.snapshot(), report=report, probes=probes,
                      push_hours=hours, restart_loops=self.monitor.restart_loops(report, now))

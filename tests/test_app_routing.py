@@ -115,3 +115,25 @@ def test_trains_ouverts_par_le_prochain_train_pas_par_une_tuile(app):
     assert "trains" not in [tid for tid, _rect in app.screens["default"]._tiles]
     app.current.handle_touch(TRAIN_BOX.center)
     assert app.current.name == "transit" and app.manual_screen == "transit"
+
+
+def test_ecran_ouvert_a_la_main_revient_a_l_accueil_apres_5_min_sans_appui(app):
+    app.manual_screen = "server"
+    app.set_screen("server")
+    app._idle_return_check()
+    assert app.current.name == "server"              # appui récent : on reste
+    app._last_input -= 5 * 60 + 1
+    app._idle_return_check()
+    assert (app.current.name, app.manual_screen) == ("default", None)
+
+
+def test_retour_auto_rend_la_partie_et_ne_touche_pas_aux_ecrans_de_l_agent(app):
+    net(app, type="_connected")
+    net(app, type="set_screen", screen="queue")
+    app._last_input -= 3600
+    app._idle_return_check()
+    assert app.current.name == "queue"               # écran mené par l'agent : jamais rabattu
+    app.manual_screen = "server"
+    app.set_screen("server")
+    app._idle_return_check()
+    assert app.current.name == "queue"               # écran à la main oublié : retour à la partie

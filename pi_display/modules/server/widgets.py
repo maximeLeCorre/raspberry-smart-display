@@ -194,3 +194,10 @@ def size_text(n: int | None) -> str:
     if n >= 1024 ** 3:
         return f"{n / 1024 ** 3:.1f} Go".replace(".", ",")
     return f"{n / 1024 ** 2:.0f} Mo"
+
+
+def cpu_text(pct: float | None) -> str:
+    """CPU de `docker stats` (% d'un cœur) : décimales sous 10 %, un conteneur au repos est à 0,0x %."""
+    if pct is None:
+        return "—"
+    return f"{pct:.2f} %".replace(".", ",") if pct < 10 else f"{pct:.0f} %"

@@ -2,7 +2,7 @@
 
 Bandeau : verdict des trajets témoins (`/v1/status`) + temps de réponse de `/health`.
 Gauche : conteneurs docker (état, santé, CPU/RAM, redémarrages, démarrés depuis) lus par
-`pi-monitor`. Droite : données MOTIS (import, plan IDFM) et totaux `/v1/admin/stats`.
+`pi-monitor` ; toucher un conteneur ouvre ses courbes CPU/RAM (`server_container`). Droite : données MOTIS (import, plan IDFM) et totaux `/v1/admin/stats`.
 Bas : frise des 24 h du verdict (gardée sur le Pi, `history.py`) : une période dégradée ou
 en panne est hachurée ET nommée au-dessus (pas seulement colorée).
 """
@@ -38,6 +38,7 @@ class RentrerScreen(Screen):
         self.module = app.modules.get("server")
         self._key = None
         self._drawn_at = 0.0
+        self._names: list[str] = []      # conteneurs affichés, dans l'ordre des cartes
 
     def enter(self) -> None:
         self._key = None
@@ -99,6 +100,7 @@ class RentrerScreen(Screen):
         up = sum(1 for s in want if (ctrs.get(s) or {}).get("state") == "running")
         title = f"CONTENEURS · {up} / {len(want)} actifs" if data else "CONTENEURS"
         w.blit(surface, f.tiny, title, w.GREY, (CTR_AREA.x, CTR_AREA.y - 18))
+        self._names = names[:6] if data else []
         if not data:
             msg = rep.get("error") or "en attente du relevé SSH…"
             from modules.system.news_screen import wrap_text
@@ -107,11 +109,10 @@ class RentrerScreen(Screen):
                 w.blit(surface, f.small, line, w.GREY, (CTR_AREA.x + 10, y))
                 y += 22
             return
-        cw, ch, gap = (CTR_AREA.w - 16) // 3, (CTR_AREA.h - 8) // 2, 8
         now = time.time()
-        for i, svc in enumerate(names[:6]):
+        for i, svc in enumerate(self._names):
             c = ctrs.get(svc)
-            rect = pygame.Rect(CTR_AREA.x + (i % 3) * (cw + gap), CTR_AREA.y + (i // 3) * (ch + gap), cw, ch)
+            rect = self._card_rect(i)
             running = c is not None and c.get("state") == "running"
             bad = not running or c.get("health") == "unhealthy"
             level = (CRIT if not running else WARN) if bad else None
@@ -133,11 +134,17 @@ class RentrerScreen(Screen):
             w.blit(surface, f.small, word, w.LEVEL_COLOR[st_level], (x + 20, y + 34), rect.w - 34,
                    anchor="midleft")
             if c is not None:
-                cpu = f"CPU {c['cpu']} %" if c.get("cpu") is not None else "CPU —"
-                w.blit(surface, f.small, f"{cpu} · {w.size_text(c.get('mem'))}", w.SOFT, (x, y + 50), rect.w - 20)
+                w.blit(surface, f.small, f"CPU {w.cpu_text(c.get('cpu'))} · {w.size_text(c.get('mem'))}", w.SOFT,
+                       (x, y + 50), rect.w - 20)
+                w.arrow(surface, w.DIM, (rect.right - 12, y + 9))
                 since = w.duration(now - c["started"]) if c.get("started") else "—"
                 w.blit(surface, f.tiny, f"{c.get('restarts', 0)} redém. · depuis {since}", w.DIM,
                        (x, y + 72), rect.w - 20)
+
+    @staticmethod
+    def _card_rect(i: int) -> pygame.Rect:
+        cw, ch, gap = (CTR_AREA.w - 16) // 3, (CTR_AREA.h - 8) // 2, 8
+        return pygame.Rect(CTR_AREA.x + (i % 3) * (cw + gap), CTR_AREA.y + (i // 3) * (ch + gap), cw, ch)
 
     def _data(self, surface, data, stats, rp) -> None:
         f = self.fonts
@@ -228,4 +235,11 @@ class RentrerScreen(Screen):
         if w.RETOUR_RECT.collidepoint(pos):
             self.app.manual_screen = "server"
             self.app.set_screen("server")
+            return None
+        for i, svc in enumerate(self._names):
+            if self._card_rect(i).collidepoint(pos):
+                self.module.selected_container = svc
+                self.app.manual_screen = "server_container"
+                self.app.set_screen("server_container")
+                break
         return None

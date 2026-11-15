@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 
 import pygame
 
@@ -40,6 +41,9 @@ class App:
         self.width = config["display"]["width"]
         self.height = config["display"]["height"]
         self.fps = config["display"]["fps"]
+        # Écran ouvert à la main et laissé sans appui : retour automatique (0 = jamais).
+        self.idle_return = float(config["display"].get("idle_return_minutes", 5)) * 60
+        self._last_input = time.monotonic()
         self.scale = max(1, scale)
         self.fullscreen = fullscreen
         self.debug = debug
@@ -229,6 +233,19 @@ class App:
             self.manual_screen = None
             self.set_screen(self._route(target))
 
+    def _idle_return_check(self) -> None:
+        """Écran choisi à la main (serveur, météo, historique…) sans appui depuis
+        `idle_return` : retour au mode auto = l'accueil, ou l'écran que l'agent montre
+        (partie en cours). Les écrans menés par l'agent ne sont jamais rabattus."""
+        if (self.idle_return <= 0 or self.manual_screen is None or self.current is None
+                or self.current.name == DEFAULT_SCREEN
+                or time.monotonic() - self._last_input < self.idle_return):
+            return
+        print(f"[app] {self.idle_return / 60:.0f} min sans appui : retour auto")
+        self.manual_screen = None
+        self.set_screen(self._route(self.network_screen if self.network_screen in self.screens
+                                    else DEFAULT_SCREEN))
+
     def _route(self, screen: str) -> str:
         """Vue par défaut d'un écran demandé par l'agent (cf. `Module.route_screen`)."""
         for module in self.modules.values():
@@ -238,6 +255,7 @@ class App:
     # --------------------------------------------------------------- boucles
     def _dispatch_touch(self, pos) -> None:
         """Traite un appui (souris ou tactile) à la position interne `pos`."""
+        self._last_input = time.monotonic()
         if self.backlight.wake():
             return                    # appui de réveil : pas un clic à l'aveugle
         action = self.current.handle_touch(pos)
@@ -251,6 +269,7 @@ class App:
                 self.running = False
 
             elif event.type == pygame.KEYDOWN:
+                self._last_input = time.monotonic()
                 if event.key == pygame.K_ESCAPE:
                     self.last_key = "Échap -> retour"
                     self.do_action(ACTION_BACK)
@@ -282,6 +301,7 @@ class App:
                 action = self.action_queue.get_nowait()
             except queue.Empty:
                 break
+            self._last_input = time.monotonic()
             if not self.backlight.wake():
                 self.do_action(action)
 
@@ -406,6 +426,7 @@ class App:
                     module.tick()     # tâches périodiques (ex. scan LCU)
                 self._drain_io()      # résultats des appels réseau asynchrones
                 self.backlight.tick(self.agent_connected)
+                self._idle_return_check()
 
                 dirty = self.current.draw(self.surface)
                 if self.debug:

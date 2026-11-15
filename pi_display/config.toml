@@ -39,6 +39,7 @@ sandbox = false
 width = 800        # résolution interne de rendu (ne pas changer : écran 5")
 height = 480
 fps = 15           # FPS max de la boucle d'affichage (Pi 3 = peu puissant)
+idle_return_minutes = 5   # écran ouvert à la main, sans appui : retour à l'accueil (0 = jamais)
 
 [rss]
 # Flux d'actualité affiché sur l'accueil (3 derniers titres) et l'écran France

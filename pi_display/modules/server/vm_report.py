@@ -71,7 +71,10 @@ def parse_report(text: str) -> dict:
         elif key == "stat":
             parts = val.split("|")
             if len(parts) >= 3:
-                cpu = _int(parts[1].strip().rstrip("%").split(".")[0])
+                try:
+                    cpu = float(parts[1].strip().rstrip("%"))   # « 0.05% » : souvent < 1 % au repos
+                except ValueError:
+                    cpu = None
                 stats[parts[0]] = (cpu, mem_bytes(parts[2].split("/")[0]))
         else:
             raw[key] = val.strip()

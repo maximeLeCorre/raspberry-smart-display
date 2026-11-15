@@ -6,6 +6,8 @@
   compteurs depuis son démarrage (`/v1/stats`) : on garde le dernier relevé (`meta`) et on
   ajoute la différence à l'heure courante ; redémarrage (`started` change) = compteurs
   repartis de zéro, la valeur entière compte.
+- `ctr_samples` : CPU (% d'un cœur, comme `docker stats`) et RAM de chaque conteneur Rentrer,
+  un point par relevé `pi-monitor` (~1/min) : courbes de l'écran d'un conteneur.
 Deux jours gardés. Accès depuis le thread principal seulement (tick du module).
 """
 
@@ -30,6 +32,8 @@ class MonitorHistory:
                 delivered INTEGER NOT NULL DEFAULT 0, refused INTEGER NOT NULL DEFAULT 0,
                 failed INTEGER NOT NULL DEFAULT 0, limited INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS ctr_samples (ts REAL NOT NULL, svc TEXT NOT NULL, cpu REAL, mem INTEGER);
+            CREATE INDEX IF NOT EXISTS ctr_samples_svc ON ctr_samples (svc, ts);
         """)
 
     # ------------------------------------------------------------- trajets témoins
@@ -79,6 +83,20 @@ class MonitorHistory:
             (end - hours,))}
         return [{"hour": h, **rows.get(h, dict.fromkeys(PUSH_FIELDS, 0))}
                 for h in range(end - hours + 1, end + 1)]
+
+    # ------------------------------------------------------------- conteneurs Rentrer
+    def record_containers(self, containers: dict, now: float) -> None:
+        """Un point par conteneur en marche (les arrêtés n'ont pas de mesure : trou)."""
+        rows = [(now, svc, c.get("cpu"), c.get("mem")) for svc, c in containers.items()
+                if c.get("state") == "running" and (c.get("cpu") is not None or c.get("mem") is not None)]
+        self.db.executemany("INSERT INTO ctr_samples (ts, svc, cpu, mem) VALUES (?, ?, ?, ?)", rows)
+        self.db.execute("DELETE FROM ctr_samples WHERE ts < ?", (now - KEEP_SECONDS,))
+        self.db.commit()
+
+    def container_series(self, svc: str, since: float) -> list[tuple[float, float | None, int | None]]:
+        """[(ts, cpu, mem)] du conteneur depuis `since`, du plus ancien au plus récent."""
+        return [tuple(r) for r in self.db.execute(
+            "SELECT ts, cpu, mem FROM ctr_samples WHERE svc = ? AND ts >= ? ORDER BY ts", (svc, since))]
 
     def close(self) -> None:
         self.db.close()

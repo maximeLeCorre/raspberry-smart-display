@@ -45,7 +45,7 @@ push_restarts=0
 def test_releve_pi_monitor():
     rep = parse_report(REPORT)
     api, motis = rep["containers"]["api"], rep["containers"]["motis"]
-    assert (api["state"], api["health"], api["cpu"]) == ("running", "healthy", 2)
+    assert (api["state"], api["health"], api["cpu"]) == ("running", "healthy", 2.15)
     assert api["mem"] == int(96.5 * 1024 ** 2)
     assert motis["restarts"] == 2 and motis["mem"] == int(9.8 * 1024 ** 3)
     assert rep["containers"]["worker"]["started"] is None          # date zéro de Docker
@@ -278,6 +278,34 @@ def test_ecrans_de_supervision_se_dessinent(app, tmp_path, incident):
     assert app.current.name == "server_machine"
     app.current.handle_touch((740, 26))                  # RETOUR -> vue d'ensemble
     assert app.current.name == "server"
+    # Conteneur : points relevés par evaluate + un passé, courbes, fenêtres, retour.
+    assert mod.history.container_series("api", 0)
+    mod.history.record_containers({"api": {"state": "running", "cpu": 0.05, "mem": 30 << 20}}, time.time() - 600)
+    app.set_screen("server_rentrer")
+    app.current.draw(app.surface)
+    app.current.handle_touch((90, 200))                  # 1re carte
+    first = app.screens["server_rentrer"]._names[0]
+    assert (app.current.name, mod.selected_container) == ("server_container", first)
+    mod.selected_container = "api"
+    for pos in ((0, 0), (580, 72), (650, 72)):           # fenêtres 1 h, 6 h, 24 h
+        app.current.handle_touch(pos)
+        app.current.draw(app.surface)
+    app.current.handle_touch((740, 26))
+    assert app.current.name == "server_rentrer"
+
+
+def test_historique_des_conteneurs_et_echelles(tmp_path):
+    from modules.server.container_screen import nice_top, series_segments
+    from modules.server.widgets import cpu_text
+    h = MonitorHistory(tmp_path / "m.db")
+    h.record_containers({"api": {"state": "running", "cpu": 0.05, "mem": 1},
+                         "motis": {"state": "exited", "cpu": None, "mem": None}}, 1000.0)
+    h.record_containers({"api": {"state": "running", "cpu": 2.5, "mem": 2}}, 1060.0)
+    assert h.container_series("api", 0) == [(1000.0, 0.05, 1), (1060.0, 2.5, 2)]
+    assert h.container_series("motis", 0) == []
+    assert (nice_top(0.05), nice_top(0), nice_top(37), nice_top(150)) == (0.1, 0.1, 50, 200)
+    assert series_segments([(0, 1), (60, 1), (500, 1)], 180) == [[(0, 1), (60, 1)], [(500, 1)]]
+    assert (cpu_text(0.05), cpu_text(12.4), cpu_text(None)) == ("0,05 %", "12 %", "—")
 
 
 def test_epinglage_https_le_jeton_ne_part_pas_vers_un_autre_certificat(tmp_path):
