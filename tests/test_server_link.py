@@ -56,7 +56,7 @@ def test_ping_minecraft_sur_un_faux_serveur():
 
 
 def test_ligne_des_joueurs():
-    from modules.server.server_screen import players_line
+    from modules.server.machine_screen import players_line
 
     assert players_line(None) == "joueurs : …"
     assert players_line({"error": "refused"}).startswith("joueurs : le serveur ne répond pas")

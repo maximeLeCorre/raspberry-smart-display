@@ -1,4 +1,6 @@
-"""Écran de supervision/contrôle d'un petit serveur (code-drawn, pas de PNG).
+"""Écran « Machine » : supervision/contrôle de la VM (code-drawn, pas de PNG).
+
+Ouvert depuis la carte Machine de l'écran Serveur (`services_screen.py`) ; RETOUR y ramène.
 
 Haut : titre + badge connexion (en ligne/hors ligne) + RETOUR. Milieu : trois
 jauges (CPU, RAM, disque) + ligne uptime/température, puis courbes CPU/RAM des
@@ -17,7 +19,6 @@ import time
 
 import pygame
 
-from inputs import ACTION_BACK
 from screen import Screen
 
 from .server_link import get_link
@@ -103,11 +104,11 @@ def _fmt_uptime(sec: int) -> str:
     return f"{j} j {h:02d}:{m:02d}" if j else f"{h:02d}:{m:02d}"
 
 
-class ServerScreen(Screen):
-    name = "server"
+class MachineScreen(Screen):
+    name = "server_machine"
     background_name = None
     bg_color = BG
-    cycle = True
+    cycle = False
 
     def __init__(self, app):
         super().__init__(app)
@@ -192,10 +193,10 @@ class ServerScreen(Screen):
         return dirty
 
     def _draw_chrome(self, surface: pygame.Surface) -> pygame.Rect:
-        title = "SERVEUR"
+        title = "MACHINE"
         snap = self.link.snapshot() if self.link else {}
         if snap.get("host"):
-            title = f"SERVEUR · {snap['host']}"
+            title = f"MACHINE · {snap['host']}"
         surface.blit(self.font_title.render(title, True, WHITE), (24, 14))
         pygame.draw.rect(surface, GOLD, RETOUR_RECT, width=2, border_radius=8)
         label = self.font_small.render("RETOUR", True, GOLD)
@@ -456,7 +457,9 @@ class ServerScreen(Screen):
     # ---------------------------------------------------------------- entrées
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         if RETOUR_RECT.collidepoint(pos):
-            return ACTION_BACK
+            self.app.manual_screen = "server"         # retour à la vue d'ensemble
+            self.app.set_screen("server")
+            return None
         if self.service is None or self.link is None or self._pending:
             return None
         snap = self.link.snapshot()

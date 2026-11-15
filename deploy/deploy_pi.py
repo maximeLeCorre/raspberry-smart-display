@@ -427,7 +427,9 @@ def main() -> None:
                    f"RIOT_API_KEY={read_env_value('RIOT_API_KEY')}\n"
                    f"SERVER_HOST={read_env_value('SERVER_HOST')}\n"
                    f"IDFM_API_KEY={read_env_value('IDFM_API_KEY')}\n"
-                   f"REMOTE_API_TOKEN={read_env_value('REMOTE_API_TOKEN')}\n")
+                   f"REMOTE_API_TOKEN={read_env_value('REMOTE_API_TOKEN')}\n"
+                   f"RENTRER_STATS_TOKEN={read_env_value('RENTRER_STATS_TOKEN')}\n"
+                   f"PUSH_STATS_TOKEN={read_env_value('PUSH_STATS_TOKEN')}\n")
 
     tmp = Path(tempfile.mkdtemp(prefix="pi-deploy-"))
     tgz = tmp / "pi-display-deploy.tgz"

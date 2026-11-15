@@ -144,6 +144,36 @@ hour = 4
 dir = "pi-display-backups"
 keep_days = 14
 
+# Supervision de la VM et de ce qu'elle héberge (écran « Serveur » : vue d'ensemble,
+# puis Machine / Rentrer / Push NexusLink). Le Pi lit :
+#  - en SSH, le relevé `sudo -n /usr/local/sbin/pi-monitor` (conteneurs Rentrer, données
+#    MOTIS, service du push) : à installer sur la VM, deploy/server/install_pi_monitor.sh ;
+#  - en HTTPS : Rentrer (https://<ip-avec-tirets>.sslip.io, déduit de SERVER_HOST) et le push
+#    (https://<ip>:8443, certificat épinglé au 1er contact dans certs/push_pin) ;
+#    totaux avec RENTRER_STATS_TOKEN / PUSH_STATS_TOKEN (.env).
+# Historique (frise 24 h, envois par heure) gardé sur le Pi : monitor.db.
+[server.monitor]
+enabled = true
+report_seconds = 60       # relevé SSH pi-monitor
+http_seconds = 30         # /health, /v1/status
+stats_seconds = 300       # routes de statistiques
+# rentrer_url = ""        # adresses si elles ne suivent pas SERVER_HOST (config.local.toml)
+# push_url = ""
+# push_pin = ""           # empreinte SHA-256 attendue du certificat du push (sinon 1er contact)
+internet_check = "1.1.1.1:443"   # tout tombe + ceci aussi = le Pi est coupé, pas la VM
+rentrer_services = ["caddy", "api", "worker", "motis", "idfm-bridge"]   # conteneurs attendus
+disk_warn = 80            # % : ATTENTION, puis PANNE à disk_crit
+disk_crit = 90
+ram_warn = 90             # % pendant ram_minutes (hors import MOTIS)
+ram_minutes = 10
+api_seconds = 120         # API ou push muets depuis… avant l'alerte
+down_seconds = 90         # VM muette (SSH + HTTP) depuis…
+degraded_minutes = 15     # trajets témoins dégradés depuis…
+plan_minutes = 30         # nouveau plan IDFM pas importé depuis…
+import_minutes = 20       # import MOTIS bloqué au-delà
+cert_days = 14            # certificat qui expire dans moins de…
+notify = ["panne"]        # niveaux envoyés à la montre : "panne", "attention"
+
 # Services pilotables (start/stop/restart). Un seul pour l'instant (Minecraft).
 # use_sudo=true => le serveur doit autoriser `sudo systemctl ...` sans mot de
 # passe pour l'utilisateur SSH (règle sudoers NOPASSWD limitée à systemctl).

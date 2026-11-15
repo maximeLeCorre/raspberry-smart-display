@@ -79,6 +79,12 @@ def load_server_host() -> str:
     return _env("SERVER_HOST")
 
 
+def load_stats_tokens() -> tuple[str, str]:
+    """Tokens of the supervision routes (Rentrer `/v1/admin/stats`, NexusLink push
+    `/v1/stats`); empty = those numbers are not shown."""
+    return _env("RENTRER_STATS_TOKEN"), _env("PUSH_STATS_TOKEN")
+
+
 def load_idfm_key() -> str:
     """IDFM PRIM API key ("Trains" screen); empty = module not configured."""
     return _env("IDFM_API_KEY")

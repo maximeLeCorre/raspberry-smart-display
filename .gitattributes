@@ -1,0 +1,2 @@
+# Scripts exécutés sous Linux (VM, Pi) : jamais de CRLF, même avec core.autocrlf=true.
+*.sh text eol=lf

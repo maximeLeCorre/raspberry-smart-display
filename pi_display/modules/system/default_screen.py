@@ -8,8 +8,10 @@ Disposition (cadres dans le fond default.png, cf. tools/gen_default_bg.py) :
   - dock (bas) : grosses tuiles tactiles « vivantes », selon les modules actifs :
       Jouer (LoL : « Jouer une ARAM Chaos », devient « Rejoindre » quand une
       activité est en cours, ou affiche l'étape du flux « jouer »),
-      Historique (nombre de parties), Serveur (état du service + CPU),
-      Actus (liste France Info).
+      Historique (nombre de parties), Serveur (pire état de la supervision, sinon
+      Minecraft), Actus (liste France Info, sans module Trains).
+  En cas de PANNE d'un service supervisé (module serveur), le bandeau d'actualité
+  laisse la place à l'alerte (clic → écran Serveur) ; l'actu revient ensuite.
 
 ⚠️ Les constantes de géométrie ci-dessous doivent rester alignées avec
 tools/gen_default_bg.py (qui dessine les cadres correspondants).
@@ -421,15 +423,62 @@ class DefaultScreen(Screen):
             x += surf.get_width()
         return band
 
-    def _draw_news_if_changed(self, surface) -> list[pygame.Rect]:
-        if self.feed is None:
+    def _server_alert(self):
+        """Alerte de PANNE la plus ancienne de la supervision (module serveur), ou None."""
+        mod = self.app.modules.get("server")
+        monitor = getattr(mod, "monitor", None)
+        if monitor is None:
+            return None
+        crit = [a for a in monitor.alerts() if a.level == "crit"]
+        return crit[0] if crit else None
+
+    def _draw_server_alert(self, surface, alert) -> list[pygame.Rect]:
+        """Bandeau rouge à la place de l'actu : carré barré + « PANNE » + texte + « VOIR »."""
+        from modules.server.monitor import CARD_NAMES
+        key = ("alert", alert.card, alert.text)
+        if key == self._news_key:
             return []
+        self._news_key = key
+        self._news_article = None
+        self.clear_region(surface, NEWS_INNER)
+        box = NEWS_INNER.inflate(8, 2)
+        pygame.draw.rect(surface, (42, 21, 24), box, border_radius=10)
+        pygame.draw.rect(surface, RED, box, width=3, border_radius=10)
+        cx, cy = box.x + 22, box.centery
+        icon = pygame.Rect(0, 0, 20, 20)
+        icon.center = (cx, cy)
+        pygame.draw.rect(surface, RED, icon, 2, border_radius=3)
+        pygame.draw.line(surface, RED, (cx - 4, cy - 4), (cx + 4, cy + 4), 2)
+        pygame.draw.line(surface, RED, (cx + 4, cy - 4), (cx - 4, cy + 4), 2)
+        tag = self.font_news_tag.render("PANNE", True, RED)
+        surface.blit(tag, (box.x + 42, cy - tag.get_height() // 2))
+        see = self.font_news_tag.render("VOIR", True, GOLD)
+        surface.blit(see, see.get_rect(midright=(box.right - 24, cy)))
+        pygame.draw.polygon(surface, GOLD, [(box.right - 18, cy - 6), (box.right - 10, cy), (box.right - 18, cy + 6)])
+        x = box.x + 52 + tag.get_width()
+        text = fit_text(f"{CARD_NAMES[alert.card]} : {alert.text}", self.font_news, see.get_rect(
+            midright=(box.right - 24, cy)).x - x - 12)
+        t = self.font_news.render(text, True, WHITE)
+        surface.blit(t, (x, cy - t.get_height() // 2))
+        return [box]
+
+    def _draw_news_if_changed(self, surface) -> list[pygame.Rect]:
+        alert = self._server_alert()
+        if alert is not None:
+            return self._draw_server_alert(surface, alert)
+        extra = []
+        if self._news_key and self._news_key[0] == "alert":      # panne finie : l'actu revient
+            self._news_key = None
+            self.clear_region(surface, NEWS_INNER.inflate(8, 2))
+            extra.append(NEWS_INNER.inflate(8, 2))
+        if self.feed is None:
+            return extra
         articles = self.feed.articles()[:NEWS_ROTATE_COUNT]
         art = (articles[int(time.time() // NEWS_ROTATE_SECONDS) % len(articles)]
                if articles else None)
         key = (art.title, art.published) if art else None
         if key == self._news_key and self._news_key is not None:
-            return []
+            return extra
         self._news_key = key
         self._news_article = art
         self.clear_region(surface, NEWS_INNER)
@@ -448,11 +497,11 @@ class DefaultScreen(Screen):
         if meta:
             m = self.font_news_tag.render(meta, True, FAINT)
             surface.blit(m, (x + t.get_width(), NEWS_INNER.centery - m.get_height() // 2 + 1))
-        return [NEWS_INNER]
+        return extra + [NEWS_INNER]
 
     # ------------------------------------------------------------------ tuiles
     def _tile_state(self, tid: str) -> tuple:
-        """(titre, sous-titre, couleur du sous-titre, primaire, actif).
+        """(titre, sous-titre, couleur du sous-titre, primaire, actif[, alerte "crit"/"warn"]).
         Le sous-titre peut tenir sur deux lignes (séparées par « \\n »)."""
         if tid == "play":
             joinable = self.app.joinable_screen()
@@ -480,11 +529,17 @@ class DefaultScreen(Screen):
         return ("", "", DIM, False, False)
 
     def _server_tile_state(self) -> tuple:
-        srv = self.app.screens.get("server")
-        link = getattr(srv, "link", None)
-        service = getattr(srv, "service", None)
+        mod = self.app.modules.get("server")
+        link = getattr(mod, "link", None)
+        service = link.services[0] if link is not None and link.services else None
         if link is None:
             return ("Serveur", "non configuré", FAINT, False, True)
+        level, card = mod.monitor.worst()
+        if level in ("crit", "warn"):
+            from modules.server.monitor import CARD_NAMES
+            word = "PANNE" if level == "crit" else "ATTENTION"
+            return ("Serveur", f"{word}\n{CARD_NAMES[card]}", RED if level == "crit" else ORANGE,
+                    False, True, level)
         snap = link.snapshot()
         if not snap.get("online"):
             return ("Serveur", "hors ligne", RED, False, True)
@@ -505,12 +560,16 @@ class DefaultScreen(Screen):
         return ("Serveur", f"CPU {cpu:.0f} %" if cpu is not None else "en ligne",
                 GREEN, False, True)
 
-    def _draw_tile(self, surface, rect, title, sub, sub_color, primary, enabled) -> None:
+    def _draw_tile(self, surface, rect, title, sub, sub_color, primary, enabled, alert=None) -> None:
         self.clear_region(surface, rect)
         fill = BG_PRIMARY if primary and enabled else BG_TILE
         border = GOLD if primary and enabled else BORDER
+        if alert == "crit":                 # panne : fond et bordure épaisse rouges
+            fill, border = (42, 21, 24), RED
+        elif alert == "warn":
+            border = ORANGE
         pygame.draw.rect(surface, fill, rect, border_radius=14)
-        pygame.draw.rect(surface, border, rect, width=2, border_radius=14)
+        pygame.draw.rect(surface, border, rect, width=3 if alert == "crit" else 2, border_radius=14)
         title_col = WHITE if enabled else FAINT
         max_w = rect.w - 12
         t = self.font_tile.render(fit_text(title, self.font_tile, max_w), True, title_col)
@@ -538,7 +597,10 @@ class DefaultScreen(Screen):
             self.app.set_screen("weather")
             return None
         if NEWS_STRIP.collidepoint(pos):
-            self._open_news(self._news_article)
+            if self._news_key and self._news_key[0] == "alert":    # bandeau de panne
+                self._activate("server")
+            else:
+                self._open_news(self._news_article)
             return None
         if self._train_feed is not None and TRAIN_BOX.collidepoint(pos):
             self.app.manual_screen = "transit"        # prochain train -> écran Trains

@@ -91,11 +91,10 @@ clic (`request_lcu_detail`). `METRICS` (écran) ↔ clés `metrics` (builder) al
   `_postgame_baseline`**, sinon **« détail non disponible »** (`_postgame_unavailable_later`).
   ⚠️ La LCU **ne pagine pas** → seulement les **20 récentes** ; l'historique s'accumule au fil du jeu.
 
-### Serveur (`server`, module **Pi-only** : pas de Source — SSH **depuis le Pi**, marche PC éteint)
-Écran code-drawn (jauges CPU/RAM/disque + **courbes CPU/RAM** `history()` en mémoire, `[server] history_minutes` + Démarrer/Arrêter/Redémarrer d'un service systemd ; accès **onglet accueil + cycle**). **Joueurs Minecraft** : `minecraft_port` du service → `minecraft_ping.py` (Server List Ping TCP, sans SSH, ≤ 12 pseudos) → `link.players(unit)`.
-`server_link.py` = paramiko persistant, poll d'**une** cmd SSH `clé=valeur` (`[server] poll_seconds`), **CPU% = delta `/proc/stat`** côté Pi. Contrôle = `sudo systemctl` (**NOPASSWD** côté serveur). Config `[server]` + `[[server.services]]` ; IP = **`SERVER_HOST`** (.env, prioritaire sur `host`).
-**Sauvegarde** (`backup.py`, `[server.backup]`) : 1×/jour, copie SQLite cohérente de `matches.db`+`weather.db` → SFTP `~/pi-display-backups/<base>-AAAA-MM-JJ.db`, rotation `keep_days`.
-Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` TOFU). ⚠️ paramiko dans `requirements.txt` **et** le `pip` de `deploy_pi.py`.
+### Serveur (`server`, module **Pi-only** : pas de Source — SSH + HTTPS **depuis le Pi**, marche PC éteint)
+**Supervision** de la VM : tuile → `server` (`services_screen.py`, 3 cartes Machine/Rentrer/Push NexusLink, état écrit + alertes) → détails `server_machine` (jauges, **courbes** `history()`, Démarrer/Arrêter/Redémarrer systemd, joueurs Minecraft `minecraft_ping.py`), `server_rentrer`, `server_push` ; RETOUR des détails → `server`. Règles **pures** `monitor.py` (alerte après un délai de problème continu, PANNE → montre via `app.push`, rien si le Pi n'a plus internet), évaluées par `ServerModule.tick` ; **PANNE** = bandeau rouge à la place de l'actu + tuile rouge.
+Sources : `server_link.py` (paramiko persistant, cmd `clé=valeur` /`poll_seconds`, **CPU% = delta `/proc/stat`** ; + `sudo -n /usr/local/sbin/pi-monitor` /60 s = script root **fixe sans argument** `deploy/server/pi-monitor.sh`, installé par `install_pi_monitor.sh` : conteneurs Rentrer, import MOTIS, plan IDFM, service push ; ⚠️ jamais `docker inspect` complet = env secrets) ; `probes.py` (HTTPS : Rentrer `/health` `/v1/status` `/v1/admin/stats`, push `/health` `/v1/stats` **épinglé** avant d'envoyer le jeton ; URL tirées de `SERVER_HOST`) ; historique `history.py` → **`monitor.db`** (frise 24 h ; push = compteurs depuis démarrage → deltas par heure côté Pi). Config `[server]`, `[server.monitor]`, `[[server.services]]` ; IP = **`SERVER_HOST`**.
+**Sauvegarde** (`backup.py`, `[server.backup]`) : 1×/jour, copie SQLite de `matches.db`+`weather.db` → SFTP `~/pi-display-backups/<base>-AAAA-MM-JJ.db`, rotation `keep_days`. Clé **privée** dans `certs/` (gitignoré, copiée par deploy ; `known_hosts` TOFU). ⚠️ paramiko dans `requirements.txt` **et** le `pip` de `deploy_pi.py`.
 ### Trains (`transit`, Pi-only) — API **PRIM** IDFM, clé `IDFM_API_KEY` (.env), en-tête `apikey`
 `transit_feed.py` : `stop-monitoring` (ZdA `[transit] stop_area`) + `general-message` par ligne /5 min, SIRI Lite. ⚠️ **Quota 1 000 req/jour PAR endpoint** (RAZ minuit UTC) → rythme des départs calé sur `x-ratelimit-remaining-day` (`next_delay`), nuit 15 min, 429 = pause jusqu'au `retry-after`.
 plusieurs lignes possibles → `[transit.lines]` ; 2 colonnes par direction (`paris_destinations`), états **écrits** ;
@@ -134,11 +133,11 @@ lockfile résiduel → se fier à `is_logged_in` (API), pas au fichier. ⚠️ J
 - `pi_display/config.toml` : réseau, FPS, GPIO, `[rss]`, `[modules]`, **`[riot] platform/regional`**,
   **`[lol] summoner`/`friends`/`lobby_queue`/`lobby_invite`** (bouton Jouer).
 - `pc_agent/config.toml` : IP/port du Pi, `update_interval`, `[lol] launch_exe`/`launch_args` (Riot Client, pour le bouton Jouer). **Pas de clé.**
-- **`.env`** (racine, **ignoré**, modèle `.env.example`) : `RIOT_API_KEY`, `DISPLAY_AUTH_TOKEN`, `SERVER_HOST`, `IDFM_API_KEY`, `REMOTE_API_TOKEN` ; ⚠️ c'est le `.env` **du Pi** qui compte : `deploy_pi.py` y copie ces 5 clés.
+- **`.env`** (racine, **ignoré**, modèle `.env.example`) : `RIOT_API_KEY`, `DISPLAY_AUTH_TOKEN`, `SERVER_HOST`, `IDFM_API_KEY`, `REMOTE_API_TOKEN`, `RENTRER_STATS_TOKEN`, `PUSH_STATS_TOKEN` ; ⚠️ c'est le `.env` **du Pi** qui compte : `deploy_pi.py` y copie ces 7 clés.
 
 ## Fonds · Tests · Git · Déploiement
 - **Fonds** : PNG 800×480 dans `assets/` (`default`/`queue`/`champselect`/`lol`), cadres **dans le PNG** (code au pixel ;
-  `default.png` = `tools/gen_default_bg.py` sur `default_base.png`). Code-drawn : `news`, `weather`, `transit`, `postgame`, `history`, `stats`, `server`.
+  `default.png` = `tools/gen_default_bg.py` sur `default_base.png`). Code-drawn : `news`, `weather`, `transit`, `postgame`, `history`, `stats`, `server*`.
 - **Tests** : **pytest** (`tests/`) → `.\.venv\Scripts\python -m pytest` **avant chaque déploiement** ; headless (`conftest.py`). Rendus : scripts jetables `_`.
 - **Git** : repo **public** (rien de sensible ni de personnel commité : réglages perso dans `pi_display/config.local.toml`, hors Git), branche `main`. Commits **en français**
   co-signés `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. **Pas de commit/push sans demande.**
