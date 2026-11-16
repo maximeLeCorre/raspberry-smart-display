@@ -54,3 +54,4 @@ pi_display/sounds/
 
 # Réglages personnels du Pi (ville, gare, pseudos…) : hors dépôt public
 pi_display/config.local.toml
+pc_agent/config.local.toml

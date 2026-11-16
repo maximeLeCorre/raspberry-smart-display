@@ -59,6 +59,7 @@ SVC_AREA = pygame.Rect(0, 300, 800, 180)         # zone effaçable service+bouto
 SVC_LABEL_Y = 314
 PLAYERS_Y = 344                                  # joueurs Minecraft connectés
 SVC_BADGE = pygame.Rect(520, 308, 240, 34)
+SWITCH_BTN = pygame.Rect(370, 307, 140, 36)      # « Suivant (1/2) » : autre service (s'il y en a plusieurs)
 BTN_W, BTN_H, BTN_Y = 190, 62, 372
 START_BTN = pygame.Rect(40, BTN_Y, BTN_W, BTN_H)
 STOP_BTN = pygame.Rect(305, BTN_Y, BTN_W, BTN_H)
@@ -120,7 +121,9 @@ class MachineScreen(Screen):
         self.font_tiny = pygame.font.Font(None, 20)
 
         self.link = get_link(app)
-        self.service = self.link.services[0] if (self.link and self.link.services) else None
+        self.services = list(self.link.services) if self.link else []
+        self._svc_index = 0              # service affiché ([[server.services]], « Suivant » pour changer)
+        self.service = self.services[0] if self.services else None
 
         self._pending = False            # une action est en cours
         self._action_msg = ""            # dernier message d'action
@@ -178,7 +181,7 @@ class MachineScreen(Screen):
 
         # Service : badge d'état + boutons.
         status = self._status(snap)
-        skey = (status, self._pending, online, self._players_text(status))
+        skey = (self._svc_index, status, self._pending, online, self._players_text(status))
         if skey != self._svc_key:
             dirty.append(self._draw_service(surface, status, online))
             self._svc_key = skey
@@ -391,6 +394,9 @@ class MachineScreen(Screen):
 
         surface.blit(self.font_label.render(f"Service : {self.service['label']}", True, WHITE),
                      (LABEL_X, SVC_LABEL_Y))
+        if len(self.services) > 1:
+            self._button(surface, SWITCH_BTN, f"Suivant ({self._svc_index + 1}/{len(self.services)})",
+                         enabled=not self._pending, font=self.font_small)
         # Badge d'état du service.
         text, color = self._status_text(status)
         pygame.draw.circle(surface, color, (SVC_BADGE.x + 12, SVC_BADGE.centery), 7)
@@ -409,13 +415,13 @@ class MachineScreen(Screen):
         self._button(surface, RESTART_BTN, "Redémarrer", enabled=ready and active)
         return SVC_AREA
 
-    def _button(self, surface, rect, label, enabled: bool):
+    def _button(self, surface, rect, label, enabled: bool, font=None):
         fill = PANEL if enabled else (18, 22, 34)
         border = GOLD if enabled else DIM
         text_col = WHITE if enabled else DIM
         pygame.draw.rect(surface, fill, rect, border_radius=10)
         pygame.draw.rect(surface, border, rect, width=2, border_radius=10)
-        surf = self.font_btn.render(label, True, text_col)
+        surf = (font or self.font_btn).render(label, True, text_col)
         surface.blit(surf, surf.get_rect(center=rect.center))
 
     def _draw_action_line(self, surface) -> pygame.Rect:
@@ -461,6 +467,11 @@ class MachineScreen(Screen):
             self.app.set_screen("server")
             return None
         if self.service is None or self.link is None or self._pending:
+            return None
+        if len(self.services) > 1 and SWITCH_BTN.collidepoint(pos):
+            self._svc_index = (self._svc_index + 1) % len(self.services)
+            self.service = self.services[self._svc_index]
+            self._action_msg, self._action_ts = "", 0.0   # le message était celui de l'autre service
             return None
         snap = self.link.snapshot()
         if not snap.get("online"):

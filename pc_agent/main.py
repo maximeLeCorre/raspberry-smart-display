@@ -88,8 +88,19 @@ def parse_args():
 
 
 def load_config(path: str) -> dict:
+    """config.toml, complété par `config.local.toml` (même dossier, hors Git) : réglages
+    propres à ce PC (TLS activé…), comme côté Pi."""
     with open(path, "rb") as f:
-        return tomllib.load(f)
+        config = tomllib.load(f)
+    extra = Path(path).with_name("config.local.toml")
+    if extra.exists():
+        with open(extra, "rb") as f:
+            for key, value in tomllib.load(f).items():
+                if isinstance(value, dict) and isinstance(config.get(key), dict):
+                    config[key] = {**config[key], **value}
+                else:
+                    config[key] = value
+    return config
 
 
 def run_real(url: str, config: dict, auth_token: str = "", ssl_context=None) -> None:

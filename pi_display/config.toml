@@ -175,7 +175,7 @@ import_minutes = 20       # import MOTIS bloqué au-delà
 cert_days = 14            # certificat qui expire dans moins de…
 notify = ["panne"]        # niveaux envoyés à la montre : "panne", "attention"
 
-# Services pilotables (start/stop/restart). Un seul pour l'instant (Minecraft).
+# Services pilotables (start/stop/restart), écran Machine ; plusieurs = bouton « Suivant ».
 # use_sudo=true => le serveur doit autoriser `sudo systemctl ...` sans mot de
 # passe pour l'utilisateur SSH (règle sudoers NOPASSWD limitée à systemctl).
 [[server.services]]
@@ -185,6 +185,13 @@ use_sudo = true
 # Joueurs connectés lus par « Server List Ping » (TCP, sans SSH) toutes les
 # [server] players_seconds (30 s par défaut). 0 / absent = pas de liste.
 minecraft_port = 25565
+
+# Runner GitHub Actions de NexusLink (conteneur Docker, NexusLink pushserver/deploy/setup-runner.sh) :
+# arrêté = les compilations Go de NexusLink attendent dans la file GitHub (24 h max).
+[[server.services]]
+label = "GitHub runner"
+unit = "gh-runner.service"
+use_sudo = true
 
 [transit]
 # Écran « Trains » : le Pi interroge lui-même l'API PRIM d'Île-de-France Mobilités.
