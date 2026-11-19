@@ -305,6 +305,8 @@ def test_historique_des_conteneurs_et_echelles(tmp_path):
     assert h.container_series("motis", 0) == []
     assert (nice_top(0.05), nice_top(0), nice_top(37), nice_top(150)) == (0.1, 0.1, 50, 200)
     assert series_segments([(0, 1), (60, 1), (500, 1)], 180) == [[(0, 1), (60, 1)], [(500, 1)]]
+    from modules.server.widgets import nice_step
+    assert [nice_step(v) for v in (1, 4, 7, 13, 150)] == [1, 1, 2, 5, 50]
     assert (cpu_text(0.05), cpu_text(12.4), cpu_text(None)) == ("0,05 %", "12 %", "—")
 
 

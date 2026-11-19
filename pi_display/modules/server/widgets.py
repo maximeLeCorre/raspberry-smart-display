@@ -150,6 +150,25 @@ def bar(surface, rect: pygame.Rect, frac: float, color) -> None:
                          border_radius=rect.h // 2)
 
 
+def nice_step(value: float, max_ticks: int = 4, min_step: float = 1.0) -> float:
+    """Pas 1/2/5 × 10^k (≥ `min_step`) pour couvrir `value` en `max_ticks` graduations au plus."""
+    step = min_step
+    while True:
+        for m in (1, 2, 5):
+            if value <= m * step * max_ticks:
+                return m * step
+        step *= 10
+
+
+def y_axis(surface, font, plot: pygame.Rect, top: float, step: float, fmt, color=DIM) -> None:
+    """Échelle verticale : ligne de grille + valeur écrite à gauche à chaque pas, de 0 à `top`."""
+    n = max(1, round(top / step))
+    for i in range(n + 1):
+        y = plot.bottom - round(plot.h * i / n)
+        pygame.draw.line(surface, TRACK, (plot.x, y), (plot.right, y))
+        blit(surface, font, fmt(i * step), color, (plot.x - 6, y), anchor="midright")
+
+
 def hatch(surface, rect: pygame.Rect, color, bg) -> None:
     """Hachures (période dégradée/panne : repérable sans la couleur)."""
     pygame.draw.rect(surface, bg, rect)

@@ -21,6 +21,7 @@ import pygame
 
 from screen import Screen
 
+from . import widgets as w
 from .server_link import get_link
 
 # ------------------------------------------------------------------- couleurs
@@ -53,7 +54,7 @@ INFO_Y = 168
 
 CHART_AREA = pygame.Rect(0, 186, 800, 112)       # zone effaçable des courbes
 CHART = pygame.Rect(40, 190, 720, 106)           # panneau des courbes
-PLOT = pygame.Rect(CHART.x + 40, CHART.y + 30, CHART.w - 92, CHART.h - 38)  # marge droite = étiquettes
+PLOT = pygame.Rect(CHART.x + 50, CHART.y + 30, CHART.w - 102, CHART.h - 38)  # marges = échelle / étiquettes
 
 SVC_AREA = pygame.Rect(0, 300, 800, 180)         # zone effaçable service+boutons
 SVC_LABEL_Y = 314
@@ -284,12 +285,8 @@ class MachineScreen(Screen):
             return CHART_AREA
         pygame.draw.rect(surface, PANEL, CHART, border_radius=8)
 
-        # Grille 0/50/100 % (seul 50 % est légendé : 0 et 100 vont de soi).
-        for pct in (0, 50, 100):
-            y = PLOT.bottom - round(PLOT.h * pct / 100)
-            pygame.draw.line(surface, TRACK, (PLOT.x, y), (PLOT.right, y))
-        lab = self.font_tiny.render("50%", True, DIM)
-        surface.blit(lab, (PLOT.x - lab.get_width() - 6, PLOT.centery - lab.get_height() // 2))
+        # Échelle verticale 0/50/100 % (grille + valeurs écrites).
+        w.y_axis(surface, self.font_tiny, PLOT, 100, 50, lambda v: f"{v:.0f} %")
 
         # Légende (dernières valeurs) + fenêtre.
         last = hist[-1] if hist else (0, None, None)

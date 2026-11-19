@@ -20,7 +20,7 @@ from .monitor import CRIT, OK, UNKNOWN, WARN
 TILE_Y, TILE_H = 58, 80
 TILE_W = (752 - 3 * 10) // 4
 CHART = pygame.Rect(24, 150, 752, 168)
-PLOT = pygame.Rect(CHART.x + 14, CHART.y + 34, CHART.w - 28, CHART.h - 62)
+PLOT = pygame.Rect(CHART.x + 48, CHART.y + 34, CHART.w - 62, CHART.h - 62)  # marge gauche = échelle
 COUNTS = pygame.Rect(24, 330, 371, 140)
 ALERT_BOX = pygame.Rect(405, 330, 371, 140)
 SERVICE_WORD = {"active": "actif", "inactive": "arrêté", "failed": "en échec",
@@ -116,13 +116,17 @@ class PushScreen(Screen):
         top = max([h["delivered"] + h["refused"] + h["limited"] + h["failed"] for h in hours] + [0])
         w.blit(surface, f.tiny, f"max {top} / h · hachuré = refusé ou limité", w.DIM,
                (CHART.right - 14, CHART.y + 10), anchor="topright")
+        # Échelle verticale en envois / h : pas entier 1/2/5 × 10^k, au plus 4 graduations.
+        step = w.nice_step(max(top, 1))
+        axis_top = step * max(1, -(-top // step))
+        w.y_axis(surface, f.tiny, PLOT, axis_top, step, lambda v: f"{v:.0f}")
         pygame.draw.line(surface, w.BORDER, (PLOT.x, PLOT.bottom), (PLOT.right, PLOT.bottom))
         if not hours or not have_stats and top == 0:
             w.blit(surface, f.small, "historique en cours de collecte (relevé toutes les 5 min)", w.DIM,
                    PLOT.center, anchor="center")
         n = max(1, len(hours))
         slot = PLOT.w / n
-        scale = PLOT.h / top if top else 0
+        scale = PLOT.h / axis_top
         for i, h in enumerate(hours):
             x = PLOT.x + int(i * slot) + 2
             bw = max(2, int(slot) - 5)
