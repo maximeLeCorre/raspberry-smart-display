@@ -1,8 +1,11 @@
 """Sauvegarde quotidienne des bases du Pi sur le serveur (SFTP).
 
 Les bases SQLite du Pi ne sont **que** sur sa carte SD : `matches.db`
-(historique LoL, la LCU ne rend que les 20 dernières parties → irrécupérable)
-et `weather.db` (série météo au-delà des ~50 j qu'Open-Meteo sait rattraper).
+(historique LoL, la LCU ne rend que les 20 dernières parties → irrécupérable),
+`weather.db` (série météo au-delà des ~50 j qu'Open-Meteo sait rattraper),
+`watch.db` (réglages faits depuis la montre) et `push.db` (jetons APNs : sans
+eux, plus de notif tant que la montre ne s'est pas réenregistrée).
+`monitor.db` / `icons.db` ne sont pas gardées : elles se reconstruisent seules.
 Une fois par jour (à partir de `[server.backup] hour`), on en prend une copie
 **cohérente** (API backup de SQLite, sûre pendant les écritures) qu'on envoie
 par le lien SSH de l'écran Serveur, puis on ne garde que `keep_days` copies.
@@ -11,10 +14,15 @@ Côté serveur : `<dir>/matches-AAAA-MM-JJ.db`, `<dir>/weather-AAAA-MM-JJ.db`
 (`dir` relatif au home de l'utilisateur SSH). Un redémarrage du Pi après
 l'heure prévue renvoie la copie du jour (écrasée, sans conséquence).
 Un échec est retenté au contrôle suivant (`CHECK_SECONDS`).
+
+Restauration (Pi neuf, SD morte) : `restore()`, lancée par
+`deploy/deploy_pi.py --restore [AAAA-MM-JJ]` (service arrêté pendant la copie).
 """
 
 from __future__ import annotations
 
+import os
+import re
 import shlex
 import sqlite3
 import tempfile
@@ -25,10 +33,13 @@ from pathlib import Path
 
 
 def default_files() -> list[Path]:
-    """Bases sauvegardées : historique LoL + météo (chemins réels du Pi)."""
+    """Bases sauvegardées (chemins réels du Pi), `matches` en tête (sa date sert
+    de « dernière sauvegarde » à l'écran)."""
     from store import DB_PATH as MATCHES_DB
     from modules.system.weather import DB_PATH as WEATHER_DB
-    return [Path(MATCHES_DB), Path(WEATHER_DB)]
+    from watch_settings import DB_PATH as WATCH_DB
+    from push_apns import DB_PATH as PUSH_DB
+    return [Path(MATCHES_DB), Path(WEATHER_DB), Path(WATCH_DB), Path(PUSH_DB)]
 
 
 def snapshot_db(src: Path, dst: Path) -> None:
@@ -131,3 +142,69 @@ class ServerBackup:
         self.link._exec(
             f"for s in {stems}; do ls -1 {d}/$s-*.db 2>/dev/null | sort"
             f" | head -n -{self.keep_days} | xargs -r rm -f; done")
+
+
+# ------------------------------------------------------------ restauration
+_NAME = re.compile(r"^(.+)-(\d{4}-\d{2}-\d{2})\.db$")
+
+
+def available(link, remote_dir: str) -> dict[str, list[str]] | None:
+    """Copies présentes sur le serveur : {base: [jours croissants]}, None si injoignable."""
+    res = link._exec(f"ls -1 {shlex.quote(remote_dir)}/ 2>/dev/null")
+    if res is None:
+        return None
+    out: dict[str, list[str]] = {}
+    for line in res[1].splitlines():
+        m = _NAME.match(line.strip().rsplit("/", 1)[-1])
+        if m:
+            out.setdefault(m.group(1), []).append(m.group(2))
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def restore(link, remote_dir: str, files: list[Path], day: str = "") -> tuple[bool, list[str]]:
+    """Remet chaque base depuis sa copie du jour `day` (défaut : sa plus récente).
+
+    ⚠️ L'appli doit être **arrêtée** (sinon elle réécrirait par-dessus).
+    Copie téléchargée à côté, vérifiée (`integrity_check`), puis mise en place
+    par renommage ; l'ancienne base est gardée en `<nom>.avant-restauration`.
+    Renvoie (tout OK, lignes de compte rendu)."""
+    days = available(link, remote_dir)
+    if days is None:
+        return False, ["serveur injoignable"]
+    ok, lines = True, []
+    for dst in (Path(f) for f in files):
+        have = days.get(dst.stem, [])
+        pick = day if day else (have[-1] if have else "")
+        if not pick or pick not in have:
+            lines.append(f"{dst.name} : aucune copie" + (f" du {day}" if day else ""))
+            continue
+        tmp = dst.with_name(dst.name + ".restore")
+        err = link.download(f"{remote_dir}/{dst.stem}-{pick}.db", tmp)
+        if not err:
+            err = _check(tmp)
+        if err:
+            tmp.unlink(missing_ok=True)
+            ok = False
+            lines.append(f"{dst.name} : ÉCHEC ({err})")
+            continue
+        if dst.exists():
+            os.replace(dst, dst.with_name(dst.name + ".avant-restauration"))
+        # Journal WAL de l'ancienne base : il ne doit pas être rejoué sur la nouvelle.
+        for suffix in ("-wal", "-shm"):
+            dst.with_name(dst.name + suffix).unlink(missing_ok=True)
+        os.replace(tmp, dst)
+        lines.append(f"{dst.name} : restaurée (copie du {pick})")
+    return ok, lines
+
+
+def _check(path: Path) -> str:
+    """"" si la base est saine, sinon le problème."""
+    try:
+        conn = sqlite3.connect(str(path))
+        try:
+            res = conn.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        return f"base illisible : {exc}"
+    return "" if res and res[0] == "ok" else f"base abîmée : {res[0] if res else '?'}"

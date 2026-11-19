@@ -17,13 +17,14 @@ Partagé via ``get_weather(app)`` : une seule instance par application.
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+
+from sqlite_db import open_db
 
 _URL = "https://api.open-meteo.com/v1/forecast"
 _USER_AGENT = "PiDisplay/1.0 (+raspberry-smart-display)"
@@ -127,7 +128,7 @@ class WeatherStore:
 
     def __init__(self, path: Path | str = DB_PATH):
         self._lock = threading.Lock()
-        self._db = sqlite3.connect(str(path), check_same_thread=False)
+        self._db = open_db(path, check_same_thread=False)
         self._db.executescript(_SCHEMA)
         self.version = 0      # incrémenté à chaque écriture (l'écran redessine)
 

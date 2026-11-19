@@ -14,8 +14,9 @@ Deux jours gardés. Accès depuis le thread principal seulement (tick du module)
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
+
+from sqlite_db import open_db
 
 DB_PATH = Path(__file__).resolve().parents[2] / "monitor.db"
 KEEP_SECONDS = 2 * 86400
@@ -24,7 +25,7 @@ PUSH_FIELDS = ("pushed", "delivered", "refused", "failed", "limited")
 
 class MonitorHistory:
     def __init__(self, path: Path | str = DB_PATH):
-        self.db = sqlite3.connect(str(path))
+        self.db = open_db(path)
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS canary (start REAL NOT NULL, end REAL NOT NULL, state TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS push_hours (

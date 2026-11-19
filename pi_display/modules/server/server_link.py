@@ -216,6 +216,23 @@ class ServerLink:
             except Exception as exc:
                 return str(exc) or exc.__class__.__name__
 
+    def download(self, remote: str, local: Path, timeout: float = 60.0) -> str:
+        """Rapatrie un fichier en SFTP (restauration). "" si OK, sinon l'erreur."""
+        with self._lock:
+            client = self._ensure_client()
+            if client is None:
+                return "serveur injoignable"
+            try:
+                sftp = client.open_sftp()
+                try:
+                    sftp.get_channel().settimeout(timeout)
+                    sftp.get(remote, str(local))
+                finally:
+                    sftp.close()
+                return ""
+            except Exception as exc:
+                return str(exc) or exc.__class__.__name__
+
     # ------------------------------------------------------------- sondage
     def _loop(self) -> None:
         while True:

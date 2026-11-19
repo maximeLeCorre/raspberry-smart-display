@@ -8,8 +8,9 @@ is replaced as a whole, so the HTTP thread can read it.
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
+
+from sqlite_db import open_db
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "watch.db"
@@ -31,7 +32,7 @@ def _clean_invite(value) -> str:
 
 class WatchSettings:
     def __init__(self, default_queue: int, default_invites: list[str], db_path: Path | None = None):
-        self._db = sqlite3.connect(str(db_path or DB_PATH), check_same_thread=False)
+        self._db = open_db(db_path or DB_PATH, check_same_thread=False)
         self._db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)")
         self._db.commit()
         self.follows: dict[str, dict] = {}       # lowercase riotId -> {riotId, online, leave, enter}

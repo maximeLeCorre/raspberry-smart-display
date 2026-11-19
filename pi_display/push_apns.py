@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import base64
 import json
-import sqlite3
 import threading
 import time
 from pathlib import Path
+
+from sqlite_db import open_db
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "push.db"
@@ -59,7 +60,7 @@ class PushSender:
         if cfg.get("enabled") and not self.enabled:
             print(f"[push] désactivé : config [push] incomplète ou clé absente ({key_path})")
         self._lock = threading.Lock()
-        self._db = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._db = open_db(db_path, check_same_thread=False)
         self._db.execute("CREATE TABLE IF NOT EXISTS devices (token TEXT PRIMARY KEY, added REAL)")
         self._db.commit()
         self._client = client          # httpx.Client HTTP/2, créé au 1er envoi

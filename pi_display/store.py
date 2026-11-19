@@ -19,10 +19,11 @@ lectures depuis la boucle de rendu.
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 import time
 from pathlib import Path
+
+from sqlite_db import open_db
 
 DB_PATH = Path(__file__).resolve().parent / "matches.db"
 
@@ -138,7 +139,7 @@ def _when(ms) -> str:
 class Store:
     def __init__(self, path: Path = DB_PATH):
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._conn = open_db(path, check_same_thread=False)
         self._conn.executescript(SCHEMA)
         self._conn.commit()
         self._backfill_participations()

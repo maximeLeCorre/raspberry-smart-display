@@ -17,6 +17,10 @@ UTILISATION :
          .\\.venv\\Scripts\\python deploy\\deploy_pi.py --full   (force apt/pip)
        Les dépendances ne sont (ré)installées que si leur liste a changé
        (empreinte mémorisée sur le Pi, `.deps_hash`).
+    4. Restaurer les bases depuis les sauvegardes du serveur (Pi neuf, SD morte) :
+         .\\.venv\\Scripts\\python deploy\\deploy_pi.py --backups             (liste)
+         .\\.venv\\Scripts\\python deploy\\deploy_pi.py --restore [AAAA-MM-JJ]
+       (après un 1er déploiement : service arrêté pendant la copie, puis relancé).
 
 L'empreinte SSH du Pi est épinglée au 1er contact dans `deploy/known_hosts`
 (gitignoré) : un changement d'empreinte arrête le déploiement.
@@ -69,6 +73,10 @@ _args.add_argument("--full", action="store_true",
                    help="Force la réinstallation des dépendances (apt + pip).")
 _args.add_argument("--install-key", action="store_true",
                    help="Autorise la clé SSH du PC sur le Pi (via PI_PASS), puis quitte.")
+_args.add_argument("--backups", action="store_true",
+                   help="Liste les sauvegardes des bases sur le serveur, puis quitte.")
+_args.add_argument("--restore", nargs="?", const="latest", metavar="AAAA-MM-JJ",
+                   help="Restaure les bases du Pi (défaut : copies les plus récentes), puis quitte.")
 ARGS = _args.parse_args()
 
 # ===== OPTIONS DE DÉPLOIEMENT (modifiables ici) =====
@@ -417,9 +425,44 @@ def install_key() -> None:
     log("Cle autorisee sur le Pi. PI_PASS peut etre retire du .env.")
 
 
+def restore_backups(day: str | None) -> None:
+    """Sur le Pi : liste (`day` None) ou restaure les bases sauvegardées sur le
+    serveur (tools/restore_backup.py). En restauration, l'appli est arrêtée
+    pendant la copie (elle réécrirait par-dessus) et TOUJOURS relancée après."""
+    py = f"'{pi_dir}/.venv/bin/python' '{pi_dir}/pi_display/tools/restore_backup.py'"
+    ssh = connect_ssh()
+    try:
+        if day is None:
+            run(ssh, f"{py} --list")
+            return
+        arg = "" if day == "latest" else f" --day '{day}'"
+        script = f"""set -u
+if sudo -n true 2>/dev/null; then sudo_() {{ sudo -n "$@"; }}
+else IFS= read -r SUDO_PASS || true; sudo_() {{ echo "$SUDO_PASS" | sudo -S -p "" "$@"; }}; fi
+sudo_ systemctl stop pi-display
+c=0; {py}{arg} || c=$?
+sudo_ systemctl start pi-display
+exit $c
+"""
+        sftp = ssh.open_sftp()
+        try:
+            put_bytes(sftp, script.encode("utf-8"), "/tmp/pi-display-restore.sh")
+        finally:
+            sftp.close()
+        log("Restauration (service arrete pendant la copie)...")
+        code = run(ssh, "bash /tmp/pi-display-restore.sh; c=$?; rm -f /tmp/pi-display-restore.sh; exit $c",
+                   check=False, stdin_data=(PI_PASS or "") + "\n")
+        log("Restauration terminee." if code == 0 else f"Restauration incomplete (code {code}).")
+    finally:
+        ssh.close()
+
+
 def main() -> None:
     if ARGS.install_key:
         install_key()
+        return
+    if ARGS.backups or ARGS.restore:
+        restore_backups(ARGS.restore if ARGS.restore else None)
         return
     # Le Pi a besoin du jeton d'auth ET de la clé Riot (il est autonome pour
     # l'enrichissement Web : historique, dossiers, rangs...).

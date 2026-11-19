@@ -135,10 +135,11 @@ disk_path = "/"           # partition suivie pour la jauge disque
 poll_seconds = 5          # fréquence du relevé des métriques
 history_minutes = 10      # fenêtre des courbes CPU/RAM (en mémoire, 1 point par relevé)
 
-# Sauvegarde quotidienne des bases du Pi (historique LoL matches.db + weather.db)
+# Sauvegarde quotidienne des bases du Pi (matches.db, weather.db, watch.db, push.db)
 # sur ce serveur, par SFTP : copie cohérente, une fois par jour à partir de `hour`
 # (rattrapée au démarrage si le Pi était éteint). Fichiers <dir>/matches-AAAA-MM-JJ.db,
 # `dir` relatif au home de `user` ; seules les `keep_days` plus récentes sont gardées.
+# Restauration (Pi neuf) : deploy/deploy_pi.py --backups (liste) / --restore [AAAA-MM-JJ].
 [server.backup]
 enabled = true
 hour = 4

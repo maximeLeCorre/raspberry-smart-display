@@ -32,6 +32,9 @@ Thumbs.db
 # --- Base locale des parties (Pi) ---
 *.db
 
+# --- Bancs d'essai jetables (relevés JSONL à la racine) ---
+/bench_*.jsonl
+
 # --- Journaux de l'agent PC (autostart) ---
 logs/
 
