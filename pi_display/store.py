@@ -286,6 +286,38 @@ class Store:
             "queue": r[8], "duration": r[9], "when": _when(r[10]),
         } for r in rows]
 
+    def champion_records(self, game_mode: str = "", queue_id: int = 0,
+                         since_ms: int = 0) -> dict[int, tuple[int, int]]:
+        """{championId: (victoires, parties)} : cf. `champion_stats`."""
+        return {cid: (w, n) for cid, _name, w, n in self.champion_stats(game_mode, queue_id, since_ms)}
+
+    def champion_stats(self, game_mode: str = "", queue_id: int = 0,
+                       since_ms: int = 0) -> list[tuple[int, str, int, int]]:
+        """NOS parties par champion : [(championId, nom, victoires, parties)],
+        les plus joués d'abord (à égalité : meilleur winrate).
+
+        Mode spécial (ARAM Chaos = KIWI, ARAM…) : filtré par `game_mode` (ses
+        files changent : 2400, 3270…) ; Faille (CLASSIC) : par `queue_id`
+        (classée ≠ normale). `since_ms` : seulement depuis cette date."""
+        where, params = [], []
+        if game_mode and game_mode != "CLASSIC":
+            where.append("game_mode = ?")
+            params.append(game_mode)
+        elif queue_id:
+            where.append("queue_id = ?")
+            params.append(queue_id)
+        if since_ms:
+            where.append("game_creation >= ?")
+            params.append(since_ms)
+        sql = "SELECT champion_id, MAX(champion_name), SUM(win), COUNT(*) FROM matches"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += (" GROUP BY champion_id"
+                " ORDER BY COUNT(*) DESC, 1.0 * SUM(win) / COUNT(*) DESC, champion_id")
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [(int(cid), name or "", int(w or 0), int(n)) for cid, name, w, n in rows if cid]
+
     def known_games(self, riot_id: str, limit: int = 300) -> list[str]:
         """Ids des parties (récentes) où ce joueur apparaît déjà."""
         with self._lock:

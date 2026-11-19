@@ -64,7 +64,7 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
   `weather.py` = Open-Meteo sans clé (`[weather]`) → série **horaire** upsertée dans **`weather.db`** (base vide → rattrapage,
   ~50 j réels) ; `pi_health.py` = /proc local, seuils `[pi_health]` (CPU soutenu). Tout marche PC éteint.
   **Veille douce** (`backlight.py`, `[backlight]`) : PC absent + 5 min sans appui → luminosité baissée (fondu) ; appui = réveil **non transmis** ; écriture sysfs via règle udev (deploy).
-- **league/** : `queue` (ready-check, **bouton Accepter** → `lcu_action`), `champselect` (clic → dossier + splash), `lol`, `postgame`, `history`.
+- **league/** : `queue` (ready-check, **bouton Accepter** → `lcu_action`), `champselect` (panneau par défaut = **ton winrate** par champion jouable (le tien, choix, banc ; draft = tes plus joués de la file) dans le mode de la partie (`queueId`/`gameMode` du payload ; KIWI filtré par mode, Faille par file), boutons 7/30/90 j `[lol] winrate_periods` (7 par défaut, re-appui sur l'actif = depuis toujours, gardé dans watch.db clé `winratePeriod`) ; clic joueur → dossier + splash, re-clic = retour), `lol`, `postgame`, `history`.
 - `LolScreen` : **timers d'objectifs** (Faille only) + **dossier adverse au clic** (`riotId`) ; compteurs extrapolés (agent ~1/s).
 - **`counters`** (**défaut en jeu** via `route_screen` ; TABLEAU → `lol`, ÉCARTS ← `lol`/`postgame`) : compteurs ton équipe/adversaires + **écart** écrit (or/kills/CS/niveau moyen) et tendance
   1 min (courbes testées, **rejetées** par l'user). Direct = message courant + relevé /10 s, or **estimé** (`priceTotal` ; ⚠️ `price` Live =

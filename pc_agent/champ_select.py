@@ -92,8 +92,12 @@ def build_champ_select_payload(lcu: LcuClient) -> dict | None:
                  or list(session.get("benchChampionIds") or []))
     # Choix de départ : seulement tant que notre pick n'est pas verrouillé.
     choice_ids = (lcu.get_json(SUBSET_PATH) or []) if my_pending_pick(session) else []
+    # File de la partie : le Pi filtre ton winrate par champion sur ce mode.
+    queue = ((lcu.get_json("/lol-gameflow/v1/session") or {}).get("gameData") or {}).get("queue") or {}
     return {
         "phase": "champselect",
+        "queueId": queue.get("id", 0) or 0,
+        "gameMode": queue.get("gameMode") or "",
         "players": players,
         "bench": [{"championId": cid, "championName": lcu.champion_name(cid)}
                   for cid in bench_ids if cid],

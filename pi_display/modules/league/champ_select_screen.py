@@ -2,7 +2,16 @@
 
 Pour chaque joueur : icône du champion, pseudo, position, et nous surligné.
 Un clic sur un joueur demande ses détails à l'agent (rang, niveau, maîtrise,
-winrate, champions mains) et les affiche dans un panneau à droite.
+winrate, champions mains) et les affiche dans un panneau à droite (re-clic =
+retour au panneau par défaut).
+
+Panneau par défaut : **ton winrate** avec chaque champion que tu peux prendre
+(le tien, le choix de départ ARAM Chaos, le banc ; sans banc ni choix, en
+draft : tes champions les plus joués dans cette file), dans le mode de la partie,
+lu dans le store (`LeagueModule.champion_records`). Boutons de période
+`[lol] winrate_periods` (7/30/90 j, 7 par défaut) ; re-appui sur l'actif =
+depuis toujours (réglage gardé dans watch.db).
+Écrit, jamais la couleur seule : « 64 % » + « 7V 4D » / « 11 p. », « jamais joué ».
 
 Données reçues (payload) :
     {"phase": "champselect",
@@ -37,6 +46,40 @@ ICON = 56
 PANEL_X = 468
 PANEL_TOP = 72
 PANEL_W = 783 - PANEL_X
+WR_ICON = 44
+WR_CELL_H = 82
+WR_PER_ROW = 5
+
+GOLD = (210, 175, 95)
+WHITE = (235, 235, 240)
+GREY = (160, 180, 210)
+FAINT = (120, 140, 170)
+GOOD = (110, 210, 130)
+BAD = (235, 120, 120)
+
+QUEUE_NAMES = {400: "Normale (draft)", 420: "Classée solo/duo", 440: "Classée flexible",
+               430: "Normale (aveugle)", 490: "Partie rapide"}
+MODE_NAMES = {"KIWI": "ARAM Chaos", "ARAM": "ARAM", "CLASSIC": "Faille", "CHERRY": "Arène"}
+
+
+def period_label(days: int) -> str:
+    return "depuis toujours" if not days else f"{days} derniers jours"
+
+
+def record_text(rec) -> tuple[str, str]:
+    """(« 64 % », « 7V 4D ») ; (« — », « jamais joué ») sans partie."""
+    wins, games = rec or (0, 0)
+    if not games:
+        return "—", "jamais joué"
+    return f"{round(100 * wins / games)} %", f"{wins}V {games - wins}D"
+
+
+def rate_color(rec):
+    wins, games = rec or (0, 0)
+    if not games:
+        return FAINT
+    rate = 100 * wins / games
+    return GOOD if rate >= 55 else BAD if rate < 45 else GOLD
 
 
 def _format_points(points) -> str:
@@ -61,6 +104,7 @@ class ChampSelectScreen(Screen):
         self.font_small = pygame.font.Font(None, 23)
         self.font_hint = pygame.font.Font(None, 24)
         self.font_panel = pygame.font.Font(None, 26)
+        self.font_tiny = pygame.font.Font(None, 19)
 
         self.players: list[dict] = []
         self.timer: dict = {}
@@ -74,6 +118,14 @@ class ChampSelectScreen(Screen):
         self._splash_requested: set[int] = set()
         self._rows: list[tuple[pygame.Rect, dict]] = []  # zones cliquables
         self._last_state = None
+        self.queue_id = 0
+        self.game_mode = ""
+        self.bench: list[dict] = []
+        self.choices: list[dict] = []
+        self._period_rects: list[tuple[pygame.Rect, int]] = []
+        self._records: dict[int, tuple[int, int]] = {}
+        self._top: list[dict] = []           # tes plus joués (draft : pas de banc)
+        self._records_key = None
 
     def enter(self) -> None:
         self._last_state = None
@@ -85,6 +137,10 @@ class ChampSelectScreen(Screen):
         self.players = payload.get("players", self.players)
         self.timer = payload.get("timer", self.timer)
         self.bans = payload.get("bans", self.bans)
+        self.bench = payload.get("bench", self.bench)
+        self.choices = payload.get("choices", self.choices)
+        self.queue_id = payload.get("queueId", self.queue_id) or 0
+        self.game_mode = payload.get("gameMode", self.game_mode) or ""
 
     def set_player_info(self, puuid: str, info: dict) -> None:
         self.player_info[puuid] = info
@@ -100,10 +156,19 @@ class ChampSelectScreen(Screen):
     def handle_touch(self, pos: tuple[int, int]) -> str | None:
         if RETOUR_RECT.collidepoint(pos):
             return ACTION_BACK
+        for rect, days in self._period_rects:
+            if rect.collidepoint(pos):
+                self.league.toggle_winrate_period(days)
+                self._last_state = None
+                return None
         for rect, player in self._rows:
             if rect.collidepoint(pos):
                 rid = player.get("riotId") or ""
                 champ_id = player.get("championId", 0)
+                if rid and rid == self.selected_puuid:     # re-clic : retour au winrate
+                    self.selected_puuid = None
+                    self._last_state = None
+                    return None
                 self.selected_puuid = rid     # clé = Riot ID 'Nom#TAG'
                 self._last_state = None
                 # Détails joueur (si pas déjà en cache). Le Pi résout/enrichit.
@@ -127,7 +192,25 @@ class ChampSelectScreen(Screen):
             sel, bool(self.player_info.get(sel)) if sel else None,
             self.icons.signature(),
             tuple(sorted(self._splash_cache.keys())),
+            tuple(c.get("championId") for c in self.bench),
+            tuple(c.get("championId") for c in self.choices),
+            self._refresh_records(),
         )
+
+    def _refresh_records(self):
+        """Relit tes winrates si le mode, la période ou le store ont changé."""
+        key = (self.game_mode, self.queue_id, self.league.settings.winrate_days,
+               self.league.store.total())
+        if key != self._records_key:
+            self._records_key = key
+            try:
+                stats = self.league.champion_stats(self.game_mode, self.queue_id)
+            except Exception as exc:
+                print(f"[champselect] winrate illisible : {exc}")
+                stats = []
+            self._records = {cid: (w, n) for cid, _name, w, n in stats}
+            self._top = [{"championId": cid, "championName": name} for cid, name, _w, _n in stats]
+        return key
 
     def draw(self, surface: pygame.Surface) -> list[pygame.Rect]:
         signature = self._signature()
@@ -197,9 +280,10 @@ class ChampSelectScreen(Screen):
         panel = pygame.Rect(PANEL_X, PANEL_TOP, PANEL_W, self.height - PANEL_TOP - 13)
 
         x = panel.x + 14
+        self._period_rects = []
 
         if not self.selected_puuid:
-            self._draw_bans(surface, panel)
+            self._draw_winrate(surface, panel)
             return
 
         # Splash art en bannière (haut du portrait), si reçu.
@@ -225,11 +309,128 @@ class ChampSelectScreen(Screen):
             surface.blit(self.font_panel.render(line, True, color), (x, y))
             y += 29
 
-    def _draw_bans(self, surface: pygame.Surface, panel: pygame.Rect) -> None:
-        x = panel.x + 14
-        y = panel.y + 14
-        surface.blit(self.font_panel.render("Bans", True, (210, 175, 95)), (x, y))
-        y += 42
+    def _draw_winrate(self, surface: pygame.Surface, panel: pygame.Rect) -> None:
+        x, w = panel.x + 14, panel.w - 28
+        y = panel.y + 12
+        # Faille : filtrée par file -> on la nomme (classée ≠ normale).
+        mode = ((QUEUE_NAMES.get(self.queue_id) if self.game_mode == "CLASSIC" else None)
+                or MODE_NAMES.get(self.game_mode, self.game_mode or "toutes files"))
+        surface.blit(self.font_panel.render(f"Ton winrate · {mode}", True, GOLD), (x, y))
+        y += 28
+        # Boutons de période : actif = plein (texte sombre), les autres = contour ;
+        # la période en cours est aussi écrite dessous (pas que la couleur).
+        current = self.league.settings.winrate_days
+        periods = self.league.winrate_periods
+        gap = 8
+        bw = (w - gap * (len(periods) - 1)) // len(periods)
+        for i, days in enumerate(periods):
+            rect = pygame.Rect(x + i * (bw + gap), y, bw, 44)
+            on = days == current
+            pygame.draw.rect(surface, GOLD if on else (28, 40, 64), rect, border_radius=6)
+            pygame.draw.rect(surface, GOLD if on else (90, 110, 150), rect,
+                             width=2 if on else 1, border_radius=6)
+            t = self.font_name.render(f"{days} j", True, (20, 24, 36) if on else WHITE)
+            surface.blit(t, t.get_rect(center=rect.center))
+            self._period_rects.append((rect, days))
+        y += 48
+        hint = (f"sur les {period_label(current)}" if current
+                else "depuis toujours · touche une durée pour filtrer")
+        surface.blit(self.font_tiny.render(hint, True, GREY), (x, y))
+        y += 22
+
+        if self.choices:
+            surface.blit(self.font_small.render("Choix de départ", True, GREY), (x, y))
+            y = self._draw_champ_cells(surface, x, y + 20, w, self.choices[:WR_PER_ROW], None)
+        else:
+            me = next((p for p in self.players if p.get("isSelf")), None) or {}
+            cid = me.get("championId") or 0
+            if cid:
+                rec = self._records.get(cid)
+                rate, detail = record_text(rec)
+                self._blit_champ(surface, me, pygame.Rect(x, y, 40, 40))
+                surface.blit(self.font_name.render(me.get("championName") or "", True, WHITE),
+                             (x + 50, y + 1))
+                surface.blit(self.font_small.render(f"{rate} · {detail}", True, rate_color(rec)),
+                             (x + 50, y + 24))
+                y += 50
+
+        if self.bench:
+            best = self._best(self.bench)
+            surface.blit(self.font_small.render("Banc · % de victoires", True, GREY), (x, y))
+            rows = 1 if self.choices else 2           # avec le choix de départ : 1 rangée
+            y = self._draw_champ_cells(surface, x, y + 20, w, self.bench[:rows * WR_PER_ROW], best)
+            if best is not None and y + 18 < panel.bottom:
+                wins, games = self._records[best["championId"]]
+                txt = (f"Meilleur : {best.get('championName') or '?'}, "
+                       f"{round(100 * wins / games)} % sur {games} p.")
+                surface.blit(self.font_small.render(txt, True, GOLD), (x, y))
+                y += 24
+
+        elif not self.choices:
+            # Draft (ni banc ni choix) : tes plus joués dans cette file, pour choisir.
+            bans = bool(self.bans.get("myTeam") or self.bans.get("theirTeam"))
+            top = self._top[:(1 if bans else 2) * WR_PER_ROW]
+            if top:
+                surface.blit(self.font_small.render("Tes plus joués · % de victoires", True, GREY),
+                             (x, y))
+                y = self._draw_champ_cells(surface, x, y + 20, w, top, self._best(top))
+            else:
+                surface.blit(self.font_small.render("Aucune partie dans cette file sur la période",
+                                                    True, FAINT), (x, y))
+                y += 24
+
+        if (self.bans.get("myTeam") or self.bans.get("theirTeam")) and y + 98 < panel.bottom:
+            self._draw_bans(surface, panel, y)
+        elif y + 30 < panel.bottom:
+            surface.blit(self.font_small.render("Clique un joueur pour ses infos", True,
+                                                (130, 150, 185)), (x, panel.bottom - 30))
+
+    def _blit_champ(self, surface, champ: dict, rect: pygame.Rect) -> None:
+        """Icône du champion ; en attendant l'image, ses initiales écrites."""
+        cid = champ.get("championId") or 0
+        if self.icons.get(cid) is not None:
+            surface.blit(self._small_icon(cid, rect.w), rect)
+            return
+        pygame.draw.rect(surface, (45, 55, 80), rect)
+        ini = self.font_small.render((champ.get("championName") or "?")[:2].upper(),
+                                     True, (210, 220, 235))
+        surface.blit(ini, ini.get_rect(center=rect.center))
+
+    def _best(self, champs: list[dict]) -> dict | None:
+        """Champion au meilleur winrate (au moins 3 parties, sinon on ne conclut pas)."""
+        scored = []
+        for c in champs:
+            wins, games = self._records.get(c.get("championId") or 0, (0, 0))
+            if games >= 3:
+                scored.append((wins / games, games, c))
+        return max(scored, key=lambda s: (s[0], s[1]))[2] if scored else None
+
+    def _draw_champ_cells(self, surface, x, y, w, champs, best) -> int:
+        """Grille d'icônes + winrate écrit ; renvoie le y sous la grille."""
+        cell_w = w // WR_PER_ROW
+        for i, champ in enumerate(champs):
+            cid = champ.get("championId") or 0
+            cx = x + (i % WR_PER_ROW) * cell_w + cell_w // 2
+            cy = y + (i // WR_PER_ROW) * WR_CELL_H
+            icon_rect = pygame.Rect(cx - WR_ICON // 2, cy, WR_ICON, WR_ICON)
+            self._blit_champ(surface, champ, icon_rect)
+            if best is not None and champ is best:
+                pygame.draw.rect(surface, GOLD, icon_rect.inflate(6, 6), width=3)
+            rec = self._records.get(cid)
+            rate, _ = record_text(rec)
+            games = (rec or (0, 0))[1]
+            r = self.font_small.render(rate, True, rate_color(rec))
+            surface.blit(r, r.get_rect(midtop=(cx, cy + WR_ICON + 3)))
+            g = self.font_tiny.render(f"{games} p." if games else "jamais", True, FAINT)
+            surface.blit(g, g.get_rect(midtop=(cx, cy + WR_ICON + 20)))
+        rows = (len(champs) + WR_PER_ROW - 1) // WR_PER_ROW
+        return y + rows * WR_CELL_H
+
+    def _draw_bans(self, surface: pygame.Surface, panel: pygame.Rect, top: int) -> None:
+        """Bans des deux équipes, sous le winrate (draft)."""
+        x, y = panel.x + 14, top + 4
+        surface.blit(self.font_small.render("Bans", True, GOLD), (x, y))
+        y += 22
         for label, ids in (("Alliés", self.bans.get("myTeam", [])),
                            ("Ennemis", self.bans.get("theirTeam", []))):
             surface.blit(self.font_small.render(label, True, (160, 180, 210)), (x, y + 4))
@@ -239,9 +440,7 @@ class ChampSelectScreen(Screen):
                 bx += 36
             if not ids:
                 surface.blit(self.font_small.render("—", True, (120, 140, 170)), (x + 96, y + 4))
-            y += 50
-        surface.blit(self.font_small.render("Clique un joueur pour ses infos", True,
-                                            (130, 150, 185)), (x, panel.bottom - 34))
+            y += 36
 
     def _selected_champion_id(self) -> int:
         for p in self.players:

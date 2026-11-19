@@ -161,3 +161,40 @@ def test_preavis_du_retour_auto_puis_appui_pour_rester(app):
     assert app._idle_left is None
     assert app._banner.rect in app._draw_idle_banner([])   # zone ré-affichée une fois
     assert app._draw_idle_banner([]) == []
+
+
+def test_selection_affiche_le_winrate_et_change_de_periode(app):
+    league = app.modules["league"]
+    league.store.upsert_matches([
+        {"gameId": i, "gameCreation": 1000 + i, "gameMode": "KIWI", "queueId": 2400,
+         "queue": "ARAM Chaos", "duration": 900, "win": i % 3 != 0, "championId": 3,
+         "championName": "Galio", "kda": [1, 1, 1], "cs": 1, "detail": None}
+        for i in range(1, 7)])
+    net(app, type="_connected")
+    net(app, type="data", screen="champselect", payload={
+        "players": [{"riotId": "Moi#EUW", "championId": 3, "championName": "Galio", "isSelf": True}],
+        "bench": [{"championId": 3, "championName": "Galio"}, {"championId": 77, "championName": "Udyr"}],
+        "choices": [], "gameMode": "KIWI", "queueId": 2400, "timer": {}, "bans": {}})
+    net(app, type="set_screen", screen="champselect")
+    cs = app.current
+    assert cs.name == "champselect"
+    cs.draw(app.surface)
+    assert league.settings.winrate_days == 7               # défaut : 7 jours
+    assert cs._records == {}                               # parties de 1970 : hors des 7 jours
+    buttons = {days: rect for rect, days in cs._period_rects}
+    assert sorted(buttons) == [7, 30, 90]
+    cs.handle_touch(buttons[7].center)                     # re-appui sur l'actif
+    assert league.settings.winrate_days == 0               # -> depuis toujours
+    cs.draw(app.surface)
+    assert cs._records == {3: (4, 6)}                      # Galio : 4 V sur 6 en ARAM Chaos
+    assert cs._best(cs.bench)["championId"] == 3
+    cs.handle_touch(buttons[30].center)
+    assert league.settings.winrate_days == 30
+    net(app, type="data", screen="champselect", payload={   # draft : ni banc ni choix
+        "bench": [], "choices": [], "gameMode": "CLASSIC", "queueId": 420})
+    league.settings.set_winrate_days(0)
+    cs.draw(app.surface)
+    assert cs._top == []                                  # aucune classée stockée
+    net(app, type="data", screen="champselect", payload={"gameMode": "KIWI", "queueId": 2400})
+    cs.draw(app.surface)
+    assert cs._top == [{"championId": 3, "championName": "Galio"}]

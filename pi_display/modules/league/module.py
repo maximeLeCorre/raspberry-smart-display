@@ -87,6 +87,9 @@ class LeagueModule(Module):
         # Réglages faits sur la montre (amis suivis, file + amis du bouton Jouer) ;
         # la config ci-dessus ne sert que de valeur de départ.
         self.settings = WatchSettings(self.lobby_queue, [self.lobby_invite] if self.lobby_invite else [])
+        # Winrate par champion en sélection : un bouton par période (jours).
+        self.winrate_periods = sorted({int(d) for d in lol_cfg.get("winrate_periods", [7, 30, 90])
+                                       if int(d) > 0})[:4] or [7, 30, 90]
         self._friend_states: dict | None = None    # riotId → (connecté, en partie, nom) déjà vus
         self._friends_raw = None                   # dernière liste traitée (même objet = rien)
         self._started_at = 0            # epoch du début de la partie (stable, pour la montre)
@@ -558,6 +561,21 @@ class LeagueModule(Module):
             newest = self.store.newest_id()
             if newest and newest != self._postgame_baseline:
                 self._load_detail(newest)
+
+    # ------------------------------------------------ winrate en sélection
+    def toggle_winrate_period(self, days: int) -> int:
+        """Bouton de période : l'active ; re-appui sur l'actif = depuis toujours (0).
+        Gardé dans watch.db."""
+        new = 0 if self.settings.winrate_days == days else days
+        self.settings.set_winrate_days(new)
+        return new
+
+    def champion_stats(self, game_mode: str, queue_id: int) -> list[tuple[int, str, int, int]]:
+        """Tes (championId, nom, victoires, parties) dans ce mode, sur la période
+        réglée, les plus joués d'abord."""
+        days = self.settings.winrate_days
+        since = int((time.time() - days * 86400) * 1000) if days else 0
+        return self.store.champion_stats(game_mode, queue_id, since)
 
     # ------------------------------------------------- télécommande (montre)
     def remote_view(self) -> dict:

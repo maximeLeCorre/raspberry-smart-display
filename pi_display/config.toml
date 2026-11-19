@@ -119,6 +119,9 @@ sync_minutes = 3
 # par nom -> l'invité doit être dans tes amis.
 lobby_queue = 2400
 lobby_invite = ""
+# Sélection de champions : ton winrate par champion (mode de la partie). Un bouton
+# par durée (jours, 4 max) ; la 1re = défaut ; re-appui sur l'active = depuis toujours.
+winrate_periods = [7, 30, 90]
 # Surnoms affichés à la place de pseudos (rose fluo), ex. { "pseudo" = "SURNOM" }.
 nicknames = {}
 

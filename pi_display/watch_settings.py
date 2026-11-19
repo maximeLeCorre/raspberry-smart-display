@@ -39,6 +39,7 @@ class WatchSettings:
         self.queue_id = default_queue
         self.invites = [r for r in default_invites if r]
         self.directory: tuple = ()               # ({name, riotId}, ...) sorted by name
+        self.winrate_days = 7                    # winrate en sélection (jours) ; 0 = depuis toujours
         row = self._db.execute("SELECT value FROM kv WHERE key = 'settings'").fetchone()
         if row:
             try:
@@ -49,12 +50,18 @@ class WatchSettings:
             self.queue_id = int(saved.get("queueId") or default_queue)
             self.invites = [r for r in saved.get("invites") or [] if isinstance(r, str)]
             self.directory = tuple(d for d in saved.get("directory") or [] if isinstance(d, dict))
+            if "winratePeriod" in saved:
+                self.winrate_days = max(0, int(saved.get("winratePeriod") or 0))
 
     def _save(self) -> None:
         data = json.dumps({"follows": self.follows, "queueId": self.queue_id, "invites": self.invites,
-                           "directory": list(self.directory)})
+                           "directory": list(self.directory), "winratePeriod": self.winrate_days})
         self._db.execute("INSERT OR REPLACE INTO kv VALUES ('settings', ?)", (data,))
         self._db.commit()
+
+    def set_winrate_days(self, days: int) -> None:
+        self.winrate_days = max(0, int(days))
+        self._save()
 
     def set_follow(self, riot_id, events: dict) -> bool:
         """Follows a friend (`events`: online/leave/enter -> bool); all False = unfollow."""

@@ -35,3 +35,18 @@ def test_detail_stocke_puis_complete(tmp_path):
     assert st.detail(2) is None
     st.set_detail(2, {"players": [2]})
     assert st.detail(2) == {"players": [2]}
+
+
+def test_winrate_par_champion_filtre_mode_file_et_periode(tmp_path):
+    st = Store(tmp_path / "m.db")
+    games = [rec(1, 1000), rec(2, 2000, win=False), rec(3, 3000),
+             {**rec(4, 4000), "championId": 7},
+             {**rec(5, 5000, mode="ARAM"), "queueId": 450},
+             {**rec(6, 6000, mode="CLASSIC"), "queueId": 420},
+             {**rec(7, 7000, mode="CLASSIC", win=False), "queueId": 400}]
+    st.upsert_matches(games)
+    assert st.champion_records("KIWI") == {1: (2, 3), 7: (1, 1)}
+    assert st.champion_records("KIWI", since_ms=2000) == {1: (1, 2), 7: (1, 1)}
+    assert st.champion_records("CLASSIC", 420) == {1: (1, 1)}        # classée ≠ normale
+    assert st.champion_records()[1] == (4, 6)                         # sans mode : tout
+    assert st.champion_stats("KIWI")[0] == (1, "Annie", 2, 3)           # le plus joué d'abord
