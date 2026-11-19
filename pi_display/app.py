@@ -30,6 +30,7 @@ from modules import MODULES
 from network import NetworkServer
 from push_apns import PushSender
 from remote_api import RemoteServer, RemoteState
+from transition import IdleBanner, slide
 
 DEFAULT_SCREEN = "default"
 
@@ -44,6 +45,10 @@ class App:
         # Écran ouvert à la main et laissé sans appui : retour automatique (0 = jamais).
         self.idle_return = float(config["display"].get("idle_return_minutes", 5)) * 60
         self._last_input = time.monotonic()
+        # Préavis du retour auto (bandeau + barre), puis glissement (cf. transition.py).
+        self.idle_warning = float(config["display"].get("idle_warning_seconds", 10))
+        self._idle_left: float | None = None      # secondes restantes, None = pas de préavis
+        self._banner_shown = False
         self.scale = max(1, scale)
         self.fullscreen = fullscreen
         self.debug = debug
@@ -60,6 +65,7 @@ class App:
         pygame.display.set_caption("Pi Display (simulateur écran 5\")")
         self._init_display(monitor)
         self.clock = pygame.time.Clock()
+        self._banner = IdleBanner(self.width, self.height)
         self._debug_font = pygame.font.Font(None, 26)
         self.last_key = None
 
@@ -161,19 +167,23 @@ class App:
             pygame.display.flip()
 
     # ---------------------------------------------------------------- écrans
-    def set_screen(self, name: str) -> None:
+    def set_screen(self, name: str, animate: bool = False) -> None:
         if name not in self.screens:
             print(f"[app] Écran inconnu ou module désactivé, ignoré : {name!r}")
             return
         if self.current is not None and self.current.name == name:
             return
+        old = self.surface.copy() if animate and self.current is not None else None
         if self.current is not None:
             self.current.exit()
         self.current = self.screens[name]
         self.current.enter()
         self.current.draw_background(self.surface)
         self.current.draw(self.surface)
-        self.present([pygame.Rect(0, 0, self.width, self.height)])
+        if old is not None:
+            slide(self, old, self.surface.copy())
+        else:
+            self.present([pygame.Rect(0, 0, self.width, self.height)])
         print(f"[app] Écran actif : {name}")
 
     def _next_screen(self) -> str:
@@ -237,14 +247,35 @@ class App:
         """Écran choisi à la main (serveur, météo, historique…) sans appui depuis
         `idle_return` : retour au mode auto = l'accueil, ou l'écran que l'agent montre
         (partie en cours). Les écrans menés par l'agent ne sont jamais rabattus."""
+        self._idle_left = None
         if (self.idle_return <= 0 or self.manual_screen is None or self.current is None
-                or self.current.name == DEFAULT_SCREEN
-                or time.monotonic() - self._last_input < self.idle_return):
+                or self.current.name == DEFAULT_SCREEN):
+            return
+        left = self.idle_return - (time.monotonic() - self._last_input)
+        if left > 0:
+            if left <= self.idle_warning:
+                self._idle_left = left          # bandeau de préavis (dessiné dans `run`)
             return
         print(f"[app] {self.idle_return / 60:.0f} min sans appui : retour auto")
         self.manual_screen = None
-        self.set_screen(self._route(self.network_screen if self.network_screen in self.screens
-                                    else DEFAULT_SCREEN))
+        self.set_screen(self._idle_target(), animate=True)
+
+    def _idle_target(self) -> str:
+        return self._route(self.network_screen if self.network_screen in self.screens
+                           else DEFAULT_SCREEN)
+
+    def _draw_idle_banner(self, dirty):
+        """Pose (ou retire) le bandeau de préavis par-dessus l'écran courant."""
+        if self._idle_left is not None:
+            label = ("Retour à l'accueil" if self._idle_target() == DEFAULT_SCREEN
+                     else "Retour à l'écran du PC")
+            self._banner_shown = True
+            return dirty + [self._banner.draw(self.surface, self._idle_left,
+                                              self.idle_warning, label)]
+        if self._banner_shown:              # préavis annulé : on ré-affiche l'écran dessous
+            self._banner_shown = False
+            return dirty + [self._banner.rect]
+        return dirty
 
     def _route(self, screen: str) -> str:
         """Vue par défaut d'un écran demandé par l'agent (cf. `Module.route_screen`)."""
@@ -258,6 +289,9 @@ class App:
         self._last_input = time.monotonic()
         if self.backlight.wake():
             return                    # appui de réveil : pas un clic à l'aveugle
+        if self._idle_left is not None:
+            self._idle_left = None
+            return                    # « touchez pour rester » : pas un clic à l'aveugle
         action = self.current.handle_touch(pos)
         if action:
             self.last_key = f"tactile {pos} -> {action}"
@@ -428,10 +462,11 @@ class App:
                 self.backlight.tick(self.agent_connected)
                 self._idle_return_check()
 
-                dirty = self.current.draw(self.surface)
+                dirty = self._draw_idle_banner(self.current.draw(self.surface) or [])
                 if self.debug:
                     dirty = self._draw_debug(dirty)
                 self.present(dirty)
+                self._banner.restore(self.surface)
 
                 self.clock.tick(self.fps)
         finally:

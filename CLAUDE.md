@@ -57,7 +57,7 @@ Installer (**admin/UAC**, auto-élévation) : `…\install_pc_agent_autostart.ps
   (`LeagueModule.request_player_info/request_icon/request_splash` → `riot_web`/CDN, en async).
 
 ## Écrans (`pi_display/`)
-- `screen.py` : base `Screen` (attr `cycle`), fond PNG chargé 1×, redessin par **dirty rects**. Écran ouvert **à la main** sans appui `[display] idle_return_minutes` (5) → retour auto (accueil, ou écran de l'agent) ; écrans de l'agent jamais rabattus.
+- `screen.py` : base `Screen` (attr `cycle`), fond PNG chargé 1×, redessin par **dirty rects**. Écran ouvert **à la main** sans appui `[display] idle_return_minutes` (5) → retour auto (accueil, ou écran de l'agent) ; écrans de l'agent jamais rabattus. Préavis `idle_warning_seconds` (10) = bandeau posé **par-dessus** (zone gardée puis remise après `present`), appui = rester (avalé), puis **glissement** (`transition.py`).
 - **system/** : `default` (horloge, météo, pastille PC haut-gauche, alerte santé Pi, 1 actu qui tourne, **dock de tuiles
   vivantes** selon modules : Jouer/Rejoindre, Historique, Serveur, Actus ; états écrits, pas que colorés : user daltonien),
   `news` + `rss_feed` (flux lu par le Pi ; article **complet** = page web parsée par `article_text.py` `c-chapo`/`c-body`, paginée ▲/▼), `weather` (courbe du jour + pluie, ◀/▶ + menu des jours ; clic sur la météo).

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pygame
 import pytest
 
 import app as app_module
@@ -137,3 +138,26 @@ def test_retour_auto_rend_la_partie_et_ne_touche_pas_aux_ecrans_de_l_agent(app):
     app.set_screen("server")
     app._idle_return_check()
     assert app.current.name == "queue"               # écran à la main oublié : retour à la partie
+
+
+def test_preavis_du_retour_auto_puis_appui_pour_rester(app):
+    app.manual_screen = "server"
+    app.set_screen("server")
+    under = app.surface.subsurface(app._banner.rect).copy()
+    app._last_input -= 5 * 60 - 20
+    app._idle_return_check()
+    assert app._idle_left is None                    # trop tôt pour le préavis
+    app._last_input -= 15
+    app._idle_return_check()
+    assert 0 < app._idle_left <= 10                  # bandeau dans les 10 dernières s
+    dirty = app._draw_idle_banner([])
+    assert app._banner.rect in dirty
+    app._banner.restore(app.surface)                 # l'écran dessous est intact
+    assert pygame.image.tobytes(app.surface.subsurface(app._banner.rect).copy(), "RGB") \
+        == pygame.image.tobytes(under, "RGB")
+    app._dispatch_touch((400, 240))                  # « touchez pour rester »
+    assert app.current.name == "server" and app._idle_left is None
+    app._idle_return_check()
+    assert app._idle_left is None
+    assert app._banner.rect in app._draw_idle_banner([])   # zone ré-affichée une fois
+    assert app._draw_idle_banner([]) == []

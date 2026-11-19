@@ -31,6 +31,9 @@ Thumbs.db
 
 # --- Base locale des parties (Pi) ---
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 
 # --- Bancs d'essai jetables (relevés JSONL à la racine) ---
 /bench_*.jsonl
